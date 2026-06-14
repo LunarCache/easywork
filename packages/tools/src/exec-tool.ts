@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 import type { ApprovalPolicy, Tool, ToolExecContext } from "@ew/shared";
 import { defineTool } from "./define.js";
@@ -7,6 +9,34 @@ import { resolveWorkspacePath } from "./path-sandbox.js";
 const DEFAULT_TIMEOUT = 120_000;
 const MAX_TIMEOUT = 600_000;
 const MAX_OUTPUT = 100 * 1024; // 每路 stdout/stderr 上限
+const IS_WIN = process.platform === "win32";
+
+/**
+ * Windows 下定位 Git for Windows 自带的 bash.exe（含 ls/cat/rm/grep 等 Unix 工具）。
+ * 优先 env EW_GIT_BASH；否则探常见安装路径。找不到返回 null（回退 cmd.exe）。
+ */
+export function findGitBash(): string | null {
+  if (!IS_WIN) return null;
+  const candidates: string[] = [];
+  if (process.env.EW_GIT_BASH) candidates.push(process.env.EW_GIT_BASH);
+  const bases = [
+    process.env.ProgramFiles,
+    process.env["ProgramFiles(x86)"],
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Programs") : undefined,
+  ].filter((b): b is string => !!b);
+  for (const base of bases) {
+    candidates.push(path.join(base, "Git", "bin", "bash.exe"));
+    candidates.push(path.join(base, "Git", "usr", "bin", "bash.exe"));
+  }
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
 
 /** 在工作区根内执行 shell 命令，流式输出经 ctx.emit 发 tool-progress。 */
 export function makeExecTool(opts?: { approval?: ApprovalPolicy }): Tool {
@@ -38,15 +68,32 @@ export function makeExecTool(opts?: { approval?: ApprovalPolicy }): Tool {
         let stderrTrunc = false;
         let settled = false;
 
-        // detached：让子进程自成进程组，超时/中断时能杀整棵进程树（shell:true 下真正干活的是孙进程）。
-        const child = spawn(command, { cwd: workdir, shell: true, detached: true, env: process.env });
+        // Windows：用 Git for Windows 的 bash 作 shell（让模型生成的 Unix 命令可用），找不到回退 cmd。
+        // 非 Windows：用 /bin/sh，detached 使子进程自成进程组以便杀整棵树。
+        const winBash = IS_WIN ? findGitBash() : null;
+        const child = spawn(command, {
+          cwd: workdir,
+          shell: winBash ?? true,
+          ...(IS_WIN ? {} : { detached: true }),
+          env: process.env,
+        });
 
         const killTree = (): void => {
+          if (IS_WIN && child.pid) {
+            // Windows 无 POSIX 进程组：taskkill /T 连子孙进程一起杀。
+            try {
+              spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"]);
+              return;
+            } catch {
+              /* fall through */
+            }
+          }
           try {
-            if (child.pid) process.kill(-child.pid, "SIGKILL"); // 负 pid = 杀整个进程组
+            if (!IS_WIN && child.pid) process.kill(-child.pid, "SIGKILL"); // 负 pid = 杀整个进程组
+            else child.kill("SIGKILL");
           } catch {
             try {
-              child.kill("SIGKILL");
+              child.kill();
             } catch {
               /* already gone */
             }

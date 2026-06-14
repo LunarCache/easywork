@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { AgentEvent, ToolExecContext, ToolResult } from "@ew/shared";
-import { makeExecTool } from "../src/exec-tool.js";
+import { makeExecTool, findGitBash } from "../src/exec-tool.js";
 
 let root: string | undefined;
 function freshRoot(): string {
@@ -84,5 +84,11 @@ describe("run_command", () => {
     const res = await run({ command: "echo x", cwd: "../.." }, ctxFor(r));
     expect(res.isError).toBe(true);
     expect(res.content).toContain("越界");
+  });
+
+  it("findGitBash：非 Windows 恒为 null", () => {
+    // 本机非 Windows → null；Windows 下取决于是否装了 Git for Windows。
+    if (process.platform !== "win32") expect(findGitBash()).toBeNull();
+    else expect(findGitBash() === null || typeof findGitBash() === "string").toBe(true);
   });
 });

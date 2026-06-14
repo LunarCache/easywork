@@ -94,6 +94,8 @@ apps/
 
 环境：**Node ≥ 20**（推荐 26）、npm 11、`llama-server`（本地推理用，Mac `brew install llama.cpp`；env `EW_LLAMA_SERVER` 可指定路径）。桌面需 Rust 工具链（`cargo`）。
 
+> **Windows 运行需安装 Git**（[Git for Windows](https://git-scm.com/download/win)）。工作区模式用它做两件事：① git 改动审阅面板；② 命令执行工具（`run_command`）会优先用 Git 自带的 **bash.exe** + Unix 工具（`ls`/`cat`/`grep` 等）执行命令，否则模型生成的 Unix 命令在 `cmd.exe` 下无法运行。装好后通常自动探测；如未在标准路径，可用 env `EW_GIT_BASH` 指定 `bash.exe` 路径。macOS / Linux 用系统自带 `/bin/sh` + git，无需额外配置。
+
 ```bash
 npm install            # 安装全部 workspace 依赖
 npm run build          # turbo 构建全部包
