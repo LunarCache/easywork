@@ -1,0 +1,39 @@
+{
+  "name": "easywork",
+  "version": "0.0.0",
+  "private": true,
+  "description": "本地 AI 工作台 — 下载并运行本地模型，Agent 工具(Skills/MCP)，IM + 记忆",
+  "type": "module",
+  "packageManager": "npm@11.13.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "dev:daemon": "npm run dev --workspace @ew/daemon",
+    "dev:ui": "npm run dev --workspace @ew/ui",
+    "dev:desktop": "npm run dev --workspace @ew/desktop",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rimraf node_modules"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.17.0",
+    "typescript-eslint": "^8.18.0",
+    "prettier": "^3.4.0",
+    "rimraf": "^6.0.1",
+    "tsup": "^8.3.5",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@ew/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "EW_DAEMON_ENTRY=\"$PWD/../daemon/dist/cli.js\" tauri dev",
+    "tauri": "tauri",
+    "app:build": "tauri build",
+    "clean": "rimraf src-tauri/target"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}

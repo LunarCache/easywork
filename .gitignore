@@ -1,0 +1,36 @@
+node_modules/
+dist/
+out/
+build/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Rust / Tauri build output
+target/
+apps/desktop/src-tauri/gen/
+
+# Electron / packaging
+release/
+*.app
+*.dmg
+*.exe
+*.AppImage
+
+# Local data / models / secrets
+*.local
+.env
+.env.*
+!.env.example
+models/
+*.gguf
+
+# Reference repo (Unsloth, 仅作思路借鉴，不纳入本仓库)
+unsloth/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.log
+.playwright-mcp/
