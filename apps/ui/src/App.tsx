@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
+import type { Project } from "@ew/shared";
 import { currentConfig, getClient, initRuntimeConfig } from "./lib/client.js";
+import { pickWorkspaceDir } from "./lib/desktop.js";
 import { Chat } from "./pages/Chat.js";
+import { Workspace } from "./pages/Workspace.js";
 import { Models } from "./pages/Models.js";
 import { Settings } from "./pages/Settings.js";
 import { KnowledgeBase } from "./pages/KnowledgeBase.js";
 import { Skills } from "./pages/Skills.js";
 import { Mcp } from "./pages/Mcp.js";
 import { Memory } from "./pages/Memory.js";
-import { BoxIcon, BrainIcon, ChatIcon, KbIcon, NewChatIcon, PanelIcon, SlidersIcon, SparkIcon, TrashIcon, WrenchIcon } from "./icons.js";
+import { BoxIcon, BrainIcon, ChatIcon, FolderTreeIcon, FolderClosedIcon, KbIcon, NewChatIcon, PanelIcon, SlidersIcon, SparkIcon, TrashIcon, WrenchIcon } from "./icons.js";
 
-type Tab = "chat" | "models" | "kb" | "skills" | "mcp" | "memory" | "settings";
+type Tab = "chat" | "workspace" | "models" | "kb" | "skills" | "mcp" | "memory" | "settings";
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
 interface ThreadItem {
   id: string;
@@ -37,6 +40,8 @@ export function App() {
   const [threads, setThreads] = useState<ThreadItem[]>([]);
   const [contexts, setContexts] = useState<Record<string, number>>({});
   const [collapsed, setCollapsed] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState<string | null>(null);
 
   const refreshThreads = useCallback(async () => {
     try {
@@ -45,6 +50,38 @@ export function App() {
       /* ignore */
     }
   }, []);
+
+  const refreshProjects = useCallback(async () => {
+    try {
+      const ps = await getClient().listProjects();
+      setProjects(ps);
+      setProjectId((cur) => cur ?? ps[0]?.id ?? null);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const newWorkspace = async () => {
+    const dir = await pickWorkspaceDir();
+    // 未选目录 → 询问是否用默认工作区（后端在 ~/.easywork/workspace 下创建）。
+    if (!dir && !confirm("未选择目录。使用默认工作区（~/.easywork/workspace）？")) return;
+    const name = dir ? dir.split(/[/\\]/).filter(Boolean).pop() || "工作区" : "默认工作区";
+    try {
+      const p = await getClient().createProject({ name, ...(dir ? { workspaceDir: dir } : {}) });
+      await refreshProjects();
+      setProjectId(p.id);
+      setTab("workspace");
+    } catch (e) {
+      alert(`创建工作区失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const delProject = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await getClient().deleteProject(id);
+    setProjectId((cur) => (cur === id ? null : cur));
+    void refreshProjects();
+  };
 
   const check = useCallback(async () => {
     await initRuntimeConfig();
@@ -63,10 +100,11 @@ export function App() {
       setContexts(info.context ?? {});
       setStatus("ok");
       void refreshThreads();
+      void refreshProjects();
     } catch {
       setStatus("unauthorized");
     }
-  }, [refreshThreads]);
+  }, [refreshThreads, refreshProjects]);
 
   useEffect(() => {
     void check();
@@ -79,6 +117,10 @@ export function App() {
   const selectThread = (id: string) => {
     setThreadId(id);
     setTab("chat");
+  };
+  const selectProject = (id: string) => {
+    setProjectId(id);
+    setTab("workspace");
   };
   const delThread = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -105,20 +147,47 @@ export function App() {
           </button>
         </div>
 
-        <button className="newchat" onClick={newChat} title="新对话">
-          <NewChatIcon size={16} />
-          <span>新对话</span>
-        </button>
+        <div className="side-actions">
+          <button className="newbtn" onClick={newChat} title="新建对话">
+            <NewChatIcon size={15} />
+            <span>对话</span>
+          </button>
+          <button className="newbtn" onClick={() => void newWorkspace()} title="新建工作区（选择本地目录）">
+            <FolderTreeIcon size={15} />
+            <span>工作区</span>
+          </button>
+        </div>
 
-        {tab === "chat" && (
+        <div className="side-scroll">
           <div className="side-threads">
-            <div className="side-label">最近</div>
+            <div className="side-label">工作区</div>
+            <div className="threads-list">
+              {projects.length === 0 && <div className="threads-empty">还没有工作区</div>}
+              {projects.map((p) => (
+                <div
+                  key={p.id}
+                  className={`thread-item ${tab === "workspace" && p.id === projectId ? "active" : ""}`}
+                  onClick={() => selectProject(p.id)}
+                  title={p.workspaceDir}
+                >
+                  <FolderClosedIcon size={14} />
+                  <span>{p.name}</span>
+                  <button className="thread-del" title="删除" onClick={(e) => void delProject(p.id, e)}>
+                    <TrashIcon size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="side-threads">
+            <div className="side-label">对话</div>
             <div className="threads-list">
               {threads.length === 0 && <div className="threads-empty">还没有会话</div>}
               {threads.map((t) => (
                 <div
                   key={t.id}
-                  className={`thread-item ${t.id === threadId ? "active" : ""}`}
+                  className={`thread-item ${tab === "chat" && t.id === threadId ? "active" : ""}`}
                   onClick={() => selectThread(t.id)}
                   title={t.title}
                 >
@@ -131,7 +200,7 @@ export function App() {
               ))}
             </div>
           </div>
-        )}
+        </div>
 
         <div className="side-foot">
           {menuOpen && (
@@ -176,8 +245,23 @@ export function App() {
 
       <main className="content">
         {tab === "chat" && (
-          <Chat models={models} contexts={contexts} threadId={threadId} onSaved={refreshThreads} />
+          <Chat key={threadId} models={models} contexts={contexts} threadId={threadId} onSaved={refreshThreads} />
         )}
+        {tab === "workspace" &&
+          (() => {
+            const project = projects.find((p) => p.id === projectId);
+            return project ? (
+              <Workspace key={project.id} project={project} models={models} onChanged={refreshProjects} />
+            ) : (
+              <div className="empty">
+                <div className="ring">
+                  <FolderTreeIcon size={28} />
+                </div>
+                <h2>工作区</h2>
+                <p>在本地项目目录里让 AI 读写文件、运行命令完成编码任务。点击左侧「新建工作区」选择目录开始。</p>
+              </div>
+            );
+          })()}
         {tab === "models" && <Models onChange={check} />}
         {tab === "kb" && <KnowledgeBase />}
         {tab === "skills" && <Skills />}

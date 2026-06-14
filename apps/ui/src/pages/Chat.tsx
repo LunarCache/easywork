@@ -5,6 +5,17 @@ import rehypeHighlight from "rehype-highlight";
 import type { ChatMessage } from "@ew/shared";
 import { getClient } from "../lib/client.js";
 import {
+  applyAgentEvent,
+  messageText,
+  modelLabel,
+  splitThink,
+  storedToUiMsgs,
+  type StoredMsg,
+  type PendingApproval,
+  type UiImage,
+  type UiMsg,
+} from "../lib/agent-stream.js";
+import {
   loadSampling,
   saveSampling,
   samplingToRequest,
@@ -27,74 +38,6 @@ import {
   ThinkIcon,
   WrenchIcon,
 } from "../icons.js";
-
-interface UiTool {
-  id: string;
-  name: string;
-  args: string;
-  result?: string;
-  status: "running" | "done" | "error";
-  sources?: { title: string; url: string }[];
-  html?: string;
-  htmlTitle?: string;
-  citations?: { id: number; source: string; score?: number }[];
-}
-interface PendingApproval {
-  id: string;
-  toolName: string;
-  args: unknown;
-}
-interface UiImage {
-  mimeType: string;
-  data: string; // base64（无 data: 前缀）
-}
-interface UiMsg {
-  role: "user" | "assistant";
-  raw: string;
-  reasoning: string;
-  tools: UiTool[];
-  images?: UiImage[];
-  start?: number;
-  thinkEnd?: number;
-}
-
-function splitThink(raw: string): { reasoning: string; answer: string } {
-  let reasoning = "";
-  let answer = "";
-  let cursor = 0;
-  while (cursor < raw.length) {
-    const open = raw.indexOf("<think>", cursor);
-    if (open === -1) {
-      answer += raw.slice(cursor);
-      break;
-    }
-    answer += raw.slice(cursor, open);
-    const start = open + 7;
-    const close = raw.indexOf("</think>", start);
-    if (close === -1) {
-      reasoning += raw.slice(start);
-      break;
-    }
-    reasoning += raw.slice(start, close);
-    cursor = close + 8;
-  }
-  return { reasoning: reasoning.trim(), answer: answer.trim() };
-}
-
-function messageText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content))
-    return content
-      .filter((p) => (p as { type?: string }).type === "text")
-      .map((p) => (p as { text?: string }).text ?? "")
-      .join("");
-  return "";
-}
-
-function modelLabel(m: string): string {
-  if (m.includes("/") || m.includes("\\")) return (m.split(/[/\\]/).pop() ?? m).replace(/\.gguf$/i, "");
-  return m;
-}
 
 function fmtK(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
@@ -168,6 +111,10 @@ export function Chat({
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // 卸载（切换会话会因 key 重挂载）时中断在途的 agent 流。
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const onPickImages = async (files: FileList | null) => {
     if (!files) return;
@@ -221,19 +168,7 @@ export function Chat({
       try {
         const list = await getClient().threadMessages(threadId);
         if (cancelled) return;
-        setMsgs(
-          list
-            .filter((m) => m.role === "user" || m.role === "assistant")
-            .map((m) => ({
-              role: m.role as "user" | "assistant",
-              raw: m.parts
-                .filter((p) => p.type === "text")
-                .map((p) => p.text ?? "")
-                .join(""),
-              reasoning: "",
-              tools: [],
-            })),
-        );
+        setMsgs(storedToUiMsgs(list as unknown as StoredMsg[]));
       } catch {
         if (!cancelled) setMsgs([]);
       }
@@ -313,71 +248,34 @@ export function Chat({
     const excludeTools = web ? [] : ["web_search", "http_get"];
     const sampling = samplingToRequest(loadSampling(model));
     const agentPrefs = loadAgentPrefs();
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
-      for await (const ev of getClient().runAgent({
-        threadId,
-        model,
-        history,
-        excludeTools,
-        think,
-        kb,
-        ...(kb && kbId ? { kbId } : {}),
-        ...(Object.keys(sampling).length ? { sampling } : {}),
-        ...(agentPrefs.maxIterations ? { maxIterations: agentPrefs.maxIterations } : {}),
-      })) {
-        if (ev.type === "text")
-          apply((m) => {
-            const raw = m.raw + ev.text;
-            const start = m.start ?? Date.now();
-            // 思考结束 = 出现 </think>（或有 reasoning 事件后开始出正文）。
-            const ended = raw.includes("</think>") || (!!m.reasoning && splitThink(raw).answer.length > 0);
-            const thinkEnd = m.thinkEnd ?? (ended ? Date.now() : undefined);
-            return { ...m, raw, start, ...(thinkEnd ? { thinkEnd } : {}) };
-          });
-        else if (ev.type === "reasoning")
-          apply((m) => ({ ...m, reasoning: m.reasoning + ev.text, start: m.start ?? Date.now() }));
-        else if (ev.type === "usage") setUsage(ev.usage);
-        else if (ev.type === "tool-start")
-          apply((m) => ({
-            ...m,
-            tools: [...m.tools, { id: ev.call.id, name: ev.call.name, args: ev.call.arguments, status: "running" }],
-          }));
-        else if (ev.type === "tool-end")
-          apply((m) => ({
-            ...m,
-            tools: m.tools.map((t) => {
-              if (t.id !== ev.call.id) return t;
-              const display = (ev.result as { display?: unknown }).display as
-                | { kind?: string; html?: string; title?: string; sources?: unknown }
-                | { title: string; url: string }[]
-                | undefined;
-              const patch: Partial<UiTool> = {};
-              if (Array.isArray(display)) {
-                patch.sources = display.filter((s) => s?.url);
-              } else if (display && typeof display === "object") {
-                if (display.kind === "html" && typeof display.html === "string") {
-                  patch.html = display.html;
-                  if (display.title) patch.htmlTitle = display.title;
-                } else if (display.kind === "citations" && Array.isArray(display.sources)) {
-                  patch.citations = display.sources as { id: number; source: string; score?: number }[];
-                }
-              }
-              return {
-                ...t,
-                result: String(ev.result.content),
-                status: ev.result.isError ? "error" : "done",
-                ...patch,
-              };
-            }),
-          }));
+      for await (const ev of getClient().runAgent(
+        {
+          threadId,
+          model,
+          history,
+          excludeTools,
+          think,
+          kb,
+          ...(kb && kbId ? { kbId } : {}),
+          ...(Object.keys(sampling).length ? { sampling } : {}),
+          ...(agentPrefs.maxIterations ? { maxIterations: agentPrefs.maxIterations } : {}),
+        },
+        { signal: ac.signal },
+      )) {
+        if (ev.type === "usage") setUsage(ev.usage);
         else if (ev.type === "approval-request")
           setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });
         else if (ev.type === "final") apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
         else if (ev.type === "error") apply((m) => ({ ...m, raw: `${m.raw}\n\n[错误] ${ev.message}` }));
+        else apply((m) => applyAgentEvent(m, ev));
       }
       onSaved();
     } catch (e) {
-      apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
+      if (!ac.signal.aborted)
+        apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
     } finally {
       setBusy(false);
     }

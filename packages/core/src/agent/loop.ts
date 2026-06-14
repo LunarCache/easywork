@@ -7,6 +7,7 @@ import {
   type ApprovalGate,
   type ChatMessage,
   type InferenceEngine,
+  type MemoryLayer,
   type MemoryProvider,
   type Tool,
   type ToolCall,
@@ -73,11 +74,14 @@ export interface AgentDeps {
   workspaceDir: string;
   /** 可选记忆提供商：生成前 recall 注入、生成后 observe。 */
   memory?: MemoryProvider;
-  recallOptions?: { topK?: number; minScore?: number };
+  /** 生成前动态 recall 注入配置。enabled=false 时关闭（如已用冻结快照置顶注入全局记忆）。 */
+  recallOptions?: { topK?: number; minScore?: number; layers?: MemoryLayer[]; enabled?: boolean };
   /** 本轮只能调用一次的工具集合（默认含 render_html）。 */
   oneShotTools?: Set<string>;
   /** 请求级附加工具（如按所选知识库集合作用域的 search_knowledge_base）。 */
   extraTools?: Tool[];
+  /** 工具中间进度（如 run_command 流式 stdout/stderr）旁路回调，直接写 SSE，不经 generator。 */
+  onToolProgress?: (ev: AgentEvent) => void;
 }
 
 /**
@@ -108,12 +112,19 @@ export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIte
     workspaceDir: deps.workspaceDir,
     signal,
     approval: deps.approval,
+    ...(deps.onToolProgress
+      ? {
+          emit: (event: { type: string; [k: string]: unknown }) => {
+            if (event.type === "tool-progress") deps.onToolProgress!(event as unknown as AgentEvent);
+          },
+        }
+      : {}),
   };
 
   let lastAssistant: ChatMessage = { role: "assistant", content: "" };
 
   // 生成前：语义/词法召回相关记忆，注入为系统上下文（带 topK/minScore 防稀释）。
-  if (deps.memory) {
+  if (deps.memory && deps.recallOptions?.enabled !== false) {
     const lastUser = [...input.history].reverse().find((m) => m.role === "user");
     const query = lastUser ? messageText(lastUser.content) : "";
     if (query) {
@@ -123,6 +134,7 @@ export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIte
           sessionId: input.threadId,
           ...(deps.recallOptions?.topK != null ? { topK: deps.recallOptions.topK } : {}),
           ...(deps.recallOptions?.minScore != null ? { minScore: deps.recallOptions.minScore } : {}),
+          ...(deps.recallOptions?.layers ? { layers: deps.recallOptions.layers } : {}),
         });
         if (hits.length > 0) {
           yield { type: "memory-recall", count: hits.length };
@@ -198,7 +210,9 @@ export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIte
       yield { type: "final", message: assistant };
       // 生成后：抽取/摘要写入记忆（失败不影响）。
       if (deps.memory) {
-        await deps.memory.observe({ messages, sessionId: input.threadId }).catch(() => {});
+        await deps.memory
+          .observe({ messages, sessionId: input.threadId, model: input.model })
+          .catch(() => {});
       }
       return;
     }
@@ -251,6 +265,7 @@ export async function* runAgent(input: AgentRunInput, deps: AgentDeps): AsyncIte
       yield { type: "tool-start", call: tc };
       let result: ToolResult;
       try {
+        ctx.callId = tc.id; // 流式工具（run_command）用它标记 tool-progress，对齐 UI 工具卡
         result = await tool.execute(args, ctx);
       } catch (e) {
         result = { content: `执行错误: ${e instanceof Error ? e.message : String(e)}`, isError: true };

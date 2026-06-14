@@ -1,6 +1,7 @@
 // @ew/sdk — daemon HTTP API 的类型化客户端。UI / IM 连接器 / 测试共用。
 import type {
   AgentEvent,
+  ApprovalMode,
   ChatMessage,
   ChatRequest,
   ChatStreamEvent,
@@ -11,9 +12,36 @@ import type {
   LocalLoadOptions,
   LocalModel,
   McpServerConfig,
+  Project,
   SamplingParams,
   Skill,
 } from "@ew/shared";
+
+export type { Project, ApprovalMode } from "@ew/shared";
+
+/** 工作区文件树条目。 */
+export interface WsEntry {
+  path: string;
+  type: "file" | "dir";
+  size?: number;
+}
+
+/** git 改动文件。 */
+export interface GitFile {
+  path: string;
+  index: string;
+  work: string;
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+  adds: number;
+  dels: number;
+}
+export interface GitStatus {
+  repo: boolean;
+  branch?: string;
+  files: GitFile[];
+}
 
 export interface ClientOptions {
   baseUrl: string;
@@ -194,10 +222,95 @@ export class EasyWorkClient {
       sampling?: SamplingParams;
       kb?: boolean;
       kbId?: string;
+      projectId?: string;
     },
     init?: { signal?: AbortSignal },
   ): AsyncIterable<AgentEvent> {
     return this.streamSSE<AgentEvent>("/agent/run", input, init);
+  }
+
+  // ---- 工作区项目 ----
+  async listProjects(): Promise<Project[]> {
+    return (await this.getJSON<{ projects: Project[] }>("/projects")).projects;
+  }
+
+  async createProject(p: {
+    name: string;
+    workspaceDir?: string;
+    approvalMode?: ApprovalMode;
+    instructions?: string;
+  }): Promise<Project> {
+    return this.postJSON<Project>("/projects", p);
+  }
+
+  async updateProject(
+    id: string,
+    patch: { name?: string; workspaceDir?: string; approvalMode?: ApprovalMode; instructions?: string },
+  ): Promise<Project> {
+    const res = await this.fetchImpl(`${this.baseUrl}/projects/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: this.headers({ "content-type": "application/json" }),
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error(`PATCH /projects failed: ${res.status}`);
+    return res.json() as Promise<Project>;
+  }
+
+  async deleteProject(id: string): Promise<void> {
+    await this.fetchImpl(`${this.baseUrl}/projects/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+  }
+
+  /** 列出工作区项目内某目录（文件树）。 */
+  async wsList(projectId: string, path = ".", depth = 1): Promise<WsEntry[]> {
+    const q = new URLSearchParams({ path, depth: String(depth) });
+    return (
+      await this.getJSON<{ entries: WsEntry[] }>(`/workspace/${encodeURIComponent(projectId)}/fs/list?${q}`)
+    ).entries;
+  }
+
+  /** 读取工作区项目内某文件（只读查看）。 */
+  async wsRead(
+    projectId: string,
+    path: string,
+    range?: { start?: number; end?: number },
+  ): Promise<{ content?: string; binary?: boolean; truncated?: boolean; size: number }> {
+    const q = new URLSearchParams({ path });
+    if (range?.start) q.set("start", String(range.start));
+    if (range?.end) q.set("end", String(range.end));
+    return this.getJSON(`/workspace/${encodeURIComponent(projectId)}/fs/read?${q}`);
+  }
+
+  // ---- 工作区 git ----
+  private wsGit(projectId: string): string {
+    return `/workspace/${encodeURIComponent(projectId)}/git`;
+  }
+  async gitStatus(projectId: string): Promise<GitStatus> {
+    return this.getJSON(`${this.wsGit(projectId)}/status`);
+  }
+  async gitDiff(projectId: string, path: string, staged = false): Promise<string> {
+    const q = new URLSearchParams({ path, ...(staged ? { staged: "1" } : {}) });
+    return (await this.getJSON<{ diff: string }>(`${this.wsGit(projectId)}/diff?${q}`)).diff;
+  }
+  async gitBranches(projectId: string): Promise<{ current: string; all: string[] }> {
+    return this.getJSON(`${this.wsGit(projectId)}/branches`);
+  }
+  async gitStage(projectId: string, paths?: string[]): Promise<{ ok: boolean; error?: string }> {
+    return this.postJSON(`${this.wsGit(projectId)}/stage`, paths ? { paths } : { all: true });
+  }
+  async gitUnstage(projectId: string, paths?: string[]): Promise<{ ok: boolean; error?: string }> {
+    return this.postJSON(`${this.wsGit(projectId)}/unstage`, paths ? { paths } : { all: true });
+  }
+  async gitRevert(projectId: string, paths?: string[]): Promise<{ ok: boolean }> {
+    return this.postJSON(`${this.wsGit(projectId)}/revert`, paths ? { paths } : { all: true });
+  }
+  async gitCommit(projectId: string, message: string): Promise<{ ok: boolean; error?: string }> {
+    return this.postJSON(`${this.wsGit(projectId)}/commit`, { message });
+  }
+  async gitSwitch(projectId: string, name: string): Promise<{ ok: boolean; error?: string }> {
+    return this.postJSON(`${this.wsGit(projectId)}/switch`, { name });
   }
 
   /** 回应工具审批请求（approval-request 事件携带 id）。 */
@@ -219,9 +332,21 @@ export class EasyWorkClient {
     });
   }
 
-  async threadMessages(id: string): Promise<{ role: string; parts: { type: string; text?: string }[] }[]> {
+  async threadMessages(id: string): Promise<
+    {
+      role: string;
+      parts: { type: string; text?: string; mimeType?: string; data?: string }[];
+      toolCalls?: { id: string; name: string; arguments: string }[];
+      toolResults?: { content: unknown; isError?: boolean; display?: unknown }[];
+    }[]
+  > {
     const { messages } = await this.getJSON<{
-      messages: { role: string; parts: { type: string; text?: string }[] }[];
+      messages: {
+        role: string;
+        parts: { type: string; text?: string; mimeType?: string; data?: string }[];
+        toolCalls?: { id: string; name: string; arguments: string }[];
+        toolResults?: { content: unknown; isError?: boolean; display?: unknown }[];
+      }[];
     }>(`/threads/${encodeURIComponent(id)}/messages`);
     return messages;
   }

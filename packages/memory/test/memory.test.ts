@@ -2,7 +2,12 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { LocalMemoryProvider, type Embedder } from "../src/index.js";
+import {
+  LocalMemoryProvider,
+  type Embedder,
+  type ExtractedFact,
+  type FactExtractor,
+} from "../src/index.js";
 
 let dir: string | undefined;
 function freshDir(): string {
@@ -39,7 +44,7 @@ describe("LocalMemoryProvider", () => {
     m.close();
   });
 
-  it("observe 写入会话摘要", async () => {
+  it("observe 无抽取器时为 no-op（会话历史由 ConversationRepo 存档，不再写摘要）", async () => {
     const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
     await m.observe({
       messages: [
@@ -48,9 +53,59 @@ describe("LocalMemoryProvider", () => {
       ],
       sessionId: "s1",
     });
-    const items = await m.list({ layer: "session-summary", sessionId: "s1" });
-    expect(items).toHaveLength(1);
-    expect(items[0]!.text).toContain("订机票");
+    expect(await m.list()).toHaveLength(0);
+    m.close();
+  });
+
+  it("observe LLM 事实抽取：写入全局层 + 与已有事实去重 + 透传 model", async () => {
+    const calls: { existing: ExtractedFact[]; model?: string }[] = [];
+    const extract: FactExtractor = async ({ existing, model }) => {
+      calls.push({ existing, ...(model ? { model } : {}) });
+      return [
+        { layer: "user-profile", text: "用户是后端工程师" },
+        { layer: "agent-memory", text: "项目部署在 AWS" },
+        // 与已有重复（精确同文）→ 应被去重跳过
+        { layer: "user-profile", text: "用户偏好简洁回答" },
+        // 同批内重复 → 第二次应跳过
+        { layer: "agent-memory", text: "项目部署在 AWS" },
+        // 空文本 → 跳过
+        { layer: "skills", text: "  " },
+      ];
+    };
+    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:", extract });
+    await m.write({ layer: "user-profile", text: "用户偏好简洁回答" });
+
+    await m.observe({
+      messages: [
+        { role: "user", content: "我是后端工程师，项目跑在 AWS" },
+        { role: "assistant", content: "了解" },
+      ],
+      sessionId: "s1",
+      model: "qwen3:4b",
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.model).toBe("qwen3:4b");
+    // 抽取器拿到的已有事实包含先前写入的偏好。
+    expect(calls[0]!.existing.some((e) => e.text === "用户偏好简洁回答")).toBe(true);
+
+    const profile = await m.list({ layer: "user-profile" });
+    expect(profile.map((p) => p.text).sort()).toEqual(["用户偏好简洁回答", "用户是后端工程师"]);
+    const agent = await m.list({ layer: "agent-memory" });
+    expect(agent.map((a) => a.text)).toEqual(["项目部署在 AWS"]); // 去重后仅一条
+    expect(await m.list({ layer: "skills" })).toHaveLength(0);
+    m.close();
+  });
+
+  it("observe 抽取器抛错被吞掉，不影响主流程", async () => {
+    const extract: FactExtractor = async () => {
+      throw new Error("LLM 不可用");
+    };
+    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:", extract });
+    await expect(
+      m.observe({ messages: [{ role: "user", content: "你好" }], sessionId: "s2" }),
+    ).resolves.toBeUndefined();
+    expect(await m.list()).toHaveLength(0);
     m.close();
   });
 

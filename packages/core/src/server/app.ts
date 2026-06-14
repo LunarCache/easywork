@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import {
   ChatMessageSchema,
   ChatRequestSchema,
+  ApprovalModeSchema,
   GGUFVariantSchema,
   LocalLoadOptionsSchema,
   McpServerConfigSchema,
@@ -14,6 +15,10 @@ import {
   type ChatStreamEvent,
   type DownloadEvent,
   type McpServerConfig,
+  type MemoryLayer,
+  type MemoryProvider,
+  type Project,
+  type Tool,
 } from "@ew/shared";
 import { LlamaServerEngine } from "@ew/providers";
 import { builtinTools } from "@ew/tools";
@@ -27,9 +32,16 @@ import { ProviderManager, type CloudProviderConfig } from "../providers/manager.
 import { registerOpenAICompat } from "../openai-compat/router.js";
 import { ToolRegistry } from "../agent/tool-registry.js";
 import { runAgent } from "../agent/loop.js";
+import { ToolTurnRecorder } from "../agent/turn-recorder.js";
 import { ApprovalRegistry, SseApprovalGate } from "../agent/approval-sse.js";
 import { SqliteConversationRepo } from "../store/conversation.js";
 import { EmbeddingService } from "../memory/embedding-service.js";
+import { buildFactExtractor } from "../memory/fact-extractor.js";
+import { makeMemoryTool } from "../memory/memory-tool.js";
+import { makeSessionSearchTool } from "../memory/session-search-tool.js";
+import { workspaceTools } from "../agent/workspace-approval.js";
+import { GitService } from "../git/git.js";
+import { listDir, readFileSafe } from "@ew/tools";
 import { KnowledgeBaseStore } from "../rag/store.js";
 import { makeSearchKnowledgeBaseTool, ragAutoInject } from "../rag/tool.js";
 import { parseFile } from "../rag/parse.js";
@@ -39,6 +51,7 @@ import {
   dbPath as defaultDbPath,
   memoryDir as defaultMemoryDir,
   modelsDir as defaultModelsDir,
+  defaultWorkspaceDir,
 } from "../config/paths.js";
 
 export interface CoreServer {
@@ -134,6 +147,8 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     dir: opts.memoryDir ?? defaultMemoryDir(),
     dbPath: opts.memoryDbPath ?? `${defaultDataDir()}/memory.db`,
     embed: (texts) => embeddings.embed(texts),
+    // 轮后用当轮对话模型抽取持久事实写入全局层（复用已加载模型）。
+    extract: buildFactExtractor({ resolveEngine: (m) => registry.resolve(m) }),
   });
   // markdown 为真相源：监听用户手工编辑并回灌索引（内存库/测试不监听）。
   const stopMemWatch =
@@ -395,6 +410,8 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     kb: z.boolean().optional(),
     /** 选用的知识库集合 id；省略=跨全部集合。 */
     kbId: z.string().optional(),
+    /** 工作区项目 id；解析其 workspaceDir + 审批策略，注入 fs/exec 工具。 */
+    projectId: z.string().optional(),
   });
 
   app.post("/agent/run", async (req, reply) => {
@@ -414,11 +431,13 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     const history = catalog
       ? [{ role: "system" as const, content: catalog }, ...parsed.data.history]
       : [...parsed.data.history];
+    // 记忆工具（manage_memory：模型自治增改删）+ 会话检索（session_search：FTS5 历史）常驻。
+    const extraTools: Tool[] = [makeMemoryTool(memory), makeSessionSearchTool(repo)];
     // RAG：仅当聊天开启「知识库」时启用——自动注入相关上下文，并按所选集合注入 search_knowledge_base 工具。
     const useKb = parsed.data.kb === true;
     const kbId = parsed.data.kbId;
-    const extraTools = useKb ? [makeSearchKnowledgeBaseTool(kb, kbId)] : [];
     if (useKb) {
+      extraTools.push(makeSearchKnowledgeBaseTool(kb, kbId));
       const lu = parsed.data.history[parsed.data.history.length - 1];
       const q = lu?.role === "user" ? messageText(lu.content) : "";
       if (q) {
@@ -426,6 +445,10 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         if (inj) history.unshift({ role: "system" as const, content: inj.context });
       }
     }
+    // 冻结快照（参考 Hermes）：会话期间固定的全局记忆作为系统块置顶注入，护 prefix cache。
+    // 历史检索交给 session_search（FTS5），故关闭动态 recall（见下方 recallOptions）。
+    const snapshot = await buildMemorySnapshot(memory);
+    if (snapshot) history.unshift({ role: "system" as const, content: snapshot });
     // Think 开关：把 /think 或 /no_think 注入给模型（Qwen3 等），但不污染持久化的用户消息。
     if (parsed.data.think !== undefined && history.length > 0) {
       const last = history[history.length - 1]!;
@@ -435,12 +458,28 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       }
     }
 
-    // 持久化（应用内会话历史）：确保 thread 存在并追加本轮用户消息。
+    // 工作区：按 projectId 解析项目根 + 审批策略；注入 fs/exec 工具与项目指令（含 AGENTS.md）。
     const threadId = parsed.data.threadId;
+    const projectId = parsed.data.projectId ?? repo.getThread(threadId)?.projectId ?? undefined;
+    const project = projectId ? repo.getProject(projectId) : null;
+    let runWorkspaceDir = workspaceDir;
+    if (project?.workspaceDir) {
+      runWorkspaceDir = project.workspaceDir;
+      extraTools.push(...workspaceTools(project.approvalMode ?? "approve-each"));
+      const instr = workspaceInstructions(project);
+      if (instr) history.unshift({ role: "system" as const, content: instr });
+    }
+
+    // 持久化（应用内会话历史）：确保 thread 存在并追加本轮用户消息。
     const lastUser = parsed.data.history[parsed.data.history.length - 1];
     if (!repo.getThread(threadId)) {
       const title = lastUser ? messageText(lastUser.content).slice(0, 40) || "新会话" : "新会话";
-      repo.createThread({ id: threadId, modelId: parsed.data.model, title });
+      repo.createThread({
+        id: threadId,
+        modelId: parsed.data.model,
+        title,
+        ...(projectId ? { projectId } : {}),
+      });
     }
     if (lastUser?.role === "user") {
       repo.appendMessage({
@@ -471,6 +510,23 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       emit: (ev) => send(ev),
       signal: ac.signal,
     });
+    // 从事件流重建并持久化 agent loop 的工具往返（对齐 Hermes：完整历史含 tool_calls/results）。
+    const recorder = new ToolTurnRecorder();
+    const persistRecorded = (msgs: ReturnType<ToolTurnRecorder["push"]>): void => {
+      for (const m of msgs) {
+        repo.appendMessage({
+          id: crypto.randomUUID(),
+          threadId,
+          role: m.role,
+          seq: repo.nextSeq(threadId),
+          parts: m.parts,
+          ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
+          ...(m.toolResults ? { toolResults: m.toolResults } : {}),
+          createdAt: new Date().toISOString(),
+        });
+      }
+    };
+
     try {
       for await (const ev of runAgent(
         {
@@ -486,15 +542,20 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
           resolveEngine: (m) => registry.resolve(m),
           tools,
           approval: runApproval,
-          workspaceDir,
+          workspaceDir: runWorkspaceDir,
           memory,
+          // 全局记忆已由冻结快照置顶注入、历史由 session_search 检索；关闭动态 recall 避免重复注入。
+          recallOptions: { enabled: false },
+          // 工具中间进度（run_command 流式输出）直接写 SSE。
+          onToolProgress: (ev) => send(ev),
           ...(extraTools.length ? { extraTools } : {}),
         },
       )) {
+        persistRecorded(recorder.push(ev));
         if (ev.type === "final") finalContent = messageText(ev.message.content);
         send(ev);
       }
-      // 追加助手最终回复。
+      // 追加助手最终回复（无工具的收尾轮）。
       if (finalContent) {
         repo.appendMessage({
           id: crypto.randomUUID(),
@@ -692,9 +753,152 @@ version: "0.1.0"
     return { ok: true };
   });
 
+  // ---- 工作区项目（Project = 本地目录 + 审批策略） ----
+  const ProjectCreateSchema = z.object({
+    name: z.string().min(1),
+    workspaceDir: z.string().optional(),
+    approvalMode: ApprovalModeSchema.optional(),
+    instructions: z.string().optional(),
+  });
+  const ProjectPatchSchema = ProjectCreateSchema.partial();
+
+  app.get("/projects", async () => ({ projects: repo.listProjects() }));
+  app.post("/projects", async (req, reply) => {
+    const parsed = ProjectCreateSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_project", detail: parsed.error.format() });
+    // 未指定目录 → 在数据目录下用专门的默认工作区目录（自动创建）。
+    const workspaceDir = parsed.data.workspaceDir?.trim() || defaultWorkspaceDir();
+    if (parsed.data.workspaceDir && !isExistingDir(parsed.data.workspaceDir)) {
+      return reply.code(400).send({ error: "invalid_dir", message: "workspaceDir 不是有效目录" });
+    }
+    return repo.createProject({ ...parsed.data, workspaceDir });
+  });
+  app.patch("/projects/:id", async (req, reply) => {
+    const parsed = ProjectPatchSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_project" });
+    if (parsed.data.workspaceDir && !isExistingDir(parsed.data.workspaceDir)) {
+      return reply.code(400).send({ error: "invalid_dir", message: "workspaceDir 不是有效目录" });
+    }
+    try {
+      return repo.updateProject((req.params as { id: string }).id, parsed.data);
+    } catch {
+      return reply.code(404).send({ error: "not_found" });
+    }
+  });
+  app.delete("/projects/:id", async (req) => {
+    repo.deleteProject((req.params as { id: string }).id);
+    return { ok: true };
+  });
+
+  // 工作区只读文件浏览（供 UI 文件树 / 文件查看）。写经 agent fs 工具走审批，不开直接写端点。
+  const projectRoot = (id: string): string => {
+    const p = repo.getProject(id);
+    if (!p?.workspaceDir) throw new Error("project_no_workspace");
+    return p.workspaceDir;
+  };
+  app.get("/workspace/:id/fs/list", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as { path?: string; depth?: string };
+    try {
+      return { entries: listDir(projectRoot(id), q.path ?? ".", q.depth ? Number(q.depth) : 1) };
+    } catch (e) {
+      return reply.code(400).send({ error: "fs_error", message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+  app.get("/workspace/:id/fs/read", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as { path?: string; start?: string; end?: string };
+    if (!q.path) return reply.code(400).send({ error: "path_required" });
+    try {
+      return readFileSafe(projectRoot(id), q.path, {
+        ...(q.start ? { start: Number(q.start) } : {}),
+        ...(q.end ? { end: Number(q.end) } : {}),
+      });
+    } catch (e) {
+      return reply.code(400).send({ error: "fs_error", message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // 工作区 git（status/diff/暂存/提交/还原/分支）。
+  const git = (id: string): GitService => new GitService(projectRoot(id));
+  app.get("/workspace/:id/git/status", async (req, reply) => {
+    try {
+      return await git((req.params as { id: string }).id).status();
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+  app.get("/workspace/:id/git/diff", async (req, reply) => {
+    const q = req.query as { path?: string; staged?: string };
+    if (!q.path) return reply.code(400).send({ error: "path_required" });
+    try {
+      return { diff: await git((req.params as { id: string }).id).diff(q.path, { staged: q.staged === "1" }) };
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+  app.get("/workspace/:id/git/branches", async (req, reply) => {
+    try {
+      return await git((req.params as { id: string }).id).branches();
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+  const GitPathsSchema = z.object({ paths: z.array(z.string()).optional(), all: z.boolean().optional() });
+  app.post("/workspace/:id/git/stage", async (req, reply) => {
+    try {
+      const b = GitPathsSchema.parse(req.body ?? {});
+      const g = git((req.params as { id: string }).id);
+      const r = b.all || !b.paths?.length ? await g.stageAll() : await g.stage(b.paths);
+      return { ok: r.ok, error: r.ok ? undefined : r.stderr };
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+  app.post("/workspace/:id/git/unstage", async (req, reply) => {
+    try {
+      const b = GitPathsSchema.parse(req.body ?? {});
+      const g = git((req.params as { id: string }).id);
+      const r = b.all || !b.paths?.length ? await g.unstageAll() : await g.unstage(b.paths);
+      return { ok: r.ok, error: r.ok ? undefined : r.stderr };
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+  app.post("/workspace/:id/git/revert", async (req, reply) => {
+    try {
+      const b = GitPathsSchema.parse(req.body ?? {});
+      const g = git((req.params as { id: string }).id);
+      await (b.all || !b.paths?.length ? g.revertAll() : g.revert(b.paths));
+      return { ok: true };
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+  app.post("/workspace/:id/git/commit", async (req, reply) => {
+    const b = z.object({ message: z.string().min(1) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: "message_required" });
+    try {
+      const r = await git((req.params as { id: string }).id).commit(b.data.message);
+      return { ok: r.ok, error: r.ok ? undefined : r.stderr || r.stdout };
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+  app.post("/workspace/:id/git/switch", async (req, reply) => {
+    const b = z.object({ name: z.string().min(1) }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: "name_required" });
+    try {
+      const r = await git((req.params as { id: string }).id).switchBranch(b.data.name);
+      return { ok: r.ok, error: r.ok ? undefined : r.stderr };
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+
   // ---- 记忆 ----
   const MemoryWriteSchema = z.object({
-    layer: z.enum(["user-profile", "agent-memory", "skills", "session-summary"]),
+    layer: z.enum(["user-profile", "agent-memory", "skills"]),
     text: z.string(),
     sessionId: z.string().optional(),
     meta: z.record(z.string(), z.unknown()).optional(),
@@ -806,4 +1010,51 @@ version: "0.1.0"
       }
     },
   };
+}
+
+/** 目录是否存在且为目录。 */
+function isExistingDir(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** 工作区项目指令：project.instructions + 项目根的 AGENTS.md（若存在），拼成系统块。 */
+function workspaceInstructions(project: Project): string {
+  const parts: string[] = [];
+  if (project.instructions?.trim()) parts.push(project.instructions.trim());
+  if (project.workspaceDir) {
+    for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+      try {
+        const txt = fs.readFileSync(fsPath.join(project.workspaceDir, name), "utf8");
+        if (txt.trim()) {
+          parts.push(`# ${name}\n${txt.trim()}`);
+          break;
+        }
+      } catch {
+        /* 不存在则跳过 */
+      }
+    }
+  }
+  if (parts.length === 0) return "";
+  return `你正在工作区「${project.name}」（目录：${project.workspaceDir}）中工作。可用 fs_* 工具读写文件、run_command 执行命令（路径限定在工作区内）。\n\n${parts.join("\n\n")}`;
+}
+
+/** 构造全局记忆的冻结快照系统块（参考 Hermes）：会话期固定，置顶注入。全空则返回 ""。 */
+export async function buildMemorySnapshot(memory: MemoryProvider): Promise<string> {
+  const layers: { layer: MemoryLayer; title: string }[] = [
+    { layer: "user-profile", title: "用户画像" },
+    { layer: "agent-memory", title: "长期记忆" },
+    { layer: "skills", title: "技能/流程" },
+  ];
+  const blocks: string[] = [];
+  for (const { layer, title } of layers) {
+    const items = await memory.list({ layer });
+    if (items.length === 0) continue;
+    blocks.push(`## ${title}\n${items.map((i) => `- ${i.text}`).join("\n")}`);
+  }
+  if (blocks.length === 0) return "";
+  return `以下是你的持久记忆（本次会话期间固定；需变更请用 manage_memory 工具）：\n\n${blocks.join("\n\n")}`;
 }

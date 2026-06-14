@@ -5,7 +5,9 @@ import type {
   ChannelConnector,
   ConversationRepo,
   InboundMessage,
+  MessageSearchHit,
   OutboundChunk,
+  Project,
   StoredMessage,
   Thread,
 } from "@ew/shared";
@@ -17,7 +19,32 @@ class FakeRepo implements ConversationRepo {
   private threads = new Map<string, Thread>();
   private msgs = new Map<string, StoredMessage[]>();
   private channelMap = new Map<string, string>();
+  private projects = new Map<string, Project>();
   private n = 0;
+  createProject(p: Partial<Project> & { name: string }): Project {
+    const id = p.id ?? `p${++this.n}`;
+    const proj: Project = { id, name: p.name, createdAt: new Date().toISOString() };
+    this.projects.set(id, proj);
+    return proj;
+  }
+  getProject(id: string): Project | null {
+    return this.projects.get(id) ?? null;
+  }
+  listProjects(): Project[] {
+    return [...this.projects.values()];
+  }
+  updateProject(id: string, patch: Partial<Project>): Project {
+    const cur = this.projects.get(id)!;
+    const next = { ...cur, ...patch };
+    this.projects.set(id, next);
+    return next;
+  }
+  deleteProject(id: string): void {
+    this.projects.delete(id);
+  }
+  searchMessages(): MessageSearchHit[] {
+    return [];
+  }
   createThread(t: Partial<Thread>): Thread {
     const id = t.id ?? `t${++this.n}`;
     const now = new Date().toISOString();

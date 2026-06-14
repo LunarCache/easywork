@@ -13,6 +13,12 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tool-start"), call: ToolCallSchema }),
   z.object({ type: z.literal("tool-end"), call: ToolCallSchema, result: ToolResultSchema }),
   z.object({
+    type: z.literal("tool-progress"),
+    callId: z.string(),
+    stream: z.enum(["stdout", "stderr"]),
+    chunk: z.string(),
+  }),
+  z.object({
     type: z.literal("approval-request"),
     id: z.string(),
     toolName: z.string(),

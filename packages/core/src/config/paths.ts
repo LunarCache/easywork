@@ -24,6 +24,13 @@ export function memoryDir(): string {
   return dir;
 }
 
+/** 默认工作区根：用户未选择本地目录时，在数据目录下用一个专门目录承载。 */
+export function defaultWorkspaceDir(): string {
+  const dir = path.join(dataDir(), "workspace");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 export function dbPath(): string {
   return path.join(dataDir(), "easywork.db");
 }

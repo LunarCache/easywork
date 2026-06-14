@@ -11,6 +11,7 @@ use std::thread;
 
 use serde::Serialize;
 use tauri::{Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 #[derive(Clone, Serialize)]
 struct DaemonInfo {
@@ -29,6 +30,23 @@ struct AppState {
 #[tauri::command]
 fn get_config(state: State<'_, AppState>) -> Option<DaemonInfo> {
     state.info.lock().unwrap().clone()
+}
+
+/// 打开系统文件夹选择对话框，返回所选目录绝对路径（取消则 None）。工作区模式用。
+/// 用非阻塞 pick_folder（rfd 内部派发到主线程）+ 通道异步取回，避免在主线程 block 导致卡死。
+#[tauri::command]
+async fn select_workspace_dir(app: tauri::AppHandle) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().pick_folder(move |f| {
+        let _ = tx.send(f);
+    });
+    let picked = tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .ok()
+        .flatten();
+    picked
+        .and_then(|p| p.into_path().ok())
+        .map(|pb| pb.to_string_lossy().to_string())
 }
 
 fn data_dir() -> String {
@@ -56,8 +74,9 @@ fn resolve_daemon_entry(app: &tauri::AppHandle) -> std::path::PathBuf {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![get_config])
+        .invoke_handler(tauri::generate_handler![get_config, select_workspace_dir])
         .setup(|app| {
             let handle = app.handle().clone();
             let entry = resolve_daemon_entry(&handle);

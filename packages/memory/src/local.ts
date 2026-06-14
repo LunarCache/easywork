@@ -10,7 +10,6 @@ import type {
   MemoryWrite,
   RecallQuery,
 } from "@ew/shared";
-import { messageText } from "@ew/shared";
 import { cosine, lexicalScore } from "./cosine.js";
 
 // node:sqlite 通过 createRequire 运行时加载（避免打包器静态解析这个较新的内置模块）。
@@ -20,6 +19,28 @@ type SqliteDB = InstanceType<typeof NodeSqlite.DatabaseSync>;
 /** 文本批量向量化（注入 node-llama-cpp / 云端 embed）。 */
 export type Embedder = (texts: string[]) => Promise<number[][]>;
 
+/** LLM 抽取出的一条持久事实（带目标分层）。 */
+export interface ExtractedFact {
+  layer: "user-profile" | "agent-memory" | "skills";
+  text: string;
+}
+
+/**
+ * LLM 事实抽取器：对话 → 候选持久事实。注入以解耦引擎依赖（本包仅依赖 @ew/shared）。
+ * 不可用/失败时应返回 [] 或抛错（observe 会吞掉，不影响主流程）。
+ */
+export type FactExtractor = (input: {
+  messages: { role: string; content: unknown }[];
+  /** 各全局层已有事实，供模型去重（避免重复抽取）。 */
+  existing: ExtractedFact[];
+  /** 抽取所用模型 id（通常复用当轮对话模型，已加载）。 */
+  model?: string;
+}) => Promise<ExtractedFact[]>;
+
+const GLOBAL_FACT_LAYERS = ["user-profile", "agent-memory", "skills"] as const;
+/** 与同层已有事实词法重叠达到此阈值则视为重复，跳过写入（防记忆膨胀）。 */
+const FACT_DEDUP_THRESHOLD = 0.85;
+
 export interface LocalMemoryOptions {
   /** 分层 markdown 目录。 */
   dir: string;
@@ -27,13 +48,14 @@ export interface LocalMemoryOptions {
   dbPath: string;
   /** 可选向量化函数；缺省则用词法召回。 */
   embed?: Embedder;
+  /** 可选 LLM 事实抽取器；提供则 observe 额外抽取持久事实写入全局层。 */
+  extract?: FactExtractor;
 }
 
 const LAYER_FILE: Record<MemoryLayer, string> = {
   "user-profile": "user-profile.md",
   "agent-memory": "agent-memory.md",
   skills: "skills.md",
-  "session-summary": "sessions",
 };
 
 interface Row {
@@ -55,10 +77,12 @@ export class LocalMemoryProvider implements MemoryProvider {
   private readonly db: SqliteDB;
   private readonly dir: string;
   private readonly embed?: Embedder;
+  private readonly extract?: FactExtractor;
 
   constructor(opts: LocalMemoryOptions) {
     this.dir = opts.dir;
     if (opts.embed) this.embed = opts.embed;
+    if (opts.extract) this.extract = opts.extract;
     fs.mkdirSync(opts.dir, { recursive: true });
     if (opts.dbPath !== ":memory:") fs.mkdirSync(path.dirname(opts.dbPath), { recursive: true });
     this.db = new DatabaseSync(opts.dbPath);
@@ -117,7 +141,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         updatedAt,
         item.meta ? JSON.stringify(item.meta) : null,
       );
-    this.regenerateMarkdown(item.layer, item.sessionId);
+    this.regenerateMarkdown(item.layer);
     return { id, updatedAt, ...item };
   }
 
@@ -133,7 +157,7 @@ export class LocalMemoryProvider implements MemoryProvider {
     this.db
       .prepare(`UPDATE memory_items SET text = ?, embedding = ?, updated_at = ?, meta = ? WHERE id = ?`)
       .run(text, emb instanceof Float32Array ? Buffer.from(emb.buffer) : emb, updatedAt, meta, id);
-    this.regenerateMarkdown(row.layer, row.session_id ?? undefined);
+    this.regenerateMarkdown(row.layer);
     return this.toItem({ ...row, text, updated_at: updatedAt, meta });
   }
 
@@ -160,13 +184,13 @@ export class LocalMemoryProvider implements MemoryProvider {
       | { layer: MemoryLayer; session_id: string | null }
       | undefined;
     this.db.prepare(`DELETE FROM memory_items WHERE id = ?`).run(id);
-    if (row) this.regenerateMarkdown(row.layer, row.session_id ?? undefined);
+    if (row) this.regenerateMarkdown(row.layer);
   }
 
   async recall(q: RecallQuery): Promise<MemoryItem[]> {
     const topK = q.topK ?? 6;
     const minScore = q.minScore ?? 0;
-    // 候选：指定 layers，或 全局层 + 当前 session 的会话摘要。
+    // 候选：指定 layers，否则全部全局层。
     let rows: Row[];
     if (q.layers?.length) {
       const placeholders = q.layers.map(() => "?").join(",");
@@ -175,12 +199,8 @@ export class LocalMemoryProvider implements MemoryProvider {
         .all(...q.layers) as unknown as Row[];
     } else {
       rows = this.db
-        .prepare(
-          `SELECT * FROM memory_items
-           WHERE layer IN ('user-profile','agent-memory','skills')
-              OR (layer = 'session-summary' AND session_id IS ?)`,
-        )
-        .all(q.sessionId ?? null) as unknown as Row[];
+        .prepare(`SELECT * FROM memory_items WHERE layer IN ('user-profile','agent-memory','skills')`)
+        .all() as unknown as Row[];
     }
 
     const queryEmb = await this.embedOne(q.query);
@@ -239,34 +259,70 @@ export class LocalMemoryProvider implements MemoryProvider {
     return done;
   }
 
-  /** 轮后启发式抽取：把最近一轮用户/助手交流存为会话摘要。LLM 抽取留作后续。 */
-  async observe(input: { messages: unknown[]; sessionId: string }): Promise<void> {
+  /**
+   * 轮后记忆抽取：LLM 事实抽取（注入 extractor 时）——把持久的用户偏好/事实/技能写入全局层，带去重。
+   * 会话历史本身由 ConversationRepo 完整存档（不再写截断的会话摘要）。
+   */
+  async observe(input: { messages: unknown[]; sessionId: string; model?: string }): Promise<void> {
+    if (!this.extract) return;
     const msgs = input.messages as { role: string; content: unknown }[];
-    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
-    const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
-    if (!lastUser) return;
-    const u = truncate(messageText(lastUser.content as never), 300);
-    const a = lastAssistant ? truncate(messageText(lastAssistant.content as never), 300) : "";
-    const text = a ? `用户: ${u}\n助手: ${a}` : `用户: ${u}`;
-    await this.write({ layer: "session-summary", sessionId: input.sessionId, text });
+    await this.extractFacts(msgs, input.model);
   }
 
-  private regenerateMarkdown(layer: MemoryLayer, sessionId?: string): void {
+  /** LLM 抽取持久事实并去重写入全局层（失败不影响主流程）。 */
+  private async extractFacts(
+    messages: { role: string; content: unknown }[],
+    model?: string,
+  ): Promise<void> {
+    if (!this.extract) return;
     try {
-      if (layer === "session-summary") {
-        const dir = path.join(this.dir, "sessions");
-        fs.mkdirSync(dir, { recursive: true });
-        const sid = sessionId ?? "global";
-        const rows = this.db
-          .prepare(`SELECT * FROM memory_items WHERE layer = 'session-summary' AND session_id IS ? ORDER BY updated_at`)
-          .all(sessionId ?? null) as unknown as Row[];
-        fs.writeFileSync(path.join(dir, `${sanitize(sid)}.md`), renderLayer(`会话摘要 ${sid}`, rows));
-      } else {
-        const rows = this.db
-          .prepare(`SELECT * FROM memory_items WHERE layer = ? ORDER BY updated_at`)
-          .all(layer) as unknown as Row[];
-        fs.writeFileSync(path.join(this.dir, LAYER_FILE[layer]), renderLayer(layer, rows));
+      const existing = this.globalFacts();
+      const facts = await this.extract({
+        messages,
+        existing,
+        ...(model ? { model } : {}),
+      });
+      for (const f of facts) {
+        const text = f.text.trim();
+        if (!text || !GLOBAL_FACT_LAYERS.includes(f.layer)) continue;
+        if (this.isDuplicateFact(f.layer, text, existing)) continue;
+        await this.write({ layer: f.layer, text });
+        existing.push({ layer: f.layer, text }); // 同批内也去重
       }
+    } catch {
+      /* 抽取失败不影响摘要与主流程 */
+    }
+  }
+
+  /** 读取所有全局层（user-profile/agent-memory/skills）已有事实。 */
+  private globalFacts(): ExtractedFact[] {
+    const placeholders = GLOBAL_FACT_LAYERS.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(`SELECT layer, text FROM memory_items WHERE layer IN (${placeholders})`)
+      .all(...GLOBAL_FACT_LAYERS) as unknown as { layer: ExtractedFact["layer"]; text: string }[];
+    return rows.map((r) => ({ layer: r.layer, text: r.text }));
+  }
+
+  /** 候选事实是否与同层已有事实词法高度重叠（双向取大者，>= 阈值视为重复）。 */
+  private isDuplicateFact(
+    layer: ExtractedFact["layer"],
+    text: string,
+    existing: ExtractedFact[],
+  ): boolean {
+    for (const e of existing) {
+      if (e.layer !== layer) continue;
+      const sim = Math.max(lexicalScore(text, e.text), lexicalScore(e.text, text));
+      if (sim >= FACT_DEDUP_THRESHOLD) return true;
+    }
+    return false;
+  }
+
+  private regenerateMarkdown(layer: MemoryLayer): void {
+    try {
+      const rows = this.db
+        .prepare(`SELECT * FROM memory_items WHERE layer = ? ORDER BY updated_at`)
+        .all(layer) as unknown as Row[];
+      fs.writeFileSync(path.join(this.dir, LAYER_FILE[layer]), renderLayer(layer, rows));
     } catch {
       /* markdown 镜像失败不影响主流程 */
     }
@@ -279,11 +335,8 @@ export class LocalMemoryProvider implements MemoryProvider {
    * - 文件中不再出现的 id → 删除。
    * 幂等：无变化则不写库、不重生成 markdown（避免 watcher 自激）。
    */
-  async syncFromMarkdown(layer: MemoryLayer, sessionId?: string): Promise<boolean> {
-    const file =
-      layer === "session-summary"
-        ? path.join(this.dir, "sessions", `${sanitize(sessionId ?? "global")}.md`)
-        : path.join(this.dir, LAYER_FILE[layer]);
+  async syncFromMarkdown(layer: MemoryLayer): Promise<boolean> {
+    const file = path.join(this.dir, LAYER_FILE[layer]);
     let content: string;
     try {
       content = fs.readFileSync(file, "utf8");
@@ -291,13 +344,9 @@ export class LocalMemoryProvider implements MemoryProvider {
       return false; // 文件不存在 → 跳过
     }
     const entries = parseLayerMarkdown(content);
-    const rows = (
-      layer === "session-summary"
-        ? this.db
-            .prepare(`SELECT * FROM memory_items WHERE layer = 'session-summary' AND session_id IS ? ORDER BY updated_at`)
-            .all(sessionId ?? null)
-        : this.db.prepare(`SELECT * FROM memory_items WHERE layer = ? ORDER BY updated_at`).all(layer)
-    ) as unknown as Row[];
+    const rows = this.db
+      .prepare(`SELECT * FROM memory_items WHERE layer = ? ORDER BY updated_at`)
+      .all(layer) as unknown as Row[];
     const byId = new Map(rows.map((r) => [r.id, r]));
     const seenIds = new Set<string>();
     let changed = false;
@@ -322,7 +371,7 @@ export class LocalMemoryProvider implements MemoryProvider {
           .prepare(
             `INSERT INTO memory_items (id, layer, session_id, text, embedding, updated_at, meta) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
           )
-          .run(id, layer, sessionId ?? null, e.text, emb ? Buffer.from(emb.buffer) : null, now);
+          .run(id, layer, null, e.text, emb ? Buffer.from(emb.buffer) : null, now);
         changed = true;
       }
     }
@@ -333,7 +382,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         changed = true;
       }
     }
-    if (changed) this.regenerateMarkdown(layer, sessionId);
+    if (changed) this.regenerateMarkdown(layer);
     return changed;
   }
 
@@ -343,15 +392,13 @@ export class LocalMemoryProvider implements MemoryProvider {
   startWatching(opts: { debounceMs?: number } = {}): () => void {
     const debounce = opts.debounceMs ?? 300;
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
-    fs.mkdirSync(path.join(this.dir, "sessions"), { recursive: true });
-    const onChange = (layer: MemoryLayer, sessionId?: string): void => {
-      const key = `${layer}:${sessionId ?? ""}`;
-      const prev = timers.get(key);
+    const onChange = (layer: MemoryLayer): void => {
+      const prev = timers.get(layer);
       if (prev) clearTimeout(prev);
       timers.set(
-        key,
+        layer,
         setTimeout(() => {
-          void this.syncFromMarkdown(layer, sessionId).catch(() => {});
+          void this.syncFromMarkdown(layer).catch(() => {});
         }, debounce),
       );
     };
@@ -361,18 +408,8 @@ export class LocalMemoryProvider implements MemoryProvider {
         fs.watch(this.dir, (_evt, filename) => {
           if (!filename) return;
           const fn = filename.toString();
-          const layer = (Object.keys(LAYER_FILE) as MemoryLayer[]).find(
-            (l) => l !== "session-summary" && LAYER_FILE[l] === fn,
-          );
+          const layer = (Object.keys(LAYER_FILE) as MemoryLayer[]).find((l) => LAYER_FILE[l] === fn);
           if (layer) onChange(layer);
-        }),
-      );
-      const sessionsDir = path.join(this.dir, "sessions");
-      watchers.push(
-        fs.watch(sessionsDir, (_evt, filename) => {
-          if (!filename) return;
-          const sid = filename.toString().replace(/\.md$/, "");
-          onChange("session-summary", sid === "global" ? undefined : sid);
         }),
       );
     } catch {
@@ -411,10 +448,3 @@ function renderLayer(title: string, rows: Row[]): string {
   return `# ${title}\n\n${lines.join("\n")}\n`;
 }
 
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n)}…` : s;
-}
-
-function sanitize(s: string): string {
-  return s.replace(/[^a-zA-Z0-9._-]+/g, "_");
-}

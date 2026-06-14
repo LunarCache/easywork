@@ -16,7 +16,6 @@ const LAYERS: { id: MemoryLayer | "all"; label: string }[] = [
   { id: "user-profile", label: "用户画像" },
   { id: "agent-memory", label: "助手记忆" },
   { id: "skills", label: "技能" },
-  { id: "session-summary", label: "会话摘要" },
 ];
 
 export function Memory() {

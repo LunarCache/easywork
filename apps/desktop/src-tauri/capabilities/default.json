@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "EasyWork 桌面默认权限",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }

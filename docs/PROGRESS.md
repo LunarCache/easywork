@@ -167,6 +167,64 @@
 - 结果：**98 测试全绿**，typecheck 19/19，lint 0 error。
 - **仍未做**：python/terminal 代码执行沙箱（Unsloth 有；安全敏感、默认关，留作专门设计）；IM 连接器 Discord/WeCom/飞书（**非 Unsloth 功能**，属 EasyWork 自身路线，需实盘凭证联调）。
 
+### 2026-06-14 — 记忆 LLM 事实抽取
+- **`observe` 升级**：在启发式会话摘要之外，新增可选 LLM 事实抽取。`@ew/memory` 加 `FactExtractor`/`ExtractedFact` 类型与 `LocalMemoryOptions.extract`（注入式，保持本包仅依赖 `@ew/shared`）。
+- **`@ew/core` `buildFactExtractor`**：复用当轮对话模型（`MemoryProvider.observe` 增可选 `model`，agent loop 透传 `input.model`），经 `responseFormat: json_object` 把对话抽成持久事实 → user-profile/agent-memory/skills。含括号平衡 JSON 截取（容忍围栏/前后缀）、分层校验、模型未路由/解析失败安全降级为仅摘要。
+- **去重防膨胀**：候选事实与同层已有事实双向词法重叠 ≥0.85 跳过 + 同批内去重；抽取器拿到既有事实供模型自行去重。
+- 结果：**109 测试全绿**（新增 memory observe 抽取/降级 2 例 + core fact-extractor 5 例），typecheck 19/19。
+
+### 2026-06-14（续）— 借鉴 Hermes Agent（会话/记忆四项）
+对照 NousResearch Hermes Agent（SessionDB + FTS5 完整历史、MEMORY.md/USER.md 有界自治记忆、冻结快照）补齐四项：
+- **tool 往返逐条落库**：抽出 `ToolTurnRecorder`（`@ew/core` agent/）从 AgentEvent 流重建带工具的对话轮（assistant 含 toolCalls + 各 tool 结果），`/agent/run` 用它把工具往返也写入 `ConversationRepo`（此前只存 user+assistant 终稿）。对齐 Hermes“完整历史含 tool_calls/results”。
+- **FTS5 会话全文搜索**：`messages` 表加 `messages_fts`（trigram 分词，中英文子串匹配）+ `searchMessages`（≥3 字符走 FTS5 bm25+snippet，更短如中文 2 字词走 LIKE 回退；删库清索引）。新增 `session_search` 工具（search / browse-thread / list-threads 三态，直接查 DB 不经 LLM）。`ConversationRepo` 接口加 `searchMessages` + `MessageSearchHit`。
+- **有界 + 模型自治记忆工具**：`manage_memory`（add/replace[子串定位]/remove），分层字符上限（user-profile 1375 / agent-memory・skills 2200，参考 Hermes USER.md/MEMORY.md），近限报错逼模型合并而非静默膨胀。与被动 LLM 抽取互补。
+- **冻结快照注入**：`buildMemorySnapshot` 把全局记忆（user-profile/agent-memory/skills）渲染成会话期固定的系统块置顶注入（护 prefix cache）；动态 recall 经 `recallOptions.layers` 收窄到 session-summary，避免与快照重复注入全局记忆。manage_memory 改动本会话不变、下会话生效（与 Hermes 一致）。
+- 接线：`/agent/run` 常驻 `manage_memory` + `session_search` 工具，置顶注入快照，recall 仅取 session-summary。
+- 结果：**119 测试全绿**（+10：FTS 搜索、session_search、manage_memory 有界、ToolTurnRecorder 重建、冻结快照），typecheck 19/19；改动文件 eslint 0 error。
+
+### 2026-06-14（续）— 移除 session-summary + UI 渲染适配
+- **移除 session-summary 记忆层**：`MemoryLayer` 枚举删 `session-summary`（仅剩 user-profile/agent-memory/skills 三个全局层）。会话历史已由 `ConversationRepo` 完整存档 + FTS5 全文检索（`session_search`）承载，截断摘要冗余。`LocalMemoryProvider`：`observe` 去掉摘要写入（仅保留 LLM 事实抽取，无抽取器时 no-op）；recall 默认分支收为纯全局层；`regenerateMarkdown`/`syncFromMarkdown`/`startWatching` 去掉 sessions 目录/分支；删 `truncate`/`sanitize` 死代码。`/memory` POST 校验枚举同步收窄。
+- **关闭动态 recall**：agent loop 加 `recallOptions.enabled`（默认开，保留测试与通用调用语义）；`/agent/run` 设 `enabled:false`——全局记忆已由冻结快照置顶注入、历史由 session_search 检索，避免重复注入。
+- **UI 渲染适配**：`Chat.tsx` 历史回放新增 `storedToUiMsgs`——把存档扁平消息（user / assistant[含 toolCalls] / tool[含 toolResults]）折叠回 UiMsg 气泡，重建工具卡（参数/结果/来源/引用/HTML 工件，FIFO 匹配结果到调用）。抽出 `toolDisplayPatch` 供流式与回放共用；用户消息图片从 parts 复原。`Memory.tsx` 删「会话摘要」标签页。
+- 结果：**119 测试全绿**（更新 observe 测试为 no-op/吞错语义、buildMemorySnapshot 测试去 session-summary），typecheck 19/19，UI build 通过，改动文件 eslint 0 error。
+
+### 2026-06-14（续）— 工作区模式（Codex/cowork 式编码 agent）
+新增「工作区」模式：区别于聊天，在本地项目目录里读写文件 + 执行命令。计划见 `~/.claude/plans/codex-app-claude-cowork-federated-dawn.md`。
+- **路径沙箱**（`@ew/tools` `path-sandbox.ts`）：`resolveWorkspacePath` 仿 `ssrf.ts` 拒绝越界——`..`/绝对路径逃逸 + 符号链接逃逸（对已存在前缀 realpath 再校验）。
+- **fs 工具族**（`@ew/tools` `fs-tools.ts`）：`fs_list/fs_read/fs_grep`（只读）+ `fs_write/fs_edit`（写，带 LCS unified diff display）；二进制嗅探、大小/匹配截断、唯一匹配歧义保护；纯函数 `listDir/readFileSafe` 供端点复用。
+- **命令执行**（`@ew/tools` `exec-tool.ts`）：`run_command` —— `spawn(shell:true, cwd=工作区根)`，流式 stdout/stderr 经 `tool-progress` 事件，超时 SIGKILL、abort、输出截断。loop 加 `onToolProgress`→`ctx.emit` 旁路（不改 generator）。
+- **可选审批策略**（`@ew/core` `workspace-approval.ts`）：`workspaceTools(mode)` 把 read-only/approve-each/auto-edits/full-auto 映射到各工具 `requiresApproval`；read-only 靠不注入写/exec 工具。
+- **持久化 + 端点**：复用 `projects` 表（迁移加 `workspace_dir/approval_mode/updated_at` + project CRUD）；`/projects` CRUD、只读 `/workspace/:id/fs/list|read`（经沙箱）；`/agent/run` 加 `projectId` → 解析工作区根覆盖 `workspaceDir` + 按策略注入 fs/exec 工具 + 注入 `instructions`/`AGENTS.md`/`CLAUDE.md` 系统提示 + thread 关联 project。
+- **SDK**：`listProjects/createProject/updateProject/deleteProject` + `wsList/wsRead` + `runAgent` 加 `projectId`；`threadMessages` 类型补 toolCalls/toolResults。
+- **前端**：抽 `lib/agent-stream.ts`（共享数据模型 + 纯函数 + `applyAgentEvent` 归约器，Chat 改复用，含 `tool-progress`）；新页 `Workspace.tsx`（文件树懒加载 + 只读文件查看器 + DiffCard 行级着色 + ExecCard 流式终端 + 审批策略下拉 + 复用审批弹窗）；App 加「工作区」tab + 项目侧栏 + 新建（`lib/desktop.ts` 桌面 Tauri 文件夹选择 / 浏览器路径输入回退）；图标/CSS。
+- **Tauri 壳**：`select_workspace_dir` 命令 + `tauri-plugin-dialog` + capabilities（无 Rust 工具链，未编译验证）。
+- 结果：**146 测试全绿**（+27：path-sandbox 5 / fs-tools 8 / exec-tool 7 / workspace-approval 4 / conversation project CRUD 1 / 端点+端到端 fs_write 写盘 2），typecheck 19/19，UI build 通过，改动文件 eslint 0 error。端到端验证：带 project 的 `/agent/run` 经 fs_write 工具真实写盘 + diff 透传。
+- **遗留（v2）**：工作区多会话/历史回放（现一工作区一固定 thread）；内嵌可编辑编辑器；文件 watch 实时刷新；diff「接受/拒绝单改动」；大仓库虚拟滚动 + git 状态；交互式终端输入。
+
+### 2026-06-14（续）— 工作区 git 集成 + Codex 风格 UI 重设计
+参照 Codex 桌面应用截图把工作区改为 git 感知的编码界面：中对话 + 右侧带行号 diff 审查面板。
+- **后端 git 服务**（`@ew/core` `git/git.ts` `GitService`）：`status`（porcelain -z 解析 + numstat 计数 + untracked 行数近似 + 分支）/ `diff`（tracked / staged / untracked --no-index）/ `stage`·`unstage`·`stageAll`·`unstageAll` / `commit` / `revert`（tracked restore + untracked 删除）/ `revertAll` / `branches` / `switchBranch`。`execFile git`，cwd=工作区根，非 repo 优雅降级，全不抛。
+- **端点**（`app.ts`）：`/workspace/:id/git/{status,diff,branches}`（GET）+ `{stage,unstage,revert,commit,switch}`（POST），经 `projectRoot` 解析。**SDK** 加 `gitStatus/gitDiff/gitBranches/gitStage/gitUnstage/gitRevert/gitCommit/gitSwitch` + `GitFile`/`GitStatus` 类型。
+- **前端重设计**（`Workspace.tsx` 重写）：两栏=中对话 + 右 git 审查面板。顶栏：项目名/目录 + 分支 chip + **+增/-删聚合统计** + 模型选择。对话：用户右对齐 pill 气泡、`run_command`→终端卡（流式）、`fs_write/edit`→文件改动 chip、思考折叠；输入栏内置审批策略下拉。**审查面板**：未暂存/已暂存分组、每文件 `path +N -M` 行 + 悬停暂存/取消/还原、展开显示**新旧行号 + 绿/红语法 diff**（`parseUnifiedDiff` 按 @@ hunk 重建行号）、全部暂存/还原、提交说明框 + 提交。每轮 agent 结束自动刷新 git 状态。
+- 接线：App 渲染 `<Workspace>`（项目侧栏不变）；图标加 GitBranch/Undo2/GitCommit。
+- 结果：**154 测试全绿**（+8：GitService 7 单测对真实 git + git 端点 HTTP 流程 1），typecheck 19/19，UI build 通过，改动文件 eslint 0 error，**Rust `cargo check` 通过**。dev:desktop 实机拉起验证。
+- **遗留（v2）**：暂存区内编辑、commit amend、diff 内联折叠未改动行（现全量展示）、冲突/合并、push/pull、提交历史。
+
+### 2026-06-14（续）— code-review 修复（工作区/git）
+高 effort 多角度评审后修复确认的 bug：
+- **#1 安全（严重）**：git diff/revert/stage/unstage 端点之前把用户 path 原样传给 git → 可读/删工作区外文件（`git diff --no-index /dev/null /etc/passwd`、`revert ['../../x']`）。`GitService` 所有路径经 `resolveWorkspacePath` 校验（越界抛错）；diff/revert 用根内绝对路径。
+- **#7**：git branches/stage/unstage/revert/commit/switch 端点补 try/catch → 未知/无目录项目返回 400 而非 500。
+- **#2**：run_command 流式输出之前 callId 用 `exec-时间戳`，与工具卡 id 不匹配 → 终端无输出。`ToolExecContext` 加 `callId`，loop 执行前设 `ctx.callId=tc.id`，exec 用它发 tool-progress。
+- **#4**：exec 改 `detached` + 超时/中断 `process.kill(-pid)` 杀整棵进程树（原来只杀 shell，孙进程泄漏）；显式 abort 监听。
+- **#5**：重命名文件计数为 0 —— numstat 的 `old => new`/花括号形式归一到新路径，与 status 对齐。
+- **#6**：fs_list/fs_grep 在符号链接根下产出越界相对路径 —— 用 realpath 根作 `path.relative` 基准。
+- **#8**：fs_read 行范围之前绕过 MAX_READ_BYTES —— 字节上限对所有路径生效。
+- **#3**：聊天/工作区切换会话时在途流串到新会话 —— App 给 Chat/Workspace 加 `key`（切换即重挂载）+ 卸载时 `AbortController.abort()` + runAgent 传 signal + abort 时不写错误。
+- **#9**：FileRow 缓存 diff 不刷新 —— key 含 `adds-dels`，文件改动后重挂载重取 diff。
+- **#10**：refreshGit 每个 tool-end 都触发（N+1 次、每次多个 git 子进程）—— 仅 fs_write/fs_edit/run_command 后触发 + 轮末一次。
+- **契约/死代码**：im-connectors `FakeRepo` 补齐 project CRUD + searchMessages（之前 `implements ConversationRepo` 已是潜在 tsc 错，被 esbuild 掩盖）；移除从未渲染的 fs-tools LCS `unifiedDiff`（UI 用 git diff）。
+- 结果：**157 测试全绿**（新增 git 重命名计数 + 路径越界 diff/revert + 端点 400），typecheck 19/19，UI build 通过，改动文件 eslint 0 error，Rust 编译通过。
+
 ## 待决 / 风险
 
 - 原生 addon ABI 与 asar `asarUnpack`（#1 打包风险）→ 集中原生依赖 + `@electron/rebuild` + 三平台冒烟测试。

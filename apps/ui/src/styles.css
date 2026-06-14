@@ -101,6 +101,23 @@ button:disabled { opacity: 0.55; cursor: default; }
 }
 .newchat:hover { border-color: var(--accent-2); box-shadow: var(--shadow-2); }
 
+/* 顶部两个入口：对话 / 工作区 */
+.side-actions { display: flex; gap: 8px; }
+.newbtn {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 8px; border-radius: 10px; font-size: 13px; font-weight: 600;
+  background: var(--surface); color: var(--accent); border: 1px solid var(--border-strong); box-shadow: var(--shadow-1);
+}
+.newbtn:hover { border-color: var(--accent-2); box-shadow: var(--shadow-2); }
+.newbtn svg { flex: none; }
+.side-scroll { flex: 1; min-height: 0; overflow-y: auto; margin-top: 14px; display: flex; flex-direction: column; gap: 16px; }
+.side-scroll .side-threads { flex: none; margin-top: 0; }
+.side-scroll .threads-list { flex: none; overflow: visible; }
+.sidebar.collapsed .side-actions { flex-direction: column; }
+.sidebar.collapsed .newbtn { padding: 9px 0; }
+.sidebar.collapsed .newbtn span { display: none; }
+.sidebar.collapsed .side-scroll { display: none; }
+
 .side-threads { display: flex; flex-direction: column; min-height: 0; flex: 1; margin-top: 16px; }
 .side-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; padding: 0 8px 6px; }
 .threads-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
@@ -542,3 +559,80 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
 .mem-act:hover { background: var(--surface-2); color: var(--accent); }
 .mem-act.del:hover { background: #fdecee; color: var(--err); }
 .mem-act.save { opacity: 1; color: var(--ok); }
+
+/* ===== 工作区（Codex 风格：中对话 + 右 git 审查抽屉） ===== */
+.workspace { position: relative; display: flex; height: 100%; min-height: 0; overflow: hidden; }
+.ws-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ws-review-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 4px 10px; border-radius: 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); }
+.ws-review-toggle.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-2); }
+.ws-review-toggle:hover { background: var(--surface-2); }
+.ws-bar { gap: 10px; }
+.ws-title { font-weight: 650; font-size: 14px; flex: none; }
+.ws-sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
+.ws-branch { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; }
+.ws-stat { font-family: ui-monospace, monospace; font-size: 12px; }
+.ws-stat .add, .rev-stat .add, .dv-row.add .dv-code { color: #1a7f37; }
+.ws-stat .del, .rev-stat .del { color: var(--err); }
+
+/* 对话气泡（用户右对齐 pill） */
+.workspace .msg.user { align-items: flex-end; }
+.workspace .msg.user .bubble { background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; padding: 8px 14px; max-width: 80%; font-size: 14px; white-space: pre-wrap; }
+.fs-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding: 4px 10px; margin: 4px 0; border: 1px solid var(--border); border-radius: 999px; }
+.fs-chip code { font-family: ui-monospace, monospace; color: var(--text); }
+.fs-chip.error { color: var(--err); border-color: var(--err); }
+.perm-select { font-size: 12px; padding: 4px 8px; border-radius: 8px; }
+
+/* 右侧审查抽屉（默认关闭，自右滑入） */
+.ws-review { position: absolute; top: 0; right: 0; height: 100%; width: min(46%, 560px); border-left: 1px solid var(--border-strong); background: var(--surface-2); display: flex; flex-direction: column; min-height: 0; transform: translateX(100%); transition: transform var(--ease) 0.22s; box-shadow: -10px 0 28px rgba(0,0,0,0.08); z-index: 20; }
+.ws-review.open { transform: none; }
+.rev-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 650; }
+.rev-count { font-size: 11px; font-weight: 600; color: var(--muted); background: var(--surface-3); border-radius: 999px; padding: 1px 7px; }
+.rev-empty { padding: 18px 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.rev-scroll { flex: 1; overflow: auto; }
+.rev-group { border-bottom: 1px solid var(--border); }
+.rev-group-head { display: flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--muted); position: sticky; top: 0; background: var(--surface-2); }
+.rev-group-title { display: inline-flex; align-items: center; gap: 6px; }
+.rev-act { font-size: 11px; padding: 3px 8px; border-radius: 7px; background: var(--surface); color: var(--accent); border: 1px solid var(--border-strong); display: inline-flex; align-items: center; gap: 3px; }
+.rev-act:hover { background: var(--accent-soft); }
+.rev-act.danger { color: var(--err); }
+.rev-act.danger:hover { background: #fdecee; }
+
+.rev-file { border-top: 1px solid var(--border); }
+.rev-file-head { display: flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+.rev-file-head:hover { background: var(--surface-3); }
+.rev-file-head .chev { color: var(--muted); transition: transform var(--ease) 0.15s; flex: none; }
+.rev-file-head .chev.open { transform: rotate(90deg); }
+.rev-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; font-size: 12px; }
+.rev-stat { font-family: ui-monospace, monospace; font-size: 11px; flex: none; }
+.rev-file-acts { display: none; gap: 2px; flex: none; }
+.rev-file-head:hover .rev-file-acts { display: inline-flex; }
+.rev-file-acts button { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; background: var(--surface); border: 1px solid var(--border-strong); color: var(--accent); font-size: 14px; }
+.rev-file-acts button.danger { color: var(--err); }
+
+/* 行号 diff 视图 */
+.diffview { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11.5px; line-height: 1.55; overflow-x: auto; background: var(--surface); border-top: 1px solid var(--border); }
+.dv-row { display: flex; white-space: pre; }
+.dv-gutter { flex: none; width: 38px; text-align: right; padding: 0 6px; color: var(--muted); user-select: none; opacity: 0.7; }
+.dv-sign { flex: none; width: 14px; text-align: center; color: var(--muted); }
+.dv-code { flex: 1; padding-right: 12px; white-space: pre; }
+.dv-row.add { background: #e6ffed; }
+.dv-row.del { background: #ffebe9; }
+.dv-row.del .dv-code { color: var(--err); }
+.dv-row.hunk { background: var(--surface-2); color: var(--muted); }
+.dv-row.hunk .dv-code { color: var(--accent); }
+.diff-empty { padding: 8px 12px; color: var(--muted); font-size: 12px; }
+
+.rev-commit { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.rev-commit textarea { font-family: inherit; font-size: 13px; resize: vertical; min-height: 40px; }
+.rev-commit button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.fv-btn { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: transparent; color: var(--muted); }
+.fv-btn:hover { background: var(--surface-3); color: var(--accent); }
+
+/* exec 卡 */
+.execcard { margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.execcard > summary { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; list-style: none; font-size: 13px; }
+.execcard > summary::-webkit-details-marker { display: none; }
+.execcard.error > summary { color: var(--err); }
+.execcard .tname { font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execcard .tlabel { margin-left: auto; color: var(--muted); font-size: 12px; }
+pre.exec-out { margin: 0; padding: 10px; background: #0d1117; color: #d6deeb; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.5; overflow: auto; max-height: 320px; white-space: pre-wrap; word-break: break-all; }

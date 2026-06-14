@@ -51,6 +51,8 @@ export interface ToolExecContext {
   workspaceDir: string;
   signal: AbortSignal;
   approval: ApprovalGate;
+  /** 当前工具调用 id（loop 每次执行前设置；流式工具用它标记 tool-progress，便于 UI 对齐工具卡）。 */
+  callId?: string;
   /** 向 UI/渠道发送中间进度（可选）。 */
   emit?: (event: { type: string; [k: string]: unknown }) => void;
 }
