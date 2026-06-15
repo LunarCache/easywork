@@ -8,13 +8,17 @@ import {
   createAgentSession,
   AuthStorage,
   ModelRegistry,
+  DefaultResourceLoader,
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
-import type { AgentEvent } from "@ew/shared";
+import type { AgentEvent, MemoryProvider, ConversationRepo } from "@ew/shared";
+import type { McpClientManager } from "@ew/mcp";
 import type { LocalServerManager } from "../engine/local-server-manager.js";
 import type { ProviderManager } from "../providers/manager.js";
+import type { KnowledgeBaseStore } from "../rag/store.js";
+import { buildEwCustomTools, memoryExtensionFactory } from "./ew-extensions.js";
 
 /** 宿主依赖（从 daemon 注入）。 */
 export interface SessionHostDeps {
@@ -22,6 +26,14 @@ export interface SessionHostDeps {
   providers: ProviderManager;
   /** pi 全局配置目录（auth/models/session 落盘）。默认 ~/.easywork/pi-agent。 */
   agentDir?: string;
+  /** R3：记忆（context 召回注入 + agent_end 抽取，并暴露 manage_memory 工具）。 */
+  memory?: MemoryProvider;
+  /** R3：会话历史 FTS 检索工具 session_search。 */
+  repo?: ConversationRepo;
+  /** R3：知识库检索工具 search_knowledge_base。 */
+  kb?: KnowledgeBaseStore;
+  /** R3：MCP 工具（桥成 customTools）。 */
+  mcp?: McpClientManager;
 }
 
 /** 单轮运行输入。 */
@@ -149,6 +161,24 @@ export class SessionHost {
       this.sessions.delete(threadId);
     }
     const model = this.resolveModel(modelId);
+    // R3：记忆扩展（context 召回 + agent_end 抽取）+ EasyWork 专有 customTools（记忆/检索/KB/MCP）。
+    const factories = this.deps.memory
+      ? [memoryExtensionFactory({ threadId, modelId, memory: this.deps.memory })]
+      : [];
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir: this.agentDir,
+      extensionFactories: factories,
+    });
+    await resourceLoader.reload();
+    const customTools = await buildEwCustomTools({
+      sessionId: threadId,
+      cwd,
+      ...(this.deps.memory ? { memory: this.deps.memory } : {}),
+      ...(this.deps.repo ? { repo: this.deps.repo } : {}),
+      ...(this.deps.kb ? { kb: this.deps.kb } : {}),
+      ...(this.deps.mcp ? { mcp: this.deps.mcp } : {}),
+    });
     const { session } = await createAgentSession({
       model,
       thinkingLevel: "off",
@@ -156,7 +186,9 @@ export class SessionHost {
       modelRegistry: this.modelRegistry,
       cwd,
       agentDir: this.agentDir,
-      // R1：用 pi 默认编码工具（read/bash/edit/write）。记忆/MCP/知识库在 R3 以 Extension/customTools 接入。
+      resourceLoader,
+      ...(customTools.length ? { customTools } : {}),
+      // pi 默认编码工具（read/bash/edit/write）+ 上述 EasyWork customTools。
     });
     this.sessions.set(threadId, { session, modelId, cwd, dispose: () => session.dispose() });
     return session;

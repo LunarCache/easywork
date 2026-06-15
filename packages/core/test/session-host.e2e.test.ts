@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
-import type { AgentEvent } from "@ew/shared";
+import type { AgentEvent, MemoryProvider, MemoryItem } from "@ew/shared";
 import { EngineRegistry } from "../src/engine/registry.js";
 import { LocalServerManager } from "../src/engine/local-server-manager.js";
 import { ProviderManager } from "../src/providers/manager.js";
@@ -24,7 +24,25 @@ describe.skipIf(!RUN || !fs.existsSync(GGUF))("SessionHost e2e", () => {
     const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-r1-agent-")));
     fs.writeFileSync(path.join(cwd, "README.md"), "# Demo\nThis is a teapot project.\n");
 
-    const host = new SessionHost({ local, providers, agentDir });
+    // 记录型记忆：验证 R3 扩展钩子（context 召回 + agent_end 抽取）经真实 pi 运行时触发。
+    let recallCalls = 0;
+    let observeCalls = 0;
+    const memory: MemoryProvider = {
+      id: "rec",
+      recall: async () => {
+        recallCalls++;
+        return [] as MemoryItem[];
+      },
+      observe: async () => {
+        observeCalls++;
+      },
+      write: async () => ({}) as MemoryItem,
+      edit: async () => ({}) as MemoryItem,
+      list: async () => [],
+      delete: async () => {},
+    };
+
+    const host = new SessionHost({ local, providers, agentDir, memory });
     const events: AgentEvent[] = [];
     try {
       for await (const ev of host.run({
@@ -47,5 +65,9 @@ describe.skipIf(!RUN || !fs.existsSync(GGUF))("SessionHost e2e", () => {
     expect(types).toContain("final");
     const finals = events.filter((e) => e.type === "final");
     expect(finals.length).toBe(1);
+    // R3：context 钩子（召回）与 agent_end 钩子（抽取）均经真实 pi 运行时触发。
+    console.log("R3 hooks:", JSON.stringify({ recallCalls, observeCalls }));
+    expect(recallCalls).toBeGreaterThan(0);
+    expect(observeCalls).toBeGreaterThan(0);
   }, 180_000);
 });

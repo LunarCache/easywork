@@ -119,9 +119,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   });
   const providers = new ProviderManager(registry, opts.fetch ? { fetch: opts.fetch } : {});
 
-  // R1 宿主：pi-coding-agent 内核（EW_KERNEL=pi 时托管 /agent/run；默认走 legacy loop）。
-  const sessionHost = new SessionHost({ local, providers, agentDir: fsPath.join(defaultDataDir(), "pi-agent") });
-
   // Agent 运行时：工具注册表（内置工具 + Skills/MCP 动态 provider）。
   const workspaceDir = opts.workspaceDir ?? defaultDataDir();
   const skillsDirs = opts.skillsDirs ?? [fsPath.join(defaultDataDir(), "skills")];
@@ -166,6 +163,18 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   // search_knowledge_base 工具按请求所选集合注入（见 /agent/run），不再全局常驻。
 
   const repo = new SqliteConversationRepo(opts.dbPath ?? defaultDbPath());
+
+  // 宿主：pi-coding-agent 内核（EW_KERNEL=pi 时托管 /agent/run；默认走 legacy loop）。
+  // R3：注入记忆/会话检索/知识库/MCP，使托管会话具备 EasyWork 专有能力。
+  const sessionHost = new SessionHost({
+    local,
+    providers,
+    agentDir: fsPath.join(defaultDataDir(), "pi-agent"),
+    memory,
+    repo,
+    kb,
+    mcp,
+  });
 
   // ---- 持久化 provider / MCP 配置（重启后恢复）----
   const PROVIDERS_KEY = "providers";
