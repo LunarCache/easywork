@@ -32,8 +32,6 @@ import { ProviderManager, type CloudProviderConfig } from "../providers/manager.
 import { registerOpenAICompat } from "../openai-compat/router.js";
 import { ToolRegistry } from "../agent/tool-registry.js";
 import { runAgent } from "../agent/loop.js";
-import { runAgentPi } from "../agent/pi/run-agent-pi.js";
-import { resolvePiModel } from "../ai/pi-models.js";
 import { ToolTurnRecorder } from "../agent/turn-recorder.js";
 import { ApprovalRegistry, SseApprovalGate } from "../agent/approval-sse.js";
 import { SqliteConversationRepo } from "../store/conversation.js";
@@ -538,28 +536,8 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       ...(parsed.data.sampling ? { sampling: parsed.data.sampling } : {}),
       signal: ac.signal,
     };
-    // 内核选择：EW_AGENT_KERNEL=pi 走 pi-agent-core；否则现有 loop（默认）。两者都产出我们的 AgentEvent。
-    let agentEvents: AsyncIterable<AgentEvent>;
-    if (process.env.EW_AGENT_KERNEL === "pi") {
-      const toolCtx = { sessionId: threadId, workspaceDir: runWorkspaceDir, signal: ac.signal, approval: runApproval };
-      const exclude = new Set(parsed.data.excludeTools ?? []);
-      const toolList = [...(await tools.list(toolCtx)), ...extraTools].filter(
-        (t) => !exclude.has(t.definition.name),
-      );
-      agentEvents = runAgentPi(runInput, {
-        resolveModel: (m) =>
-          resolvePiModel(m, {
-            localBaseUrl: (id) => local.baseUrlFor(id),
-            cloudProvider: (id) => providers.findByModel(id),
-          }),
-        tools: toolList,
-        approval: runApproval,
-        workspaceDir: runWorkspaceDir,
-        ...(memory ? { memory } : {}),
-        mutatingTools: new Set(["fs_write", "fs_edit", "run_command", "manage_memory"]),
-      });
-    } else {
-      agentEvents = runAgent(runInput, {
+    try {
+      for await (const ev of runAgent(runInput, {
         resolveEngine: (m) => registry.resolve(m),
         tools,
         approval: runApproval,
@@ -570,11 +548,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         // 工具中间进度（run_command 流式输出）直接写 SSE。
         onToolProgress: (ev) => send(ev),
         ...(extraTools.length ? { extraTools } : {}),
-      });
-    }
-
-    try {
-      for await (const ev of agentEvents) {
+      })) {
         persistRecorded(recorder.push(ev));
         if (ev.type === "final") finalContent = messageText(ev.message.content);
         send(ev);
