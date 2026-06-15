@@ -66,6 +66,8 @@ export interface EwAgentRunInput {
   signal?: AbortSignal;
   /** 采样参数（透传给 provider 请求；本地额外注入 llama.cpp top_k/min_p/repeat_penalty）。 */
   sampling?: SamplingParams;
+  /** 思考开关：true→/think，false→/no_think（Qwen3 约定，注入给模型，不污染持久化消息）。 */
+  think?: boolean;
 }
 
 interface HostedSession {
@@ -359,7 +361,10 @@ export class SessionHost {
       }
     });
 
-    const promptDone = session.prompt(input.text).catch((err: unknown) => {
+    // 思考开关（Qwen3 约定）：注入 /think 或 /no_think 给模型；不改持久化的原始用户消息。
+    const directive = input.think === true ? " /think" : input.think === false ? " /no_think" : "";
+    const promptText = directive ? `${input.text}${directive}` : input.text;
+    const promptDone = session.prompt(promptText).catch((err: unknown) => {
       failed = err instanceof Error ? err.message : String(err);
       done = true;
       wake();
