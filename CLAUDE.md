@@ -57,7 +57,7 @@ resources/        图标、默认 skills、模型 catalog
 ## 技术栈
 
 - **Agent 内核**：`@earendil-works/pi`（pi-coding-agent / pi-agent-core / pi-ai）。`SessionHost`（`packages/core/src/agent/session-host.ts`）封装 `createAgentSession` 无头嵌入，按 threadId 复用一个 `AgentSession`（保留上下文/自动 compaction），把 pi `AgentSessionEvent` 映射为我们的 SSE `AgentEvent`。EasyWork 专有能力经 `ew-extensions.ts` 接入：记忆（pi `context` 钩子注入召回 + `agent_end` 抽取）、`toPiTool`（我们的 `Tool` → pi customTool）、权限（pi `tool_call` 钩子 ↔ `ApprovalGate` 4 档 + `escapesCwd` 工作区路径限定）。pi 模型走 `ModelRegistry`/`AuthStorage`（本地 = 指向 llama-server 端口的 openai-completions Model；云端含 OAuth）。
-- **本地推理**：llama.cpp `llama-server` 子进程（OpenAI + 原生 Anthropic `/v1/messages`，带 `--jinja`）。文本/视觉(`--mmproj`)/embedding(`--embedding`) 全走它。`LlamaServerEngine` 管理进程并委托内部 OpenAICompatibleEngine；`LocalServerManager` 每模型一个 server 进程、含 LRU、可配置绑定 host（127.0.0.1 / 0.0.0.0）与 `--api-key`。`EngineRegistry` 现服务 `/v1` 非流式 + fact-extractor + embedding（非 agent 内核）。**已移除 node-llama-cpp**。需机器有 `llama-server`（Mac `brew install llama.cpp`；env `EW_LLAMA_SERVER` 可指定路径；打包时随附二进制）
+- **本地推理**：llama.cpp `llama-server` 子进程（OpenAI + 原生 Anthropic `/v1/messages`，带 `--jinja`）。文本/视觉(`--mmproj`)/embedding(`--embedding`) 全走它。`LlamaServerEngine` 管理进程并委托内部 OpenAICompatibleEngine；`LocalServerManager` 每模型一个 server 进程、含 LRU、可配置绑定 host（127.0.0.1 / 0.0.0.0）与 `--api-key`。`EngineRegistry` 现服务 `/v1` 回退（云端经 pi 出错时）+ fact-extractor + embedding（非 agent 内核）。**已移除 node-llama-cpp**。需机器有 `llama-server`（Mac `brew install llama.cpp`；env `EW_LLAMA_SERVER` 可指定路径；打包时随附二进制）
 - **HTTP**：Fastify（schema-first、原生 SSE）
 - **契约/校验**：zod + zod-to-json-schema（一份 schema → TS 类型 + 函数调用 JSON Schema）
 - **本地 DB**：`node:sqlite`（Node 内置 DatabaseSync，**零原生编译**，Node 26 可用；规避 better-sqlite3 在新 ABI 上编译失败的 #1 打包风险）

@@ -36,7 +36,7 @@
 - **`/chat/stream`**：已删除（无消费者，应用内走 /agent/run，裸对话走 /v1）。
 - **`/v1` 网关重构（两步）**：
   - Step1 **本地透传**：`/v1/chat/completions`·`/v1/messages` 命中已加载本地模型时反向代理到其 llama-server（原生支持 OpenAI + Anthropic + tool_use，带 --jinja），不经我们的翻译层。
-  - Step2 **云端经 pi-ai**：云端**流式**请求 → `SessionHost.streamCloud`（复用 R2 的 ModelRegistry/AuthStorage，含 OAuth/Anthropic 原生）→ `pi-adapt` 把 pi 事件映射回我们的 `ChatStreamEvent`，**复用既有** `streamEventToOpenAIChunks`/`AnthropicStreamTranslator`。云端**非流式**仍走引擎（OpenAICompatibleEngine）。
+  - Step2 **云端经 pi-ai**：云端请求 → `SessionHost.streamCloud`（流式 `streamSimple`）/ `completeCloud`（非流式 `completeSimple`），复用 R2 的 ModelRegistry/AuthStorage（含 OAuth/Anthropic 原生）→ `pi-adapt` 把 pi 事件/消息映射回 `ChatStreamEvent`/`ChatResponse`，**复用既有** `streamEventToOpenAIChunks`/`AnthropicStreamTranslator`/`chatResponseToOpenAI`/`chatResponseToAnthropic`。pi 出错回退引擎。
   - `EngineRegistry`/`LlamaServerEngine` 仍保留：撑本地进程管理、`/v1` 非流式回退、fact-extractor、embedding。
   - 更正：早前说"llama-server 不支持 Anthropic"有误——llama.cpp 已原生支持 `/v1/messages`（PR #17570），故本地透传可直接复用。
   - **本地端口暴露**：`LocalServerManager` 加可配置绑定 host（`setBindHost`/`getBindHost`/`endpoints`），默认 `127.0.0.1` 仅本机、可选 `0.0.0.0` 局域网；切换时重载已加载模型立即生效，持久化到 settings。内部 `baseUrlFor` 恒走 `127.0.0.1` 回环（即使绑 0.0.0.0）。`/models` + `GET/POST /settings/local-net` 暴露端点与 LAN IP；UI「设置 → 本地网络」可切换并展示各模型直连 URL（0.0.0.0 带未鉴权告警）。

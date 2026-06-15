@@ -11,8 +11,9 @@ import {
   AnthropicStreamTranslator,
   type AnthropicRequestBody,
 } from "./anthropic.js";
-import { chatRequestToPiContext, piEventToChatStreamEvents, newPiAdaptState } from "./pi-adapt.js";
-import type { Context as PiContext, AssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { chatRequestToPiContext, piEventToChatStreamEvents, newPiAdaptState, piAssistantToChatResponse } from "./pi-adapt.js";
+import type { ChatRequest } from "@ew/shared";
+import type { Context as PiContext, AssistantMessageEventStream, AssistantMessage } from "@earendil-works/pi-ai";
 
 let counter = 0;
 function genId(): string {
@@ -34,6 +35,25 @@ export interface OpenAICompatDeps {
     context: PiContext,
     opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number },
   ) => Promise<AssistantMessageEventStream | null>;
+  /** 云端非流式经 pi-ai；非云端模型返回 null（回退到引擎）。 */
+  completeCloud?: (
+    modelId: string,
+    context: PiContext,
+    opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number },
+  ) => Promise<AssistantMessage | null>;
+}
+
+/** 云端非流式 → pi-ai completeSimple；非云端返回 null（由调用方回退引擎）。 */
+async function tryCompleteCloud(deps: OpenAICompatDeps, chatReq: ChatRequest): Promise<AssistantMessage | null> {
+  if (!deps.completeCloud) return null;
+  try {
+    return await deps.completeCloud(chatReq.model, chatRequestToPiContext(chatReq), {
+      ...(chatReq.temperature != null ? { temperature: chatReq.temperature } : {}),
+      ...(chatReq.maxTokens != null ? { maxTokens: chatReq.maxTokens } : {}),
+    });
+  } catch {
+    return null; // 出错 → 回退引擎
+  }
 }
 
 /**
@@ -177,6 +197,12 @@ export function registerOpenAICompat(
       }
     }
 
+    // 云端非流式 → pi-ai completeSimple（与流式同源统一鉴权/OAuth）。非云端 → null → 回退引擎。
+    if (body.stream !== true) {
+      const msg = await tryCompleteCloud(deps, chatReq);
+      if (msg) return chatResponseToOpenAI(piAssistantToChatResponse(msg, chatReq.model), genId(), Math.floor(Date.now() / 1000));
+    }
+
     let engine;
     try {
       engine = registry.resolve(chatReq.model);
@@ -276,6 +302,15 @@ export function registerOpenAICompat(
           }
         }
         return;
+      }
+    }
+
+    // 云端非流式 → pi-ai completeSimple。非云端 → null → 回退引擎。
+    if (body.stream !== true) {
+      const msg = await tryCompleteCloud(deps, chatReq);
+      if (msg) {
+        const id = `msg_${Date.now().toString(36)}${(counter += 1).toString(36)}`;
+        return chatResponseToAnthropic(piAssistantToChatResponse(msg, chatReq.model), id, chatReq.model);
       }
     }
 

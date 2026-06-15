@@ -11,7 +11,7 @@ import type {
   AssistantMessage as PiAssistantMessage,
   AssistantMessageEvent,
 } from "@earendil-works/pi-ai";
-import type { ChatMessage, ChatRequest, ChatStreamEvent, ContentPart, FinishReason } from "@ew/shared";
+import type { ChatMessage, ChatRequest, ChatResponse, ChatStreamEvent, ContentPart, FinishReason } from "@ew/shared";
 import { messageText } from "@ew/shared";
 
 const ZERO_USAGE = {
@@ -102,6 +102,24 @@ export function newPiAdaptState(): PiAdaptState {
 
 function mapFinish(reason: "stop" | "length" | "toolUse"): FinishReason {
   return reason === "toolUse" ? "tool_calls" : reason;
+}
+
+/** pi stopReason → 我们的 FinishReason（非流式 completeSimple 用）。 */
+function mapStopReason(r: PiAssistantMessage["stopReason"]): FinishReason {
+  if (r === "toolUse") return "tool_calls";
+  if (r === "stop" || r === "length" || r === "error" || r === "aborted") return r;
+  return "stop";
+}
+
+/** pi AssistantMessage（非流式结果）→ 我们的 ChatResponse（供 chatResponseToOpenAI/Anthropic）。 */
+export function piAssistantToChatResponse(msg: PiAssistantMessage, model: string): ChatResponse {
+  const u = msg.usage;
+  return {
+    message: piAssistantToChatMessage(msg),
+    finishReason: mapStopReason(msg.stopReason),
+    model: msg.model || model,
+    ...(u ? { usage: { promptTokens: u.input, completionTokens: u.output, totalTokens: u.totalTokens } } : {}),
+  };
 }
 
 /** pi AssistantMessage → 我们的 ChatMessage（文本 + 工具调用，arguments 转回 JSON 串）。 */

@@ -12,8 +12,8 @@ import {
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import { streamSimple } from "@earendil-works/pi-ai";
-import type { Model, Api, Context as PiContext, AssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { streamSimple, completeSimple } from "@earendil-works/pi-ai";
+import type { Model, Api, Context as PiContext, AssistantMessageEventStream, AssistantMessage } from "@earendil-works/pi-ai";
 import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, Tool } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -193,13 +193,34 @@ export class SessionHost {
     if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
     const model = this.resolveModel(modelId);
     const auth = await this.modelRegistry.getApiKeyAndHeaders(model);
-    return streamSimple(model, context, {
+    return streamSimple(model, context, this.streamOpts(auth, opts));
+  }
+
+  /** 云端非流式（completeSimple）：与 streamCloud 同源，供 /v1 非流式统一走 pi。非云端返回 null。 */
+  async completeCloud(
+    modelId: string,
+    context: PiContext,
+    opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number } = {},
+  ): Promise<AssistantMessage | null> {
+    const cfg = this.deps.providers.findByModel(modelId);
+    if (!cfg) return null;
+    if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
+    const model = this.resolveModel(modelId);
+    const auth = await this.modelRegistry.getApiKeyAndHeaders(model);
+    return completeSimple(model, context, this.streamOpts(auth, opts));
+  }
+
+  private streamOpts(
+    auth: Awaited<ReturnType<ModelRegistry["getApiKeyAndHeaders"]>>,
+    opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number },
+  ): Record<string, unknown> {
+    return {
       ...(auth.ok && auth.apiKey ? { apiKey: auth.apiKey } : {}),
       ...(auth.ok && auth.headers ? { headers: auth.headers } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
       ...(opts.maxTokens != null ? { maxTokens: opts.maxTokens } : {}),
-    });
+    };
   }
 
   /** 取/建该 thread 的会话。modelId/cwd/workspace 变化则重建。 */

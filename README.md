@@ -144,7 +144,7 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 
 - OpenAI 兼容：`/v1/chat/completions`、`/v1/embeddings`、`/v1/models`
 - Anthropic 兼容：`/v1/messages`（流式 message_start → content_block_* → message_delta → message_stop）
-- 路由：**本地模型**透传到其 llama-server 原生端点（两种协议 + tool_use）；**云端流式**经 pi-ai（统一鉴权/OAuth），云端非流式走引擎。
+- 路由：**本地模型**透传到其 llama-server 原生端点（两种协议 + tool_use）；**云端**经 pi-ai（流式 `streamSimple` / 非流式 `completeSimple`，统一鉴权/OAuth），出错回退引擎。
 - `/v1/models` 含 `endpoints`（各本地模型对外 baseUrl/port，供外部直连 llama-server）。
 
 ---
@@ -166,7 +166,7 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 
 - IM 连接器：Telegram 已实现；Discord / 企业微信 / 飞书规划中。
 - 命令执行：工作区模式经 pi 的 `bash` 工具执行，由审批 4 档把守（非 `full-auto` 需确认）；无独立 OS 级沙箱。
-- 云端非流式仍走引擎（未并入 pi-ai）；持久化以 `ConversationRepo` 为真相源（未切 pi `SessionManager`）。
+- 持久化以 `ConversationRepo` 为真相源（未切 pi `SessionManager`）。
 - 个人微信无官方机器人 API → 仅做企业微信。
 
 进展详见 [`docs/PROGRESS.md`](docs/PROGRESS.md)，约定与架构详见 [`CLAUDE.md`](CLAUDE.md)。

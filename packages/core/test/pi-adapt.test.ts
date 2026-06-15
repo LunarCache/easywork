@@ -5,7 +5,9 @@ import {
   chatRequestToPiContext,
   piEventToChatStreamEvents,
   newPiAdaptState,
+  piAssistantToChatResponse,
 } from "../src/openai-compat/pi-adapt.js";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 describe("chatRequestToPiContext", () => {
   it("extracts system, maps user/assistant(+toolCalls)/tool, and tools", () => {
@@ -77,5 +79,31 @@ describe("piEventToChatStreamEvents", () => {
     expect(piEventToChatStreamEvents(dev({ type: "error", reason: "error", error: { errorMessage: "boom" } }), s)).toEqual([
       { type: "error", message: "boom" },
     ]);
+  });
+});
+
+describe("piAssistantToChatResponse", () => {
+  it("maps content/toolCalls/stopReason/usage (非流式)", () => {
+    const msg = {
+      role: "assistant",
+      content: [{ type: "text", text: "hi" }, { type: "toolCall", id: "a", name: "c", arguments: { y: 2 } }],
+      model: "prov/m",
+      stopReason: "toolUse",
+      usage: { input: 3, output: 4, cacheRead: 0, cacheWrite: 0, totalTokens: 7, cost: {} },
+    } as unknown as AssistantMessage;
+    const res = piAssistantToChatResponse(msg, "req-model");
+    expect(res.finishReason).toBe("tool_calls");
+    expect(res.model).toBe("prov/m");
+    expect(res.usage).toEqual({ promptTokens: 3, completionTokens: 4, totalTokens: 7 });
+    expect(res.message.content).toBe("hi");
+    expect(res.message.toolCalls?.[0]).toEqual({ id: "a", name: "c", arguments: '{"y":2}' });
+  });
+
+  it("falls back to requested model + maps stop", () => {
+    const msg = { role: "assistant", content: [{ type: "text", text: "ok" }], model: "", stopReason: "stop" } as unknown as AssistantMessage;
+    const res = piAssistantToChatResponse(msg, "req-model");
+    expect(res.model).toBe("req-model");
+    expect(res.finishReason).toBe("stop");
+    expect(res.usage).toBeUndefined();
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import Fastify from "fastify";
 import type { EngineRegistry } from "../src/engine/registry.js";
-import type { AssistantMessageEvent, AssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type { AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { registerOpenAICompat } from "../src/openai-compat/router.js";
 
 /** 假 pi 流：把若干 AssistantMessageEvent 包成 AsyncIterable（router 只 for-await 它）。 */
@@ -184,6 +184,53 @@ describe("/v1 云端经 pi-ai", () => {
     expect(res.body).toContain("event: error");
     expect(res.body).toContain("boom");
     expect(res.body).not.toContain("end_turn");
+    await app.close();
+  });
+
+  it("云端非流式：经 completeCloud → OpenAI 非流式 JSON", async () => {
+    const msg = {
+      role: "assistant",
+      content: [{ type: "text", text: "from pi" }],
+      model: "cloud-z",
+      stopReason: "stop",
+      usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3, cost: {} },
+    } as unknown as AssistantMessage;
+    const app = Fastify();
+    registerOpenAICompat(app, stubRegistry, {
+      localBaseUrl: () => undefined,
+      completeCloud: async (m) => (m === "cloud-z" ? msg : null),
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: { model: "cloud-z", messages: [{ role: "user", content: "hi" }] },
+    });
+    const j = res.json() as { object: string; choices: { message: { content: string } }[] };
+    expect(j.object).toBe("chat.completion");
+    expect(j.choices[0]?.message.content).toBe("from pi");
+    await app.close();
+  });
+
+  it("云端非流式：经 completeCloud → Anthropic 非流式 JSON", async () => {
+    const msg = {
+      role: "assistant",
+      content: [{ type: "text", text: "from pi" }],
+      model: "cloud-z",
+      stopReason: "stop",
+    } as unknown as AssistantMessage;
+    const app = Fastify();
+    registerOpenAICompat(app, stubRegistry, {
+      localBaseUrl: () => undefined,
+      completeCloud: async (m) => (m === "cloud-z" ? msg : null),
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      payload: { model: "cloud-z", messages: [{ role: "user", content: "hi" }] },
+    });
+    const j = res.json() as { type: string; content: { type: string; text: string }[] };
+    expect(j.type).toBe("message");
+    expect(j.content[0]?.text).toBe("from pi");
     await app.close();
   });
 

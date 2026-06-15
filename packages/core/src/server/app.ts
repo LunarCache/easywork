@@ -951,6 +951,7 @@ version: "0.1.0"
     localBaseUrl: (m) => local.baseUrlFor(m),
     localApiKey: () => local.getApiKey(),
     cloudStream: (modelId, context, opts) => sessionHost.streamCloud(modelId, context, opts),
+    completeCloud: (modelId, context, opts) => sessionHost.completeCloud(modelId, context, opts),
   });
 
   return {
