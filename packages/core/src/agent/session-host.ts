@@ -13,12 +13,21 @@ import {
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
-import type { AgentEvent, MemoryProvider, ConversationRepo } from "@ew/shared";
+import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { LocalServerManager } from "../engine/local-server-manager.js";
 import type { ProviderManager } from "../providers/manager.js";
 import type { KnowledgeBaseStore } from "../rag/store.js";
-import { buildEwCustomTools, memoryExtensionFactory } from "./ew-extensions.js";
+import {
+  buildEwCustomTools,
+  memoryExtensionFactory,
+  permissionExtensionFactory,
+  type RunRuntime,
+} from "./ew-extensions.js";
+
+/** 聊天模式收窄：排除会改文件/执行命令的 pi 自带工具。 */
+const CHAT_EXCLUDED_TOOLS = ["bash", "edit", "write"];
 
 /** 宿主依赖（从 daemon 注入）。 */
 export interface SessionHostDeps {
@@ -44,12 +53,20 @@ export interface EwAgentRunInput {
   text: string;
   /** 工作区根目录（pi 工具的 cwd）。 */
   cwd: string;
+  /** 是否工作区模式（启用 bash/edit/write + 审批；否则聊天模式收窄工具）。默认 false。 */
+  workspace?: boolean;
+  /** R4：本轮审批门（工作区模式下危险工具经此征询，发 approval-request SSE）。 */
+  approval?: ApprovalGate;
+  /** R4：工作区审批档位。默认 approve-each。 */
+  approvalMode?: ApprovalMode;
 }
 
 interface HostedSession {
   session: AgentSession;
   modelId: string;
   cwd: string;
+  workspace: boolean;
+  runtime: RunRuntime;
   dispose: () => void;
 }
 
@@ -152,19 +169,23 @@ export class SessionHost {
     throw new Error(`model_not_resolvable: ${modelId}`);
   }
 
-  /** 取/建该 thread 的会话。modelId/cwd 变化则重建。 */
-  private async getOrCreate(threadId: string, modelId: string, cwd: string): Promise<AgentSession> {
+  /** 取/建该 thread 的会话。modelId/cwd/workspace 变化则重建。 */
+  private async getOrCreate(threadId: string, modelId: string, cwd: string, workspace: boolean): Promise<HostedSession> {
     const existing = this.sessions.get(threadId);
-    if (existing && existing.modelId === modelId && existing.cwd === cwd) return existing.session;
+    if (existing && existing.modelId === modelId && existing.cwd === cwd && existing.workspace === workspace) {
+      return existing;
+    }
     if (existing) {
       existing.dispose();
       this.sessions.delete(threadId);
     }
     const model = this.resolveModel(modelId);
-    // R3：记忆扩展（context 召回 + agent_end 抽取）+ EasyWork 专有 customTools（记忆/检索/KB/MCP）。
-    const factories = this.deps.memory
-      ? [memoryExtensionFactory({ threadId, modelId, memory: this.deps.memory })]
-      : [];
+    // R4：每会话一个权限运行时（run() 前写入 mode/approval）；仅工作区模式装载权限扩展。
+    const runtime: RunRuntime = { mode: "approve-each", alwaysApproved: new Set() };
+    // R3：记忆扩展（context 召回 + agent_end 抽取）+ R4 权限扩展（tool_call 审批）。
+    const factories: ExtensionFactory[] = [];
+    if (this.deps.memory) factories.push(memoryExtensionFactory({ threadId, modelId, memory: this.deps.memory }));
+    if (workspace) factories.push(permissionExtensionFactory(runtime));
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: this.agentDir,
@@ -187,16 +208,23 @@ export class SessionHost {
       cwd,
       agentDir: this.agentDir,
       resourceLoader,
+      // R4：聊天模式收窄——排除 bash/edit/write（仅留读类 + EasyWork customTools）。
+      ...(workspace ? {} : { excludeTools: CHAT_EXCLUDED_TOOLS }),
       ...(customTools.length ? { customTools } : {}),
-      // pi 默认编码工具（read/bash/edit/write）+ 上述 EasyWork customTools。
     });
-    this.sessions.set(threadId, { session, modelId, cwd, dispose: () => session.dispose() });
-    return session;
+    const hosted: HostedSession = { session, modelId, cwd, workspace, runtime, dispose: () => session.dispose() };
+    this.sessions.set(threadId, hosted);
+    return hosted;
   }
 
   /** 跑一轮，产出我们的 `AgentEvent` 流（供 SSE 转发）。 */
   async *run(input: EwAgentRunInput): AsyncGenerator<AgentEvent> {
-    const session = await this.getOrCreate(input.threadId, input.modelId, input.cwd);
+    const workspace = input.workspace ?? false;
+    const hosted = await this.getOrCreate(input.threadId, input.modelId, input.cwd, workspace);
+    const session = hosted.session;
+    // R4：写入本轮权限上下文（工作区模式下 tool_call 扩展据此审批）。
+    hosted.runtime.mode = input.approvalMode ?? "approve-each";
+    hosted.runtime.approval = input.approval;
 
     const queue: AgentEvent[] = [];
     let notify: (() => void) | null = null;

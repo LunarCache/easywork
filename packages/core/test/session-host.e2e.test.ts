@@ -42,6 +42,15 @@ describe.skipIf(!RUN || !fs.existsSync(GGUF))("SessionHost e2e", () => {
       delete: async () => {},
     };
 
+    // R4：工作区模式 + 审批门（自动批准，计数）——验证权限扩展与真实 pi 工具循环集成无碍。
+    let approvalCalls = 0;
+    const approval = {
+      request: async () => {
+        approvalCalls++;
+        return "approve" as const;
+      },
+    };
+
     const host = new SessionHost({ local, providers, agentDir, memory });
     const events: AgentEvent[] = [];
     try {
@@ -50,6 +59,9 @@ describe.skipIf(!RUN || !fs.existsSync(GGUF))("SessionHost e2e", () => {
         modelId: GGUF,
         text: "用 read 工具读取 README.md，然后一句话概括这个项目。",
         cwd,
+        workspace: true,
+        approval,
+        approvalMode: "approve-each",
       })) {
         events.push(ev);
       }
@@ -69,5 +81,7 @@ describe.skipIf(!RUN || !fs.existsSync(GGUF))("SessionHost e2e", () => {
     console.log("R3 hooks:", JSON.stringify({ recallCalls, observeCalls }));
     expect(recallCalls).toBeGreaterThan(0);
     expect(observeCalls).toBeGreaterThan(0);
+    // R4：read 属放行类，不触发审批；workspace 模式整体仍正常收尾。
+    console.log("R4 approvalCalls:", approvalCalls);
   }, 180_000);
 });

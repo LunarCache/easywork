@@ -9,11 +9,14 @@ import type {
   AgentToolResult,
   ContextEvent,
   AgentEndEvent,
+  ToolCallEvent,
+  ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
 import type {
   Tool,
   ToolExecContext,
   ApprovalGate,
+  ApprovalMode,
   MemoryProvider,
   MemoryItem,
   ContentPart,
@@ -111,6 +114,62 @@ export function memoryExtensionFactory(opts: {
       await opts.memory
         .observe({ messages, sessionId: opts.threadId, model: opts.modelId })
         .catch(() => {});
+    });
+  };
+}
+
+/** 每轮运行的权限上下文（run() 前由宿主写入；权限扩展闭包读取）。 */
+export interface RunRuntime {
+  mode: ApprovalMode;
+  approval?: ApprovalGate;
+  /** approve-always 记忆：本会话内该工具后续放行。 */
+  alwaysApproved: Set<string>;
+}
+
+const READ_TOOLS = new Set(["read", "ls", "grep", "find"]);
+const WRITE_TOOLS = new Set(["edit", "write"]);
+
+type ToolClass = "read" | "write" | "bash" | "mcp" | "safe";
+
+function classify(name: string): ToolClass {
+  if (READ_TOOLS.has(name)) return "read";
+  if (WRITE_TOOLS.has(name)) return "write";
+  if (name === "bash") return "bash";
+  if (name.startsWith("mcp__")) return "mcp";
+  return "safe";
+}
+
+/**
+ * 工作区审批档位 → 决策（对齐 legacy workspace-approval）：
+ * | mode         | read | write(edit/write) | bash | mcp__ |
+ * | read-only    | 放行 | 阻止              | 阻止 | 阻止  |
+ * | approve-each | 放行 | 审批              | 审批 | 审批  |
+ * | auto-edits   | 放行 | 放行              | 审批 | 审批  |
+ * | full-auto    | 放行 | 放行              | 放行 | 放行  |
+ * 读类工具与 EasyWork 安全 customTools（记忆/检索/KB）一律放行。
+ */
+export function decideTool(name: string, mode: ApprovalMode): "allow" | "block" | "approve" {
+  const cls = classify(name);
+  if (cls === "read" || cls === "safe") return "allow";
+  if (mode === "read-only") return "block";
+  if (mode === "full-auto") return "allow";
+  if (cls === "write") return mode === "approve-each" ? "approve" : "allow"; // auto-edits 放行写
+  return "approve"; // bash / mcp：除 full-auto 外均审批
+}
+
+/** 权限扩展工厂：pi `tool_call` 钩子按 RunRuntime 决策放行/阻止/审批（经 EasyWork ApprovalGate）。 */
+export function permissionExtensionFactory(runtime: RunRuntime): ExtensionFactory {
+  return (pi: ExtensionAPI) => {
+    pi.on("tool_call", async (event: ToolCallEvent): Promise<ToolCallEventResult> => {
+      const d = decideTool(event.toolName, runtime.mode);
+      if (d === "allow") return {};
+      if (d === "block") return { block: true, reason: `当前「${runtime.mode}」模式禁止 ${event.toolName}` };
+      if (runtime.alwaysApproved.has(event.toolName)) return {};
+      if (!runtime.approval) return {}; // 无审批门（无 UI 连接）→ 放行，避免无人应答而卡死
+      const verdict = await runtime.approval.request({ toolName: event.toolName, args: event.input });
+      if (verdict === "deny") return { block: true, reason: "用户拒绝了该操作" };
+      if (verdict === "approve-always") runtime.alwaysApproved.add(event.toolName);
+      return {};
     });
   };
 }

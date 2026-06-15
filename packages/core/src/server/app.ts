@@ -565,6 +565,10 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
           modelId: parsed.data.model,
           text: userText,
           cwd: runWorkspaceDir,
+          // 工作区模式：有项目工作目录 → 启用 bash/edit/write + 审批；否则聊天模式收窄。
+          workspace: !!project?.workspaceDir,
+          approval: runApproval,
+          approvalMode: project?.approvalMode ?? "approve-each",
         })) {
           if (ev.type === "final") finalContent = messageText(ev.message.content);
           send(ev);
