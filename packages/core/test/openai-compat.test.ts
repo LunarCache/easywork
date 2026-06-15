@@ -38,29 +38,6 @@ const fakeUpstream = (async (input: RequestInfo | URL, init?: RequestInit) => {
   throw new Error(`unexpected upstream call: ${url}`);
 }) as unknown as typeof fetch;
 
-/** 解析 OpenAI SSE，拼接 delta.content。 */
-async function collectOpenAIStream(res: Response): Promise<string> {
-  const reader = res.body!.getReader();
-  const dec = new TextDecoder();
-  let buffer = "";
-  let text = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += dec.decode(value, { stream: true });
-    let idx: number;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const line = buffer.slice(0, idx).replace(/^data:\s?/, "");
-      buffer = buffer.slice(idx + 2);
-      if (line === "[DONE]" || !line.trim()) continue;
-      const chunk = JSON.parse(line);
-      const c = chunk.choices?.[0]?.delta?.content;
-      if (typeof c === "string") text += c;
-    }
-  }
-  return text;
-}
-
 describe("/v1 OpenAI 兼容端点（经云端 provider）", () => {
   let core: CoreServer | undefined;
   afterEach(async () => {
@@ -68,7 +45,9 @@ describe("/v1 OpenAI 兼容端点（经云端 provider）", () => {
     core = undefined;
   });
 
-  it("addProvider 后 /v1/models 列出模型，/v1/chat/completions 流式与非流式均可用", async () => {
+  // 注：云端「流式」现走 pi-ai（统一 ModelRegistry/AuthStorage），用 fake fetch 无法拦截 pi 的 HTTP，
+  // 其流式覆盖见 openai-local-proxy.test（fake cloudStream）。这里验证 /v1/models + 非流式（仍经引擎）。
+  it("addProvider 后 /v1/models 列出模型，/v1/chat/completions 非流式经引擎可用", async () => {
     core = createCore({ token: "t", fetch: fakeUpstream });
     core.providers.add({ id: "cloud", baseUrl: "http://upstream.test/v1", models: ["cloud-model"] });
     const { port, host } = await core.start({ port: 0, host: "127.0.0.1" });
@@ -80,15 +59,7 @@ describe("/v1 OpenAI 兼容端点（经云端 provider）", () => {
     const modelsJson = (await modelsRes.json()) as any;
     expect(modelsJson.data.map((m: any) => m.id)).toContain("cloud-model");
 
-    // 流式
-    const streamRes = await fetch(`${base}/v1/chat/completions`, {
-      method: "POST",
-      headers: auth,
-      body: JSON.stringify({ model: "cloud-model", stream: true, messages: [{ role: "user", content: "hi" }] }),
-    });
-    expect(await collectOpenAIStream(streamRes)).toBe("cloud reply");
-
-    // 非流式
+    // 非流式（云端非流式仍走引擎 → fake 上游）
     const jsonRes = await fetch(`${base}/v1/chat/completions`, {
       method: "POST",
       headers: auth,

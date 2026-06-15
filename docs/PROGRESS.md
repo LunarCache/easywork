@@ -20,7 +20,12 @@
 - **abort 透传**：`SessionHost.run` 接 `signal`，SSE 断开 → `AgentSession.abort()` 中止 pi 当前轮。
 - **MCP 动态刷新**：`/mcp/servers` 增删后 `sessionHost.invalidateAll()`，下次 run 重建会话以纳入新 customTools。
 - **工作区路径限定（安全）**：发现 pi 自带 fs 工具**不做路径沙箱**（`write ../escape.txt` 真会越界写到父目录）。在 `permissionExtensionFactory` 加 `escapesCwd` 硬边界：read/edit/write/ls/grep/find 的 `path/file_path` 越界一律拒（所有档位，含 full-auto）；bash 为任意 shell 仍由审批把守。`workspace-confinement.test` 记录 pi 原始行为，`permission.test` 锁定我们的拦截。
-- **`/v1`·`/chat/stream` 决策**：**保留薄引擎**（EngineRegistry + LlamaServerEngine/OpenAICompatibleEngine）。它们是 OpenAI 兼容**服务端**，而 pi-ai 是**客户端**库，二者职责相反；用引擎实现服务端是正确选择，非遗留债。
+- **`/chat/stream`**：已删除（无消费者，应用内走 /agent/run，裸对话走 /v1）。
+- **`/v1` 网关重构（两步）**：
+  - Step1 **本地透传**：`/v1/chat/completions`·`/v1/messages` 命中已加载本地模型时反向代理到其 llama-server（原生支持 OpenAI + Anthropic + tool_use，带 --jinja），不经我们的翻译层。
+  - Step2 **云端经 pi-ai**：云端**流式**请求 → `SessionHost.streamCloud`（复用 R2 的 ModelRegistry/AuthStorage，含 OAuth/Anthropic 原生）→ `pi-adapt` 把 pi 事件映射回我们的 `ChatStreamEvent`，**复用既有** `streamEventToOpenAIChunks`/`AnthropicStreamTranslator`。云端**非流式**仍走引擎（OpenAICompatibleEngine）。
+  - `EngineRegistry`/`LlamaServerEngine` 仍保留：撑本地进程管理、`/v1` 非流式回退、fact-extractor、embedding。
+  - 更正：早前说"llama-server 不支持 Anthropic"有误——llama.cpp 已原生支持 `/v1/messages`（PR #17570），故本地透传可直接复用。
 - **未做（明确）**：持久化仍以 `ConversationRepo` 为真相源（未切 pi `SessionManager` 为真相源——那是涉及 UI/SDK 的独立大改，无用户可见收益）。
 - 结果：**156 测试全绿**（+8），typecheck 19/19，改动文件 eslint 0，真机 e2e 通过且无越界产物。
 

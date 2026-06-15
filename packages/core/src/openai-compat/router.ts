@@ -11,6 +11,8 @@ import {
   AnthropicStreamTranslator,
   type AnthropicRequestBody,
 } from "./anthropic.js";
+import { chatRequestToPiContext, piEventToChatStreamEvents, newPiAdaptState } from "./pi-adapt.js";
+import type { Context as PiContext, AssistantMessageEventStream } from "@earendil-works/pi-ai";
 
 let counter = 0;
 function genId(): string {
@@ -24,6 +26,12 @@ export interface OpenAICompatDeps {
   localBaseUrl?: (model: string) => string | undefined;
   /** 透传所用 fetch（默认全局；测试可注入）。 */
   fetch?: typeof fetch;
+  /** 云端流式经 pi-ai；非云端模型返回 null（回退到引擎）。 */
+  cloudStream?: (
+    modelId: string,
+    context: PiContext,
+    opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number },
+  ) => Promise<AssistantMessageEventStream | null>;
 }
 
 /**
@@ -107,6 +115,46 @@ export function registerOpenAICompat(
     const chatReq = openaiToChatRequest(body);
     if (!chatReq.model) return reply.code(400).send({ error: { message: "missing model" } });
 
+    // 云端流式 → pi-ai（统一 ModelRegistry/AuthStorage，含 OAuth/Anthropic 原生）。非云端返回 null → 回退引擎。
+    if (body.stream === true && deps.cloudStream) {
+      const ac = new AbortController();
+      const piStream = await deps.cloudStream(chatReq.model, chatRequestToPiContext(chatReq), {
+        signal: ac.signal,
+        ...(chatReq.temperature != null ? { temperature: chatReq.temperature } : {}),
+        ...(chatReq.maxTokens != null ? { maxTokens: chatReq.maxTokens } : {}),
+      });
+      if (piStream) {
+        reply.raw.on("close", () => ac.abort());
+        const id = genId();
+        const created = Math.floor(Date.now() / 1000);
+        reply.hijack();
+        const raw = reply.raw;
+        raw.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+          "access-control-allow-origin": req.headers.origin ?? "*",
+        });
+        const roleSent = { value: false };
+        const state = newPiAdaptState();
+        try {
+          for await (const pev of piStream) {
+            for (const ce of piEventToChatStreamEvents(pev, state)) {
+              for (const chunk of streamEventToOpenAIChunks(ce, { id, created, model: chatReq.model, roleSent })) {
+                raw.write(`data: ${chunk}\n\n`);
+              }
+            }
+          }
+        } catch (err) {
+          raw.write(`data: ${JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
+        } finally {
+          raw.write("data: [DONE]\n\n");
+          raw.end();
+        }
+        return;
+      }
+    }
+
     let engine;
     try {
       engine = registry.resolve(chatReq.model);
@@ -159,6 +207,46 @@ export function registerOpenAICompat(
 
     const chatReq = anthropicToChatRequest(body);
     if (!chatReq.model) return reply.code(400).send({ type: "error", error: { message: "missing model" } });
+
+    // 云端流式 → pi-ai；非云端返回 null → 回退引擎。
+    if (body.stream === true && deps.cloudStream) {
+      const ac = new AbortController();
+      const piStream = await deps.cloudStream(chatReq.model, chatRequestToPiContext(chatReq), {
+        signal: ac.signal,
+        ...(chatReq.temperature != null ? { temperature: chatReq.temperature } : {}),
+        ...(chatReq.maxTokens != null ? { maxTokens: chatReq.maxTokens } : {}),
+      });
+      if (piStream) {
+        reply.raw.on("close", () => ac.abort());
+        const id = `msg_${Date.now().toString(36)}${(counter += 1).toString(36)}`;
+        reply.hijack();
+        const raw = reply.raw;
+        raw.writeHead(200, {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          connection: "keep-alive",
+          "access-control-allow-origin": req.headers.origin ?? "*",
+        });
+        const tr = new AnthropicStreamTranslator(id, chatReq.model);
+        const state = newPiAdaptState();
+        raw.write(tr.start());
+        try {
+          for await (const pev of piStream) {
+            for (const ce of piEventToChatStreamEvents(pev, state)) {
+              const frame = tr.event(ce);
+              if (frame) raw.write(frame);
+            }
+          }
+          raw.write(tr.end());
+        } catch (err) {
+          raw.write(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
+        } finally {
+          raw.end();
+        }
+        return;
+      }
+    }
+
     let engine;
     try {
       engine = registry.resolve(chatReq.model);

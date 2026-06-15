@@ -1,7 +1,16 @@
 import { describe, it, expect } from "vitest";
 import Fastify from "fastify";
 import type { EngineRegistry } from "../src/engine/registry.js";
+import type { AssistantMessageEvent, AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { registerOpenAICompat } from "../src/openai-compat/router.js";
+
+/** 假 pi 流：把若干 AssistantMessageEvent 包成 AsyncIterable（router 只 for-await 它）。 */
+function fakePiStream(events: AssistantMessageEvent[]): AssistantMessageEventStream {
+  async function* gen(): AsyncGenerator<AssistantMessageEvent> {
+    for (const e of events) yield e;
+  }
+  return gen() as unknown as AssistantMessageEventStream;
+}
 
 // Step 1：本地已加载模型 → /v1 透传到其 llama-server（不经我们的翻译层）。
 const enc = new TextEncoder();
@@ -89,6 +98,73 @@ describe("/v1 本地透传", () => {
     });
     expect(fetched).toBe(false); // 没有透传
     expect(res.statusCode).toBe(404); // 引擎 resolve 抛错 → 404
+    await app.close();
+  });
+});
+
+describe("/v1 云端经 pi-ai", () => {
+  const piEvents: AssistantMessageEvent[] = [
+    { type: "text_delta", contentIndex: 0, delta: "Hello", partial: {} } as AssistantMessageEvent,
+    { type: "text_delta", contentIndex: 0, delta: " world", partial: {} } as AssistantMessageEvent,
+    {
+      type: "done",
+      reason: "stop",
+      message: { role: "assistant", content: [{ type: "text", text: "Hello world" }], usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 3, cost: {} } },
+    } as unknown as AssistantMessageEvent,
+  ];
+
+  it("chat/completions: 云端模型经 cloudStream → OpenAI chunks", async () => {
+    let askedModel = "";
+    const app = Fastify();
+    registerOpenAICompat(app, stubRegistry, {
+      localBaseUrl: () => undefined,
+      cloudStream: async (modelId) => {
+        askedModel = modelId;
+        return modelId === "cloud-z" ? fakePiStream(piEvents) : null;
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: { model: "cloud-z", messages: [{ role: "user", content: "hi" }], stream: true },
+    });
+    expect(askedModel).toBe("cloud-z");
+    expect(res.body).toContain("Hello");
+    expect(res.body).toContain("world");
+    expect(res.body).toContain("[DONE]");
+    await app.close();
+  });
+
+  it("messages: 云端模型经 cloudStream → Anthropic 帧", async () => {
+    const app = Fastify();
+    registerOpenAICompat(app, stubRegistry, {
+      localBaseUrl: () => undefined,
+      cloudStream: async (modelId) => (modelId === "cloud-z" ? fakePiStream(piEvents) : null),
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      payload: { model: "cloud-z", messages: [{ role: "user", content: "hi" }], stream: true },
+    });
+    expect(res.body).toContain("message_start");
+    expect(res.body).toContain("Hello");
+    expect(res.body).toContain("message_stop");
+    await app.close();
+  });
+
+  it("cloudStream 返回 null（非云端）→ 回退引擎（stub 抛错 → 流式错误体）", async () => {
+    const app = Fastify();
+    registerOpenAICompat(app, stubRegistry, {
+      localBaseUrl: () => undefined,
+      cloudStream: async () => null,
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: { model: "other", messages: [{ role: "user", content: "hi" }], stream: true },
+    });
+    // 回退到引擎路径：stubRegistry.resolve 抛错 → 404（未命中云端透传）。
+    expect(res.statusCode).toBe(404);
     await app.close();
   });
 });

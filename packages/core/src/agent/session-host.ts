@@ -12,7 +12,8 @@ import {
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import type { Model, Api } from "@earendil-works/pi-ai";
+import { streamSimple } from "@earendil-works/pi-ai";
+import type { Model, Api, Context as PiContext, AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, Tool } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -171,6 +172,29 @@ export class SessionHost {
       };
     }
     throw new Error(`model_not_resolvable: ${modelId}`);
+  }
+
+  /**
+   * Step 2：云端模型经 pi-ai 流式推理（供 /v1 网关复用同一 ModelRegistry/AuthStorage，
+   * 拿到 OAuth/Anthropic 原生等统一能力）。非云端模型返回 null（由调用方回退）。
+   */
+  async streamCloud(
+    modelId: string,
+    context: PiContext,
+    opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number } = {},
+  ): Promise<AssistantMessageEventStream | null> {
+    const cfg = this.deps.providers.findByModel(modelId);
+    if (!cfg) return null;
+    if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
+    const model = this.resolveModel(modelId);
+    const auth = await this.modelRegistry.getApiKeyAndHeaders(model);
+    return streamSimple(model, context, {
+      ...(auth.ok && auth.apiKey ? { apiKey: auth.apiKey } : {}),
+      ...(auth.ok && auth.headers ? { headers: auth.headers } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+      ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
+      ...(opts.maxTokens != null ? { maxTokens: opts.maxTokens } : {}),
+    });
   }
 
   /** 取/建该 thread 的会话。modelId/cwd/workspace 变化则重建。 */

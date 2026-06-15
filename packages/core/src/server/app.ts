@@ -885,8 +885,12 @@ version: "0.1.0"
     return { ...embeddings.info, dim, reindexed };
   });
 
-  // ---- OpenAI/Anthropic 兼容端点（复用同一 registry；本地模型透传到 llama-server） ----
-  registerOpenAICompat(app, registry, { localBaseUrl: (m) => local.baseUrlFor(m) });
+  // ---- OpenAI/Anthropic 兼容端点（复用同一 registry） ----
+  // 本地模型透传到 llama-server；云端流式经 pi-ai（统一 ModelRegistry/AuthStorage）。
+  registerOpenAICompat(app, registry, {
+    localBaseUrl: (m) => local.baseUrlFor(m),
+    cloudStream: (modelId, context, opts) => sessionHost.streamCloud(modelId, context, opts),
+  });
 
   return {
     app,
