@@ -3,8 +3,6 @@ import type {
   AgentEvent,
   ApprovalMode,
   ChatMessage,
-  ChatRequest,
-  ChatStreamEvent,
   DownloadEvent,
   EngineCapabilities,
   GGUFVariant,
@@ -202,15 +200,7 @@ export class EasyWorkClient {
     });
   }
 
-  /** 内部流式对话（渠道无关 ChatStreamEvent）。 */
-  chatStream(
-    req: Omit<ChatRequest, "signal">,
-    init?: { signal?: AbortSignal },
-  ): AsyncIterable<ChatStreamEvent> {
-    return this.streamSSE<ChatStreamEvent>("/chat/stream", req, init);
-  }
-
-  /** 运行 agent（工具/Skills/MCP 循环），流式发 AgentEvent。 */
+  /** 运行 agent（pi 托管会话），流式发 AgentEvent。 */
   runAgent(
     input: {
       threadId?: string;

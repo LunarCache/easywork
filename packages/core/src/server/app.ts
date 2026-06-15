@@ -3,7 +3,6 @@ import fsPath from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   ChatMessageSchema,
-  ChatRequestSchema,
   ApprovalModeSchema,
   GGUFVariantSchema,
   LocalLoadOptionsSchema,
@@ -12,7 +11,6 @@ import {
   messageText,
   normalizeContent,
   type AgentEvent,
-  type ChatStreamEvent,
   type DownloadEvent,
   type McpServerConfig,
   type MemoryLayer,
@@ -367,42 +365,10 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   });
 
   // ---- 流式对话（内部 SSE，渠道无关事件） ----
-  app.post("/chat/stream", async (req, reply) => {
-    const parsed = ChatRequestSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_request", detail: parsed.error.format() });
-    }
-    let engine;
-    try {
-      engine = registry.resolve(parsed.data.model);
-    } catch (err) {
-      return reply.code(404).send({ error: "model_not_loaded", message: String(err) });
-    }
+  // 注：纯流式对话 /chat/stream 已移除——应用内一律走 /agent/run（pi 托管），
+  // 裸模型对话直接打 OpenAI 兼容的 /v1/chat/completions。
 
-    const ac = new AbortController();
-    reply.raw.on("close", () => ac.abort());
-    reply.hijack();
-    const raw = reply.raw;
-    raw.writeHead(200, {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-      "access-control-allow-origin": req.headers.origin ?? "*",
-    });
-    const send = (ev: ChatStreamEvent) => raw.write(`data: ${JSON.stringify(ev)}\n\n`);
-    try {
-      for await (const ev of engine.chatStream({ ...parsed.data, signal: ac.signal })) {
-        send(ev);
-      }
-    } catch (err) {
-      send({ type: "error", message: err instanceof Error ? err.message : String(err) });
-    } finally {
-      raw.write("data: [DONE]\n\n");
-      raw.end();
-    }
-  });
-
-  // ---- Agent 运行（工具/Skills/MCP 循环，SSE 发 AgentEvent） ----
+  // ---- Agent 运行（pi 托管会话，SSE 发 AgentEvent） ----
   const AgentRunSchema = z.object({
     threadId: z.string().default("default"),
     model: z.string(),
