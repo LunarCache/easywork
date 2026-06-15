@@ -96,11 +96,32 @@ export class SessionHost {
   constructor(private readonly deps: SessionHostDeps) {
     this.agentDir = deps.agentDir ?? path.join(os.homedir(), ".easywork", "pi-agent");
     fs.mkdirSync(this.agentDir, { recursive: true });
+    this.tunePiSettings();
     this.authStorage = AuthStorage.create(path.join(this.agentDir, "auth.json"));
     // llama-server 忽略 key，仅为通过 pi 的 provider key 校验。
     this.authStorage.set("local", { type: "api_key", key: "local" });
     this.modelRegistry = ModelRegistry.create(this.authStorage, path.join(this.agentDir, "models.json"));
     this.syncCloudProviders();
+  }
+
+  /**
+   * 调校 pi 设置（写 agentDir/settings.json，SettingsManager 启动时读取）。
+   * 关键：pi 默认 compaction.reserveTokens=16384，而本地模型 contextWindow 常为 4k/8k，
+   * 导致 shouldCompact = tokens > contextWindow-16384 恒为真 → 每轮都触发压缩（一次 LLM 摘要），
+   * 表现为输出结束后还卡几秒。下调到合理值，仅在接近真实上限时才压缩；overflow 兜底仍在。
+   */
+  private tunePiSettings(): void {
+    const file = path.join(this.agentDir, "settings.json");
+    try {
+      const cur = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>) : {};
+      const comp = (cur.compaction as Record<string, unknown> | undefined) ?? {};
+      if (comp.reserveTokens == null) {
+        cur.compaction = { ...comp, reserveTokens: 2048 };
+        fs.writeFileSync(file, JSON.stringify(cur, null, 2), "utf8");
+      }
+    } catch {
+      /* 设置写入失败不影响运行 */
+    }
   }
 
   /**

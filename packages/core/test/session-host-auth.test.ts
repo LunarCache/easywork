@@ -59,4 +59,13 @@ describe("SessionHost.syncCloudProviders", () => {
     host.disposeAll();
     fs.rmSync(agentDir, { recursive: true, force: true });
   });
+
+  it("调低 compaction.reserveTokens（防小上下文模型每轮压缩）", () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-tune-")));
+    const host = new SessionHost({ ...makeDeps([]), agentDir });
+    const settings = JSON.parse(fs.readFileSync(path.join(agentDir, "settings.json"), "utf8"));
+    expect(settings.compaction.reserveTokens).toBe(2048);
+    host.disposeAll();
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
 });

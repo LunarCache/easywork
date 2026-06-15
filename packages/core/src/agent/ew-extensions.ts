@@ -118,8 +118,8 @@ export function memoryExtensionFactory(opts: {
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role, content: contentText(m.content as string | ContentPart[]) }))
         .filter((m) => !m.content.startsWith(RECALL_MARKER));
-      // 后台抽取事实：不 await——否则 pi 会等它跑完才让 run 收尾，SSE 迟迟不关、
-      // UI 光标在输出结束后仍持续闪烁。抽取是 best-effort，放到后台跑。
+      // 后台抽取事实：不 await——否则 pi 会等它跑完才让 run 收尾，SSE 迟迟不关。
+      // 抽取是 best-effort，放到后台跑。
       void opts.memory
         .observe({ messages, sessionId: opts.threadId, model: opts.modelId })
         .catch(() => {});
