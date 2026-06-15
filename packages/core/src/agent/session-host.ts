@@ -14,7 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { streamSimple, completeSimple } from "@earendil-works/pi-ai";
 import type { Model, Api, Context as PiContext, AssistantMessageEventStream, AssistantMessage } from "@earendil-works/pi-ai";
-import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, Tool } from "@ew/shared";
+import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, SamplingParams, Tool } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { LocalServerManager } from "../engine/local-server-manager.js";
@@ -64,6 +64,8 @@ export interface EwAgentRunInput {
   approvalMode?: ApprovalMode;
   /** R5b：中断信号（SSE 断开 → 中止 pi 当前轮）。 */
   signal?: AbortSignal;
+  /** 采样参数（透传给 provider 请求；本地额外注入 llama.cpp top_k/min_p/repeat_penalty）。 */
+  sampling?: SamplingParams;
 }
 
 interface HostedSession {
@@ -269,6 +271,26 @@ export class SessionHost {
       ...(workspace ? {} : { excludeTools: CHAT_EXCLUDED_TOOLS }),
       ...(customTools.length ? { customTools } : {}),
     });
+    // 采样参数注入：pi 不在 createAgentSession 暴露采样，包装 agent.streamFn 读取 runtime.sampling
+    // → temperature/maxTokens 走 StreamOptions；top_p/top_k/min_p/repeat_penalty/seed/penalties 经
+    // onPayload 注入请求体（top_k/min_p/repeat_penalty 是 llama.cpp 扩展，仅本地模型注入）。
+    const baseStream = session.agent.streamFn;
+    session.agent.streamFn = (m, context, options) => {
+      const s = runtime.sampling;
+      if (!s) return baseStream(m, context, options);
+      const isLocal = m.provider === "local";
+      const prevOnPayload = options?.onPayload;
+      return baseStream(m, context, {
+        ...options,
+        ...(s.temperature != null ? { temperature: s.temperature } : {}),
+        ...(s.maxTokens != null ? { maxTokens: s.maxTokens } : {}),
+        onPayload: async (payload, mm) => {
+          const base = (prevOnPayload ? await prevOnPayload(payload, mm) : undefined) ?? payload;
+          return applySampling(base as Record<string, unknown>, s, isLocal);
+        },
+      });
+    };
+
     const hosted: HostedSession = { session, modelId, cwd, workspace, runtime, dispose: () => session.dispose() };
     this.sessions.set(threadId, hosted);
     return hosted;
@@ -298,6 +320,7 @@ export class SessionHost {
     hosted.runtime.mode = input.approvalMode ?? "approve-each";
     hosted.runtime.approval = input.approval;
     hosted.runtime.recall = undefined; // M3：每轮重置召回缓存
+    hosted.runtime.sampling = input.sampling; // 采样参数（streamFn 包装读取）
 
     // R5b：中断透传——信号 abort → 中止 pi 当前轮。
     const onAbort = (): void => {
@@ -434,6 +457,23 @@ export function mapSessionEvent(ev: AgentSessionEvent): AgentEvent[] {
     default:
       return [];
   }
+}
+
+/** 把 EasyWork 采样参数注入 OpenAI 兼容请求体；llama.cpp 扩展（top_k/min_p/repeat_penalty）仅本地。 */
+export function applySampling(body: Record<string, unknown>, s: SamplingParams, isLocal: boolean): Record<string, unknown> {
+  const out = { ...body };
+  if (s.temperature != null) out.temperature = s.temperature;
+  if (s.topP != null) out.top_p = s.topP;
+  if (s.maxTokens != null) out.max_tokens = s.maxTokens;
+  if (s.seed != null) out.seed = s.seed;
+  if (s.frequencyPenalty != null) out.frequency_penalty = s.frequencyPenalty;
+  if (s.presencePenalty != null) out.presence_penalty = s.presencePenalty;
+  if (isLocal) {
+    if (s.topK != null) out.top_k = s.topK;
+    if (s.minP != null) out.min_p = s.minP;
+    if (s.repeatPenalty != null) out.repeat_penalty = s.repeatPenalty;
+  }
+  return out;
 }
 
 function safeStringify(v: unknown): string {

@@ -19,6 +19,7 @@ import type {
   ToolExecContext,
   ApprovalGate,
   ApprovalMode,
+  SamplingParams,
   MemoryProvider,
   MemoryItem,
   ContentPart,
@@ -132,6 +133,8 @@ export interface RunRuntime {
   alwaysApproved: Set<string>;
   /** 本轮召回缓存（run() 开始时重置，避免同一 query 跨轮复用陈旧召回）。 */
   recall?: { key: string; block: string };
+  /** 本轮采样参数（run() 前写入；streamFn 包装读取，注入 provider 请求）。 */
+  sampling?: SamplingParams;
 }
 
 const READ_TOOLS = new Set(["read", "ls", "grep", "find"]);

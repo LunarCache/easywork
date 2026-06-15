@@ -529,6 +529,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         approval: runApproval,
         approvalMode: project?.approvalMode ?? "approve-each",
         signal: ac.signal,
+        ...(parsed.data.sampling ? { sampling: parsed.data.sampling } : {}),
       })) {
         persistRecorded(recorder.push(ev));
         if (ev.type === "final") finalContent = messageText(ev.message.content);
