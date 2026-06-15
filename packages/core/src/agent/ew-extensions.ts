@@ -113,12 +113,14 @@ export function memoryExtensionFactory(opts: {
       const injected = { role: "user" as const, content: rt.recall.block, timestamp: Date.now() };
       return { messages: [injected, ...event.messages] };
     });
-    pi.on("agent_end", async (event: AgentEndEvent) => {
+    pi.on("agent_end", (event: AgentEndEvent) => {
       const messages = event.messages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role, content: contentText(m.content as string | ContentPart[]) }))
         .filter((m) => !m.content.startsWith(RECALL_MARKER));
-      await opts.memory
+      // 后台抽取事实：不 await——否则 pi 会等它跑完才让 run 收尾，SSE 迟迟不关、
+      // UI 光标在输出结束后仍持续闪烁。抽取是 best-effort，放到后台跑。
+      void opts.memory
         .observe({ messages, sessionId: opts.threadId, model: opts.modelId })
         .catch(() => {});
     });
