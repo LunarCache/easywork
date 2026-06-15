@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { EngineRegistry } from "../engine/registry.js";
 import {
   chatResponseToOpenAI,
@@ -18,11 +18,75 @@ function genId(): string {
   return `chatcmpl-${Date.now().toString(36)}${counter.toString(36)}`;
 }
 
+/** 网关依赖：本地已加载模型的 llama-server baseUrl 解析器（用于本地透传）。 */
+export interface OpenAICompatDeps {
+  /** 返回已加载本地模型的 OpenAI/Anthropic 兼容 baseUrl（http://host:port/v1）；非本地返回 undefined。 */
+  localBaseUrl?: (model: string) => string | undefined;
+  /** 透传所用 fetch（默认全局；测试可注入）。 */
+  fetch?: typeof fetch;
+}
+
+/**
+ * 本地透传：把请求反向代理到该模型的 llama-server（原生支持 OpenAI /chat/completions
+ * 与 Anthropic /messages，且我们带 --jinja 启动）。原样转发 + 回流，不经我们的翻译层。
+ */
+async function proxyToLocal(
+  base: string,
+  path: string,
+  req: FastifyRequest,
+  reply: FastifyReply,
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  const ac = new AbortController();
+  reply.raw.on("close", () => ac.abort());
+  let upstream: Response;
+  try {
+    upstream = await fetchImpl(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(req.body ?? {}),
+      signal: ac.signal,
+    });
+  } catch (err) {
+    if (!reply.sent) reply.code(502).send({ error: { message: `local upstream error: ${String(err)}` } });
+    return;
+  }
+  reply.hijack();
+  const raw = reply.raw;
+  raw.writeHead(upstream.status, {
+    "content-type": upstream.headers.get("content-type") ?? "application/json",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+    "access-control-allow-origin": req.headers.origin ?? "*",
+  });
+  if (!upstream.body) {
+    raw.end();
+    return;
+  }
+  const reader = upstream.body.getReader();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      raw.write(Buffer.from(value));
+    }
+  } catch {
+    /* 客户端断开/上游中断：直接收尾 */
+  } finally {
+    raw.end();
+  }
+}
+
 /**
  * 挂载 OpenAI 兼容端点，复用同一 EngineRegistry。
  * 让外部工具（Claude Code / openai SDK）指向 http://127.0.0.1:<port>/v1 即可用。
+ * 本地已加载模型直接透传到其 llama-server；云端走引擎（Step 2 改 pi-ai）。
  */
-export function registerOpenAICompat(app: FastifyInstance, registry: EngineRegistry): void {
+export function registerOpenAICompat(
+  app: FastifyInstance,
+  registry: EngineRegistry,
+  deps: OpenAICompatDeps = {},
+): void {
   app.get("/v1/models", async () => ({
     object: "list",
     data: registry.routedModels().map((id) => ({
@@ -35,6 +99,11 @@ export function registerOpenAICompat(app: FastifyInstance, registry: EngineRegis
 
   app.post("/v1/chat/completions", async (req, reply) => {
     const body = req.body as Record<string, unknown>;
+    const model = typeof body.model === "string" ? body.model : "";
+    // 本地已加载模型 → 透传到 llama-server 原生 /v1/chat/completions。
+    const localBase = model ? deps.localBaseUrl?.(model) : undefined;
+    if (localBase) return proxyToLocal(localBase, "/chat/completions", req, reply, deps.fetch ?? fetch);
+
     const chatReq = openaiToChatRequest(body);
     if (!chatReq.model) return reply.code(400).send({ error: { message: "missing model" } });
 
@@ -84,6 +153,10 @@ export function registerOpenAICompat(app: FastifyInstance, registry: EngineRegis
   // ---- Anthropic Messages API 兼容（让走 Anthropic 协议的客户端，如 Claude Code，可接入）----
   app.post("/v1/messages", async (req, reply) => {
     const body = req.body as AnthropicRequestBody;
+    // 本地已加载模型 → 透传到 llama-server 原生 /v1/messages（含 tool_use，需 --jinja，已带）。
+    const localBase = body.model ? deps.localBaseUrl?.(body.model) : undefined;
+    if (localBase) return proxyToLocal(localBase, "/messages", req, reply, deps.fetch ?? fetch);
+
     const chatReq = anthropicToChatRequest(body);
     if (!chatReq.model) return reply.code(400).send({ type: "error", error: { message: "missing model" } });
     let engine;

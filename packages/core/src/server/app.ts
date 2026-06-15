@@ -885,8 +885,8 @@ version: "0.1.0"
     return { ...embeddings.info, dim, reindexed };
   });
 
-  // ---- OpenAI 兼容端点（复用同一 registry） ----
-  registerOpenAICompat(app, registry);
+  // ---- OpenAI/Anthropic 兼容端点（复用同一 registry；本地模型透传到 llama-server） ----
+  registerOpenAICompat(app, registry, { localBaseUrl: (m) => local.baseUrlFor(m) });
 
   return {
     app,
