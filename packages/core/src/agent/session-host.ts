@@ -11,7 +11,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import type { Model } from "@earendil-works/pi-ai";
+import type { Model, Api } from "@earendil-works/pi-ai";
 import type { AgentEvent } from "@ew/shared";
 import type { LocalServerManager } from "../engine/local-server-manager.js";
 import type { ProviderManager } from "../providers/manager.js";
@@ -48,18 +48,63 @@ interface HostedSession {
 export class SessionHost {
   private readonly sessions = new Map<string, HostedSession>();
   private readonly agentDir: string;
+  // R2：单一、落盘的共享 auth/registry（OAuth 与 key 跨重启持久；所有会话复用）。
+  private readonly authStorage: AuthStorage;
+  private readonly modelRegistry: ModelRegistry;
+  private readonly registeredProviders = new Set<string>();
 
   constructor(private readonly deps: SessionHostDeps) {
     this.agentDir = deps.agentDir ?? path.join(os.homedir(), ".easywork", "pi-agent");
     fs.mkdirSync(this.agentDir, { recursive: true });
+    this.authStorage = AuthStorage.create(path.join(this.agentDir, "auth.json"));
+    // llama-server 忽略 key，仅为通过 pi 的 provider key 校验。
+    this.authStorage.set("local", { type: "api_key", key: "local" });
+    this.modelRegistry = ModelRegistry.create(this.authStorage, path.join(this.agentDir, "models.json"));
+    this.syncCloudProviders();
   }
 
-  /** 解析一个 EasyWork modelId → pi `Model` + 其 provider 的鉴权信息。 */
-  private resolveModel(modelId: string): { model: Model<"openai-completions">; provider: string; apiKey: string } {
+  /**
+   * 把 EasyWork 云端 provider 同步进 pi（AuthStorage key + ModelRegistry provider/headers）。
+   * 幂等 + 全量对账：已删除的 provider 会被注销。provider 增删后调用。
+   */
+  syncCloudProviders(): void {
+    const present = new Set<string>();
+    for (const cfg of this.deps.providers.dump()) {
+      present.add(cfg.id);
+      if (cfg.apiKey) this.authStorage.set(cfg.id, { type: "api_key", key: cfg.apiKey });
+      this.modelRegistry.registerProvider(cfg.id, {
+        baseUrl: cfg.baseUrl,
+        ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
+        ...(cfg.headers ? { headers: cfg.headers } : {}),
+        api: "openai-completions",
+        authHeader: true,
+        models: cfg.models.map((id) => ({
+          id,
+          name: id,
+          reasoning: false,
+          input: ["text"] as ("text" | "image")[],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 32768,
+          maxTokens: 4096,
+          ...(cfg.headers ? { headers: cfg.headers } : {}),
+        })),
+      });
+      this.registeredProviders.add(cfg.id);
+    }
+    for (const id of [...this.registeredProviders]) {
+      if (present.has(id)) continue;
+      this.modelRegistry.unregisterProvider(id);
+      this.authStorage.remove(id);
+      this.registeredProviders.delete(id);
+    }
+  }
+
+  /** 解析一个 EasyWork modelId → pi `Model`（本地 llama-server / 云端 provider）。 */
+  private resolveModel(modelId: string): Model<Api> {
     const localBase = this.deps.local.baseUrlFor(modelId);
     if (localBase) {
       const ctx = this.deps.local.contexts()[modelId];
-      const model: Model<"openai-completions"> = {
+      return {
         id: modelId,
         name: modelId,
         api: "openai-completions",
@@ -71,12 +116,14 @@ export class SessionHost {
         contextWindow: ctx && ctx > 0 ? ctx : 8192,
         maxTokens: 4096,
       };
-      // llama-server 忽略 key，仅为通过 pi 的 provider key 校验。
-      return { model, provider: "local", apiKey: "local" };
     }
     const cfg = this.deps.providers.findByModel(modelId);
     if (cfg) {
-      const model: Model<"openai-completions"> = {
+      if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
+      const m = this.modelRegistry.find(cfg.id, modelId);
+      if (m) return m;
+      // registry 未命中（理论不应发生）→ 手搓兜底，带上 headers，鉴权由共享 AuthStorage 提供。
+      return {
         id: modelId,
         name: modelId,
         api: "openai-completions",
@@ -87,8 +134,8 @@ export class SessionHost {
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 32768,
         maxTokens: 4096,
+        ...(cfg.headers ? { headers: cfg.headers } : {}),
       };
-      return { model, provider: cfg.id, apiKey: cfg.apiKey ?? "none" };
     }
     throw new Error(`model_not_resolvable: ${modelId}`);
   }
@@ -101,15 +148,12 @@ export class SessionHost {
       existing.dispose();
       this.sessions.delete(threadId);
     }
-    const { model, provider, apiKey } = this.resolveModel(modelId);
-    const authStorage = AuthStorage.inMemory();
-    authStorage.set(provider, { type: "api_key", key: apiKey });
-    const modelRegistry = ModelRegistry.inMemory(authStorage);
+    const model = this.resolveModel(modelId);
     const { session } = await createAgentSession({
       model,
       thinkingLevel: "off",
-      authStorage,
-      modelRegistry,
+      authStorage: this.authStorage,
+      modelRegistry: this.modelRegistry,
       cwd,
       agentDir: this.agentDir,
       // R1：用 pi 默认编码工具（read/bash/edit/write）。记忆/MCP/知识库在 R3 以 Extension/customTools 接入。

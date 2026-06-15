@@ -188,6 +188,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   try {
     const raw = repo.getSetting(PROVIDERS_KEY);
     if (raw) for (const c of JSON.parse(raw) as CloudProviderConfig[]) providers.add(c);
+    sessionHost.syncCloudProviders();
   } catch {
     /* 损坏的配置忽略 */
   }
@@ -356,12 +357,14 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     }
     providers.add(parsed.data);
     persistProviders();
+    sessionHost.syncCloudProviders();
     return { ok: true };
   });
 
   app.delete("/providers/:id", async (req) => {
     providers.remove((req.params as { id: string }).id);
     persistProviders();
+    sessionHost.syncCloudProviders();
     return { ok: true };
   });
 
