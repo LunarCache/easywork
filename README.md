@@ -11,16 +11,20 @@
 - **本地 / 云端模型**
   - 本地：从 HuggingFace 搜索、下载（断点续传）GGUF，经 `llama-server` 子进程运行（文本 / 视觉 / embedding）。每模型一进程，带 LRU 淘汰。
   - 云端：单一通用 **OpenAI-兼容** provider，接 OpenAI / OpenRouter / vLLM 等。
-- **Agent 工具能力**
-  - 自愈式 tool-call 解析器、调用去重、重复-noop 强制收尾、one-shot 工具、错误回喂自纠。
-  - **真实工具审批流**：危险工具经 SSE 挂起，UI 弹窗「允许 / 总是允许 / 拒绝」。
-  - 内置工具：`get_time` / `calculator` / `http_get`（带 SSRF 防护）/ `web_search` / `render_html` 工件。
-  - **MCP**：stdio（默认禁用，需开关）+ HTTP；cooloff / 工具缓存 / 入参校验 / 导入标准 `mcpServers` JSON。
-  - **Skills**：渐进披露（系统提示只放目录，模型按需 `open_skill` 加载全文）+ 热重载 + 模板创建。
+- **Agent 内核 = pi-coding-agent（托管）**
+  - 内核为托管 [`@earendil-works/pi`](https://github.com/earendil-works/pi) 的 `AgentSession`（无头嵌入）：自带编码工具（read/bash/edit/write/grep/ls/find）、自动上下文 compaction、会话管理。EasyWork 是它的宿主/集成层。
+  - **真实工具审批流（4 档）**：`read-only` / `approve-each` / `auto-edits` / `full-auto`，经 pi `tool_call` 钩子映射；危险工具经 SSE 挂起，UI 弹窗「允许 / 总是允许 / 拒绝」。
+  - **工作区路径限定**：fs 工具路径经 realpath 解析后硬拦越界（含软链接），bash 由审批把守。
+  - 内置工具（桥成 pi customTool）：`get_time` / `calculator` / `http_get`（带 SSRF 防护）/ `web_search`。
+  - **记忆/知识库/会话检索**：以 pi 扩展（召回注入 + 事实抽取）+ customTools 接入。
+  - **MCP**：stdio（默认禁用，需开关）+ HTTP；工具桥成 pi customTools；导入标准 `mcpServers` JSON。
+  - **Skills**：pi 自带 skills（resourceLoader 发现）+ 应用内 Skills 管理。
+- **工作区模式**：在本地项目目录里读写文件 / 跑命令（git 改动审阅面板）；区别于纯聊天模式（聊天模式收窄工具，去 bash/edit/write）。
 - **文档知识库 RAG**：本地文件上传 → 异步解析（带进度）→ 分块 → 嵌入 → **RRF 混合检索**（语义 + 词法）→ 多集合作用域 → 首轮自动注入 + 引用来源。
 - **可插拔记忆**：分层 markdown 为真相源（文件可手改、监听自动回灌）+ JS 余弦 / 词法混合召回；条目可编辑 / 删除；Mem0 适配器。
 - **采样参数**：`temperature / top_p / top_k / min_p / repeat_penalty / frequency_penalty / presence_penalty / reasoning_effort`，全链路透传，**按模型**保存（聊天内快捷浮层）。
-- **多协议端点**：`/v1/chat/completions`（+stream）、`/v1/embeddings`、`/v1/models`（OpenAI 兼容）、`/v1/messages`（Anthropic 兼容）。可让 Claude Code 等外部客户端直接指向。
+- **多协议端点（网关）**：`/v1/chat/completions`（+stream）、`/v1/embeddings`、`/v1/models`（OpenAI 兼容）、`/v1/messages`（Anthropic 兼容）。本地模型**透传**到其 llama-server 原生端点（OpenAI + 原生 Anthropic）；云端**流式经 pi-ai**（统一鉴权，含 OAuth）。可让 Claude Code 等外部客户端直接指向。
+- **本地端口暴露**：llama-server 默认仅绑 `127.0.0.1`；可在「设置 → 本地网络」切到 `0.0.0.0` 让局域网其他服务直连（**强制设置 api-key**，未鉴权拒绝）。
 - **思维链**：`<think>` 与 gpt-oss harmony 多通道（analysis → 思考 / final → 正文）解析。
 - **桌面 UI**：聊天（流式 / 思维链 / 工具卡 / 引用 / HTML 工件 / 图片多模态 / 审批弹窗）、模型、知识库、Skills、MCP、记忆、设置 —— 各为独立页面。
 
@@ -28,14 +32,15 @@
 
 ## 🧱 架构：Core Daemon 模型
 
-一个无头的 Node **核心守护进程（`@ew/core`）拥有全部"大脑"**：推理引擎、agent loop、工具 / Skills / MCP、记忆、知识库、SQLite 存储、provider 注册表。对外暴露**本地 HTTP API + SSE**（Fastify）。Tauri 桌面壳、外部 IM 连接器、以及任意 `/v1` 客户端都是它的**瘦客户端**——同一个大脑既服务应用内聊天，也服务外部渠道，还能无头运行。
+一个无头的 Node **核心守护进程（`@ew/core`）拥有全部"大脑"**：托管 pi-coding-agent 内核（`SessionHost`）、推理（llama-server 进程管理 + 云端 provider）、工具 / Skills / MCP、记忆、知识库、SQLite 存储。对外暴露**本地 HTTP API + SSE**（Fastify）。Tauri 桌面壳、外部 IM 连接器、以及任意 `/v1` 客户端都是它的**瘦客户端**——同一个大脑既服务应用内聊天，也服务外部渠道，还能无头运行。
 
 ```
                  ┌──────────────────────────────────────────┐
                  │            CORE DAEMON (@ew/core)          │
-                 │  推理引擎(llama-server host) · agent loop  │
-                 │  tools · skills · MCP · memory · RAG        │
-                 │  SQLite store · provider registry          │
+                 │  pi-coding-agent 内核(SessionHost 托管)     │
+                 │  ew-extensions(记忆/权限/桥接工具)          │
+                 │  llama-server host · skills · MCP · RAG     │
+                 │  SQLite store · /v1 网关(本地透传+云端 pi)  │
                  │  Fastify HTTP + SSE + /v1 + /v1/messages    │
                  └──────────────────────────────────────────┘
     spawn sidecar ▲       ▲ HTTP+SSE        ▲ HTTP+SSE    ▲ HTTP /v1
@@ -56,8 +61,8 @@
 ```
 packages/
   shared/         @ew/shared        纯 zod schema + 类型（契约层，零运行时依赖）
-  core/           @ew/core          daemon 库：server / routes / /v1 / agent loop / 解析器 / RAG / store
-  providers/      @ew/providers     LlamaServerEngine / OpenAICompatibleEngine / harmony 解析
+  core/           @ew/core          daemon 库：server / routes / SessionHost(托管 pi) / ew-extensions / /v1 网关 / RAG / store
+  providers/      @ew/providers     LlamaServerEngine（--host/--api-key）/ OpenAICompatibleEngine / harmony 解析
   memory/         @ew/memory        MemoryProvider：local（markdown + 混合召回）+ mem0
   tools/          @ew/tools         内置工具 + SSRF 防护
   skills/         @ew/skills        Skills 发现 / 渐进披露 / 执行
@@ -78,7 +83,8 @@ apps/
 
 | 关注点 | 选型 |
 |---|---|
-| 本地推理 | llama.cpp `llama-server` 子进程（OpenAI 兼容；文本 / `--mmproj` 视觉 / `--embedding`） |
+| Agent 内核 | `@earendil-works/pi`（pi-coding-agent）`AgentSession` 无头托管；记忆/工具/权限经扩展 + customTools 接入 |
+| 本地推理 | llama.cpp `llama-server` 子进程（OpenAI + 原生 Anthropic；文本 / `--mmproj` 视觉 / `--embedding`） |
 | HTTP | Fastify（schema-first、原生 SSE） |
 | 契约 / 校验 | zod + zod-to-json-schema |
 | 本地 DB | `node:sqlite`（内置 DatabaseSync，零原生编译） |
@@ -99,7 +105,7 @@ apps/
 ```bash
 npm install            # 安装全部 workspace 依赖
 npm run build          # turbo 构建全部包
-npm test               # vitest（102 测试）
+npm test               # vitest（176 测试）
 npm run typecheck      # 全量类型检查
 npm run lint           # eslint
 ```
@@ -138,6 +144,8 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 
 - OpenAI 兼容：`/v1/chat/completions`、`/v1/embeddings`、`/v1/models`
 - Anthropic 兼容：`/v1/messages`（流式 message_start → content_block_* → message_delta → message_stop）
+- 路由：**本地模型**透传到其 llama-server 原生端点（两种协议 + tool_use）；**云端流式**经 pi-ai（统一鉴权/OAuth），云端非流式走引擎。
+- `/v1/models` 含 `endpoints`（各本地模型对外 baseUrl/port，供外部直连 llama-server）。
 
 ---
 
@@ -150,12 +158,15 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 | `EW_ALLOW_STDIO_MCP=1` | 允许 stdio MCP（默认禁用，会在本机执行任意命令） |
 | `EW_DATA_DIR` | 数据目录（默认 `~/.easywork`） |
 
+> 本地网络暴露（绑定 host `127.0.0.1`/`0.0.0.0` 与 api-key）在 daemon 的 SQLite `settings` 表中持久化，由 UI「设置 → 本地网络」管理（非环境变量）。
+
 ---
 
 ## 📍 路线 / 未完成
 
 - IM 连接器：Telegram 已实现；Discord / 企业微信 / 飞书规划中。
-- 代码执行沙箱（python / terminal）：默认关闭，留作专门的安全设计。
+- 命令执行：工作区模式经 pi 的 `bash` 工具执行，由审批 4 档把守（非 `full-auto` 需确认）；无独立 OS 级沙箱。
+- 云端非流式仍走引擎（未并入 pi-ai）；持久化以 `ConversationRepo` 为真相源（未切 pi `SessionManager`）。
 - 个人微信无官方机器人 API → 仅做企业微信。
 
 进展详见 [`docs/PROGRESS.md`](docs/PROGRESS.md)，约定与架构详见 [`CLAUDE.md`](CLAUDE.md)。

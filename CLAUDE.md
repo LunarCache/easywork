@@ -1,21 +1,22 @@
 # EasyWork — 本地 AI 工作台
 
-> 纯推理（无训练/微调）的跨平台本地 AI 工作台。下载并运行本地 GGUF 模型，也可接云端 OpenAI-兼容模型；具备 Agent 工具能力（内置工具 / Skills / MCP）；支持应用内聊天与外部 IM 渠道，带可插拔记忆系统。
-> 参考 Unsloth Studio 与 Hermes Studio 的能力**思路**，独立实现（不抄袭）。TypeScript 开发，支持 Linux / macOS / Windows。
+> 纯推理（无训练/微调）的跨平台本地 AI 工作台。下载并运行本地 GGUF 模型，也可接云端 OpenAI-兼容模型；具备 Agent 工具能力（pi 自带编码工具 + 内置工具 / Skills / MCP）；支持应用内聊天与外部 IM 渠道，带可插拔记忆系统。
+> **Agent 内核 = 托管 `@earendil-works/pi`（pi-coding-agent）的 `AgentSession`（无头嵌入）**；EasyWork 退化为它的宿主/集成层。记忆/工具/权限以 pi 扩展 + customTools 接入。TypeScript 开发，支持 Linux / macOS / Windows。
 
 ## 核心架构：Core Daemon 模型
 
-一个无头 Node **核心守护进程（@ew/core）拥有全部"大脑"**：推理引擎、agent loop、工具/Skills/MCP、记忆、SQLite 存储、provider 注册表。对外暴露 **本地 HTTP API + SSE**（Fastify）。
+一个无头 Node **核心守护进程（@ew/core）拥有全部"大脑"**：pi-coding-agent 内核（`SessionHost` 托管）、推理（llama-server 进程管理 + 云端 provider）、工具/Skills/MCP、记忆、知识库、SQLite 存储。对外暴露 **本地 HTTP API + SSE**（Fastify）。
 
-Tauri webview UI、外部 IM 连接器、以及外部工具（Claude Code 等通过 `/v1` OpenAI-兼容端点）**都是这个 daemon 的瘦客户端**。这样"同一个大脑"既服务应用内聊天，也服务 Telegram/Discord 等外部渠道，还能无头运行（`easywork serve`）。
+Tauri webview UI、外部 IM 连接器、以及外部工具（Claude Code 等通过 `/v1` OpenAI/Anthropic 兼容端点）**都是这个 daemon 的瘦客户端**。这样"同一个大脑"既服务应用内聊天，也服务 Telegram/Discord 等外部渠道，还能无头运行（`easywork serve`）。
 
 ```
                  ┌──────────────────────────────────────────┐
                  │            CORE DAEMON (@ew/core)          │
-                 │  推理引擎(llama-server host) · agent loop  │
-                 │  tools · skills · MCP client · memory      │
-                 │  SQLite store · provider registry          │
-                 │  Fastify HTTP + SSE + /v1 OpenAI-compat     │
+                 │  pi-coding-agent 内核(SessionHost 托管)     │
+                 │  ew-extensions(记忆/权限/桥接工具) ·        │
+                 │  llama-server host · skills · MCP · memory  │
+                 │  SQLite store · /v1 网关(本地透传+云端 pi)  │
+                 │  Fastify HTTP + SSE + /v1 + /v1/messages    │
                  └──────────────────────────────────────────┘
     spawn/lease ▲       ▲ HTTP+SSE        ▲ HTTP+SSE     ▲ HTTP /v1
   ┌─────────────┘       │                 │              │
@@ -36,12 +37,12 @@ Tauri webview UI、外部 IM 连接器、以及外部工具（Claude Code 等通
 ```
 packages/
   shared/         @ew/shared        纯 zod schema + 类型（零运行时依赖）——契约层，所有包依赖它
-  core/           @ew/core          daemon 库：Fastify server、routes、/v1、agent loop、解析器、engine 路由、registry、SQLite store、LocalServerManager
-  providers/      @ew/providers     LlamaServerEngine（llama-server 子进程）/ openai-compatible
+  core/           @ew/core          daemon 库：Fastify server、routes、SessionHost(托管 pi)、ew-extensions(记忆/权限/桥接工具)、/v1 网关(本地透传+云端 pi-ai)、engine registry、SQLite store、LocalServerManager
+  providers/      @ew/providers     LlamaServerEngine（llama-server 子进程，支持 --api-key）/ openai-compatible
   memory/         @ew/memory        MemoryProvider 接口 + local + mem0
-  tools/          @ew/tools         内置工具（web fetch、fs、代码沙箱[默认关]）
-  skills/         @ew/skills        Skills 发现/加载/执行
-  mcp/            @ew/mcp           MCP client（@modelcontextprotocol/sdk）
+  tools/          @ew/tools         内置工具（time/calculator/http_get/web_search，桥成 pi customTools）+ SSRF/路径沙箱
+  skills/         @ew/skills        Skills 发现/加载/执行（pi 亦自带 skills，经 resourceLoader）
+  mcp/            @ew/mcp           MCP client（@modelcontextprotocol/sdk）；工具桥成 pi customTools
   im-connectors/  @ew/im-connectors telegram/discord/wecom/feishu
   sdk/            @ew/sdk           daemon HTTP API 的类型化客户端（UI/连接器/测试共用）
 apps/
@@ -55,7 +56,8 @@ resources/        图标、默认 skills、模型 catalog
 
 ## 技术栈
 
-- **本地推理（统一）**：llama.cpp `llama-server` 子进程（OpenAI 兼容，参考 Unsloth）。文本/视觉(`--mmproj`)/embedding(`--embedding`) 全走它。`LlamaServerEngine` 管理进程并委托内部 OpenAICompatibleEngine；`LocalServerManager` 每模型一个 server 进程并注册到 EngineRegistry。**已移除 node-llama-cpp**（避免原生 addon + 统一后端 + 与 Unsloth 一致）。需机器有 `llama-server`（Mac `brew install llama.cpp`；env `EW_LLAMA_SERVER` 可指定路径；打包时随附二进制）
+- **Agent 内核**：`@earendil-works/pi`（pi-coding-agent / pi-agent-core / pi-ai）。`SessionHost`（`packages/core/src/agent/session-host.ts`）封装 `createAgentSession` 无头嵌入，按 threadId 复用一个 `AgentSession`（保留上下文/自动 compaction），把 pi `AgentSessionEvent` 映射为我们的 SSE `AgentEvent`。EasyWork 专有能力经 `ew-extensions.ts` 接入：记忆（pi `context` 钩子注入召回 + `agent_end` 抽取）、`toPiTool`（我们的 `Tool` → pi customTool）、权限（pi `tool_call` 钩子 ↔ `ApprovalGate` 4 档 + `escapesCwd` 工作区路径限定）。pi 模型走 `ModelRegistry`/`AuthStorage`（本地 = 指向 llama-server 端口的 openai-completions Model；云端含 OAuth）。
+- **本地推理**：llama.cpp `llama-server` 子进程（OpenAI + 原生 Anthropic `/v1/messages`，带 `--jinja`）。文本/视觉(`--mmproj`)/embedding(`--embedding`) 全走它。`LlamaServerEngine` 管理进程并委托内部 OpenAICompatibleEngine；`LocalServerManager` 每模型一个 server 进程、含 LRU、可配置绑定 host（127.0.0.1 / 0.0.0.0）与 `--api-key`。`EngineRegistry` 现服务 `/v1` 非流式 + fact-extractor + embedding（非 agent 内核）。**已移除 node-llama-cpp**。需机器有 `llama-server`（Mac `brew install llama.cpp`；env `EW_LLAMA_SERVER` 可指定路径；打包时随附二进制）
 - **HTTP**：Fastify（schema-first、原生 SSE）
 - **契约/校验**：zod + zod-to-json-schema（一份 schema → TS 类型 + 函数调用 JSON Schema）
 - **本地 DB**：`node:sqlite`（Node 内置 DatabaseSync，**零原生编译**，Node 26 可用；规避 better-sqlite3 在新 ABI 上编译失败的 #1 打包风险）
@@ -73,24 +75,30 @@ resources/        图标、默认 skills、模型 catalog
 
 - `InferenceEngine`：`chat()` / `chatStream(): AsyncIterable<ChatStreamEvent>` / `embed?()` + `capabilities`。本地引擎额外 `load/unload/loaded`。
 - `ChatStreamEvent`：判别联合 `text-delta` / `tool-call-start|args-delta|end` / `reasoning-delta` / `usage` / `done`。**不用裸字符串流**（无法表达 text 与 tool call 交织）。
-- `Tool` / `ToolRegistry` / `ToolProvider`：内置工具、MCP 工具、Skills 统一成 `Tool` 进同一注册表；含 `ApprovalGate`。
+- `Tool` / `ToolProvider`：内置工具、MCP 工具统一成 `Tool`，再经 `toPiTool` 桥成 pi customTool（含 `ApprovalGate`）。**注**：自研 `ToolRegistry`/agent loop 已删除，agent 内核 = pi `AgentSession`。
 - `MemoryProvider`：`recall/write/edit/list/delete/observe`。本地 = 分层 markdown（真相源）+ JS 余弦语义 ⊕ 词法混合召回。
+- `AgentEvent`（SSE 对外事件）：`text/reasoning/tool-start/tool-end/tool-progress/approval-request/memory-recall/usage/final/error`。`mapSessionEvent` 把 pi 事件映射到它。
 - `ChannelConnector`：`start/stop/onInbound/reply`。`resolveThreadForChannel(kind, channelUserId)` 映射渠道身份到 thread → 跨渠道同一大脑。
 
 ## 关键正确性约束（实现时务必遵守）
 
-1. **流式与 tool-call 交织**：非原生 tool-call 引擎用尾缓冲 `stripToolCallMarkup`，**绝不吐出半个 `<tool_call>`/`<function=` 标签**，仅在流结束时结构化产出 tool call。
-2. **自愈解析器**（移植自 `unsloth/studio/backend/core/tool_healing.py`）：大括号平衡 + 字符串转义感知 + 闭合标签可选；name 字符类含 `-`（MCP 命名空间 `mcp__srv__tool` 依赖）。用参考的精确性用例锁定。
-3. **agent loop 安全**：`canonicalToolCallKey`（参数排序后稳定序列化）去重打断重复调用；max-iterations + 强制收尾；tool 错误一律作为 tool 消息喂回模型自纠，不抛出；`JSON.parse(args)` 包裹 try。
-4. **记忆召回**：相关度下限 + topK 上限防 context 稀释；markdown 为真相源，embedding 为派生缓存，变更才重嵌。
-5. **个人微信无官方机器人 API** → 只做企业微信（WeCom）；个人微信仅作带警告的实验性可选项，不依赖它。
+> tool-call 解析/交织、调用去重、max-iterations 等**现由 pi 内核负责**（自研 loop/healing/tool-registry 已删除）。下面是 EasyWork 宿主层必须守住的约束：
+
+1. **每 thread 串行化 run**：`SessionHost.run` 用 promise 链按 threadId 串行——同一会话同一时刻只跑一轮。pi 的 `subscribe` 是会话级，并发会跨请求串流 + 共享 runtime 审批错配（IM 连发/双击/重连可触发）。
+2. **事件映射唯一边界**：`mapSessionEvent`（pi→SSE）+ `pi-adapt.ts`（pi↔OpenAI/Anthropic）是仅有的边界翻译。协议翻译器必须处理 `error` 事件并正确终止（OpenAI error 帧 / Anthropic `event: error`，**不可伪装成 `end_turn`**）。
+3. **工作区路径限定**：pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。`escapesCwd`（`ew-extensions.ts`）经 `realpath` 解析软链接后硬拦 read/edit/write/ls/grep/find 的越界路径（所有审批档位）；bash 是任意 shell，靠审批把守。锁定测试：`workspace-confinement.test`（记录 pi 原始越界）+ `permission.test`（拦截）。
+4. **0.0.0.0 暴露强制 api-key**：`LocalServerManager` 绑 0.0.0.0 时必须设 `--api-key`（`/settings/local-net` 校验），内部回环调用（pi/proxy/fact-extractor）一并带 Bearer；引擎自连接恒走 127.0.0.1 回环。
+5. **SSE 健壮性**：所有 SSE 写口（`/agent/run`、`/v1` 透传、云端分支）须 `raw.on("error")` + `writableEnded/destroyed` 守卫，避免客户端断开后 write-after-end 崩 async handler。
+6. **记忆召回**：相关度下限 + topK 上限防 context 稀释；markdown 为真相源，embedding 为派生缓存，变更才重嵌；召回缓存挂 `RunRuntime`，每轮 `run()` 重置。
+7. **个人微信无官方机器人 API** → 只做企业微信（WeCom）；个人微信仅作带警告的实验性可选项，不依赖它。
 
 ## 常用命令
 
 ```bash
 npm install                 # 安装全部 workspace 依赖
 npm run build               # turbo 构建全部包（含 ui dist、desktop dist）
-npm test                    # vitest（61 测试）
+npm test                    # vitest（176 测试）
+EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts   # 真机 e2e（需本地模型 + llama-server）
 npm run typecheck           # 全量类型检查
 npm run lint                # eslint
 
@@ -108,15 +116,14 @@ npm run dev:desktop         # tauri dev：编译 Rust 壳、起 Vite(beforeDevCo
 # 实测脚本
 node scripts/smoke-local.mjs     # 下载小模型 + 本地文本推理（llama-server）
 node scripts/smoke-vision.mjs    # 下载视觉模型 + llama-server sidecar 多模态图片问答
+node scripts/spike-session.mjs   # pi AgentSession 无头嵌入 spike（R0 决策门）
 ```
 
-## 参考文件（仅借鉴思路，勿改 unsloth/ 目录）
+## 参考文件（只读，勿改这些目录）
 
-- `unsloth/studio/backend/core/tool_healing.py` — 逐行移植到 TS 的解析器
-- `unsloth/studio/backend/core/inference/tool_loop_controller.py` — agent loop 的 dedup/noop 模式
-- `unsloth/studio/backend/core/inference/mcp_client.py` — MCP cooloff + 工具缓存
-- `unsloth/studio/backend/core/inference/tools.py` — 内置工具 + RAG autoinject
-- `unsloth/studio/backend/core/rag/store.py` — sqlite-vec + FTS5 混合检索
+- `~/workspace/github/pi/packages/coding-agent/src/{core,index.ts}` — pi 内核源码：`createAgentSession`、`AgentSession`、tools、extensions、auth-storage、model-registry。是当前 agent 内核的真相源。
+- pi 类型在 `node_modules/@earendil-works/{pi-coding-agent,pi-agent-core,pi-ai}/dist/*.d.ts`（写宿主代码时核对事件/工具/Model 形状）。
+- `unsloth/` / Hermes — 早期借鉴的能力**思路**（记忆分层、RAG、混合召回）；agent loop/tool_healing 部分已被 pi 取代，勿再移植。
 
 ## 进展
 
