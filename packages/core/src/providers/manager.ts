@@ -57,4 +57,10 @@ export class ProviderManager {
   dump(): CloudProviderConfig[] {
     return [...this.configs.values()];
   }
+
+  /** 找到暴露了某 model id 的 provider 配置（供 pi-ai 解析云端模型）。 */
+  findByModel(modelId: string): CloudProviderConfig | undefined {
+    for (const c of this.configs.values()) if (c.models.includes(modelId)) return c;
+    return undefined;
+  }
 }

@@ -24,6 +24,8 @@ interface LocalHandle {
   engine: InferenceEngine & { start(): Promise<void>; stop(): Promise<void> };
   contextSize: number;
   lastUsed: number;
+  host: string;
+  port: number;
 }
 
 export interface LocalEngineLike extends InferenceEngine {
@@ -100,8 +102,21 @@ export class LocalServerManager {
     const tracked = this.trackUsage(id, engine);
     this.registry.register(tracked);
     this.registry.routeModel(id, tracked);
-    this.handles.set(id, { id, engine, contextSize: opts.contextSize ?? 0, lastUsed: this.now() });
+    this.handles.set(id, {
+      id,
+      engine,
+      contextSize: opts.contextSize ?? 0,
+      lastUsed: this.now(),
+      host: "127.0.0.1",
+      port,
+    });
     return { id, contextSize: opts.contextSize ?? 0 };
+  }
+
+  /** 已加载本地模型的 OpenAI 兼容 baseUrl（供 pi-ai openai-completions 驱动）。未加载返回 undefined。 */
+  baseUrlFor(modelId: string): string | undefined {
+    const h = this.handles.get(modelId);
+    return h ? `http://${h.host}:${h.port}/v1` : undefined;
   }
 
   /** 包装引擎：调用 chat/chatStream/embed 时更新 lastUsed（供 LRU）。 */
