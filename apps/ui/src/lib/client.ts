@@ -16,20 +16,29 @@ let runtime: { baseUrl: string; token: string } | undefined;
 
 /**
  * 解析 daemon 连接信息，优先级：
- * 1) 用户在 UI 里手动设置（localStorage）；
- * 2) Electron preload 注入的 window.ewConfig；
- * 3) 浏览器：URL ?baseUrl=&token= 或 Vite env；
- * 4) 默认 127.0.0.1:8788。
+ * 1) Tauri 运行时下发（runtime，桌面最高优先级）；
+ * 2) URL ?baseUrl=&token=（显式启动意图，最新——并持久化到 localStorage，后续裸刷新仍连）；
+ * 3) 用户在 UI 里手动设置 / 上次持久化（localStorage）；
+ * 4) window.ewConfig；
+ * 5) Vite env / 默认 127.0.0.1:8788。
  */
 export function resolveConfig(): { baseUrl: string; token: string } {
   if (runtime) return runtime;
-  const lsBase = localStorage.getItem(LS_BASE);
-  const lsToken = localStorage.getItem(LS_TOKEN);
-  if (lsBase) return { baseUrl: lsBase, token: lsToken ?? "" };
-  if (window.ewConfig?.baseUrl && window.ewConfig.token) return window.ewConfig;
+  // URL 参数优先且持久化：开发态用 ?baseUrl=&token= 启动一次后，裸刷新（localStorage）仍连；
+  // daemon 重启换 token 时，带新 ?token= 再开即可覆盖旧值。
   const q = new URLSearchParams(location.search);
-  const baseUrl = q.get("baseUrl") ?? import.meta.env.VITE_EW_BASEURL ?? "http://127.0.0.1:8788";
-  const token = q.get("token") ?? import.meta.env.VITE_EW_TOKEN ?? "";
+  const qBase = q.get("baseUrl");
+  if (qBase) {
+    const cfg = { baseUrl: qBase.replace(/\/$/, ""), token: q.get("token") ?? "" };
+    localStorage.setItem(LS_BASE, cfg.baseUrl);
+    localStorage.setItem(LS_TOKEN, cfg.token);
+    return cfg;
+  }
+  const lsBase = localStorage.getItem(LS_BASE);
+  if (lsBase) return { baseUrl: lsBase, token: localStorage.getItem(LS_TOKEN) ?? "" };
+  if (window.ewConfig?.baseUrl && window.ewConfig.token) return window.ewConfig;
+  const baseUrl = import.meta.env.VITE_EW_BASEURL ?? "http://127.0.0.1:8788";
+  const token = import.meta.env.VITE_EW_TOKEN ?? "";
   return { baseUrl: baseUrl.replace(/\/$/, ""), token };
 }
 
