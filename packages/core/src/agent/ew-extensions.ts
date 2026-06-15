@@ -1,6 +1,7 @@
 // R3 — EasyWork 专有能力以 pi 扩展/customTool 形式接入托管的 AgentSession：
 //  - 记忆：pi `context` 钩子注入召回 + `agent_end` 钩子被动抽取（保留 LocalMemoryProvider）。
 //  - 知识库 / session 检索 / MCP：桥成 pi customTools。
+import path from "node:path";
 import { Type } from "typebox";
 import type {
   ExtensionAPI,
@@ -159,10 +160,30 @@ export function decideTool(name: string, mode: ApprovalMode): "allow" | "block" 
   return "approve"; // bash / mcp：除 full-auto 外均审批
 }
 
+/**
+ * fs 工具的 path/file_path 参数是否逃出工作区（pi 自带工具不做路径沙箱，需我们兜住）。
+ * 返回越界的路径字符串，未越界返回 null。bash 是任意 shell，不在此静态检查（由审批把守）。
+ */
+export function escapesCwd(toolName: string, input: unknown, cwd: string): string | null {
+  if (classify(toolName) === "bash") return null;
+  const obj = (input ?? {}) as Record<string, unknown>;
+  const root = path.resolve(cwd);
+  for (const key of ["path", "file_path", "dir", "directory"]) {
+    const v = obj[key];
+    if (typeof v !== "string" || !v) continue;
+    const abs = path.resolve(root, v);
+    if (abs !== root && !abs.startsWith(root + path.sep)) return v;
+  }
+  return null;
+}
+
 /** 权限扩展工厂：pi `tool_call` 钩子按 RunRuntime 决策放行/阻止/审批（经 EasyWork ApprovalGate）。 */
-export function permissionExtensionFactory(runtime: RunRuntime): ExtensionFactory {
+export function permissionExtensionFactory(runtime: RunRuntime, cwd: string): ExtensionFactory {
   return (pi: ExtensionAPI) => {
     pi.on("tool_call", async (event: ToolCallEvent): Promise<ToolCallEventResult> => {
+      // 硬边界：fs 工具的路径不得逃出工作区（所有档位均拒，pi 不自带沙箱）。
+      const esc = escapesCwd(event.toolName, event.input, cwd);
+      if (esc) return { block: true, reason: `路径越界被拒（限定在工作区内）：${esc}` };
       const d = decideTool(event.toolName, runtime.mode);
       if (d === "allow") return {};
       if (d === "block") return { block: true, reason: `当前「${runtime.mode}」模式禁止 ${event.toolName}` };

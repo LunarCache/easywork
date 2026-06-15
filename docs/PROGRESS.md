@@ -12,8 +12,17 @@
 - **R3**：`agent/ew-extensions.ts` — 记忆经 pi `context`（召回注入）+ `agent_end`（事实抽取）扩展；`toPiTool` 把我们的 `Tool` 桥成 pi customTool；`manage_memory`/`session_search`/`search_knowledge_base`/MCP/内置工具均以 customTools 注入。
 - **R4**：pi `tool_call` 钩子映射审批 4 档（read-only/approve-each/auto-edits/full-auto）经 `ApprovalGate`（沿用 approval-request SSE）；工作区/聊天模式工具收窄。
 - **R5（硬切清理）**：`/agent/run` 仅走 pi（移除 `EW_KERNEL` 过渡门 + legacy 分支）；删除自研内核 `agent/{loop,healing,turn-recorder,tool-registry,workspace-approval,approval}.ts` 及其测试；内置工具桥成 customTools 保留能力。**保留**（仍在用）：`EngineRegistry`/`LocalServerManager`/`ProviderManager`（撑 `/v1`·`/chat/stream`·fact-extractor）、`approval-sse`、`memory/session/rag` 工具、`@ew/tools`。
-  - **待办（R5b，已知未做）**：`/v1`·`/chat/stream` 仍是引擎直连（非 pi-ai）；持久化仍用 `ConversationRepo`（未切 pi `SessionManager`）；`/agent/run` 的 abort 未透传给 pi；MCP 工具在会话创建时快照（运行时增删需重建会话）。
   - 结果：**148 测试全绿**（删 ~36 legacy 测试），typecheck 19/19，改动文件 eslint 0。
+
+### R5b — 收尾（abort / MCP 刷新 / 工具历史 / 工作区限定）
+
+- **工具历史持久化**：恢复 `ToolTurnRecorder`，把 pi 事件流里的 assistant tool_calls + tool results 重建并写入 `ConversationRepo` → 刷新后历史完整（修复 R5 只存 user+final 的回退）。
+- **abort 透传**：`SessionHost.run` 接 `signal`，SSE 断开 → `AgentSession.abort()` 中止 pi 当前轮。
+- **MCP 动态刷新**：`/mcp/servers` 增删后 `sessionHost.invalidateAll()`，下次 run 重建会话以纳入新 customTools。
+- **工作区路径限定（安全）**：发现 pi 自带 fs 工具**不做路径沙箱**（`write ../escape.txt` 真会越界写到父目录）。在 `permissionExtensionFactory` 加 `escapesCwd` 硬边界：read/edit/write/ls/grep/find 的 `path/file_path` 越界一律拒（所有档位，含 full-auto）；bash 为任意 shell 仍由审批把守。`workspace-confinement.test` 记录 pi 原始行为，`permission.test` 锁定我们的拦截。
+- **`/v1`·`/chat/stream` 决策**：**保留薄引擎**（EngineRegistry + LlamaServerEngine/OpenAICompatibleEngine）。它们是 OpenAI 兼容**服务端**，而 pi-ai 是**客户端**库，二者职责相反；用引擎实现服务端是正确选择，非遗留债。
+- **未做（明确）**：持久化仍以 `ConversationRepo` 为真相源（未切 pi `SessionManager` 为真相源——那是涉及 UI/SDK 的独立大改，无用户可见收益）。
+- 结果：**156 测试全绿**（+8），typecheck 19/19，改动文件 eslint 0，真机 e2e 通过且无越界产物。
 
 ## 阶段总览
 

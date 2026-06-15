@@ -29,6 +29,7 @@ import { ModelManager } from "../models/manager.js";
 import { ProviderManager, type CloudProviderConfig } from "../providers/manager.js";
 import { registerOpenAICompat } from "../openai-compat/router.js";
 import { SessionHost } from "../agent/session-host.js";
+import { ToolTurnRecorder } from "../agent/turn-recorder.js";
 import { ApprovalRegistry, SseApprovalGate } from "../agent/approval-sse.js";
 import { SqliteConversationRepo } from "../store/conversation.js";
 import { EmbeddingService } from "../memory/embedding-service.js";
@@ -477,6 +478,23 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       signal: ac.signal,
     });
 
+    // 从事件流重建并持久化工具往返（assistant tool_calls + tool results），保证刷新后历史完整。
+    const recorder = new ToolTurnRecorder();
+    const persistRecorded = (msgs: ReturnType<ToolTurnRecorder["push"]>): void => {
+      for (const m of msgs) {
+        repo.appendMessage({
+          id: crypto.randomUUID(),
+          threadId,
+          role: m.role,
+          seq: repo.nextSeq(threadId),
+          parts: m.parts,
+          ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
+          ...(m.toolResults ? { toolResults: m.toolResults } : {}),
+          createdAt: new Date().toISOString(),
+        });
+      }
+    };
+
     const userText = lastUser?.role === "user" ? messageText(lastUser.content) : "";
     try {
       for await (const ev of sessionHost.run({
@@ -488,7 +506,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         workspace: !!project?.workspaceDir,
         approval: runApproval,
         approvalMode: project?.approvalMode ?? "approve-each",
+        signal: ac.signal,
       })) {
+        persistRecorded(recorder.push(ev));
         if (ev.type === "final") finalContent = messageText(ev.message.content);
         send(ev);
       }
@@ -531,11 +551,13 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     }
     await mcp.upsert(parsed.data);
     persistMcp();
+    sessionHost.invalidateAll(); // MCP 工具集变更 → 重建会话以刷新 customTools。
     return { ok: true };
   });
   app.delete("/mcp/servers/:id", async (req) => {
     await mcp.remove((req.params as { id: string }).id);
     persistMcp();
+    sessionHost.invalidateAll();
     return { ok: true };
   });
   app.post("/mcp/probe", async (req, reply) => {

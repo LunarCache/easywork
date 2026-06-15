@@ -61,6 +61,8 @@ export interface EwAgentRunInput {
   approval?: ApprovalGate;
   /** R4：工作区审批档位。默认 approve-each。 */
   approvalMode?: ApprovalMode;
+  /** R5b：中断信号（SSE 断开 → 中止 pi 当前轮）。 */
+  signal?: AbortSignal;
 }
 
 interface HostedSession {
@@ -187,7 +189,7 @@ export class SessionHost {
     // R3：记忆扩展（context 召回 + agent_end 抽取）+ R4 权限扩展（tool_call 审批）。
     const factories: ExtensionFactory[] = [];
     if (this.deps.memory) factories.push(memoryExtensionFactory({ threadId, modelId, memory: this.deps.memory }));
-    if (workspace) factories.push(permissionExtensionFactory(runtime));
+    if (workspace) factories.push(permissionExtensionFactory(runtime, cwd));
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: this.agentDir,
@@ -228,6 +230,15 @@ export class SessionHost {
     // R4：写入本轮权限上下文（工作区模式下 tool_call 扩展据此审批）。
     hosted.runtime.mode = input.approvalMode ?? "approve-each";
     hosted.runtime.approval = input.approval;
+
+    // R5b：中断透传——信号 abort → 中止 pi 当前轮。
+    const onAbort = (): void => {
+      void session.abort().catch(() => {});
+    };
+    if (input.signal) {
+      if (input.signal.aborted) onAbort();
+      else input.signal.addEventListener("abort", onAbort);
+    }
 
     const queue: AgentEvent[] = [];
     let notify: (() => void) | null = null;
@@ -276,6 +287,7 @@ export class SessionHost {
       if (failed) yield { type: "error", message: failed };
     } finally {
       unsub();
+      input.signal?.removeEventListener("abort", onAbort);
     }
   }
 
@@ -286,6 +298,14 @@ export class SessionHost {
       s.dispose();
       this.sessions.delete(threadId);
     }
+  }
+
+  /**
+   * R5b：作废全部会话缓存，下次 run 重建（customTools 在会话创建时固定，
+   * MCP 等工具集变更后需重建会话才生效）。会丢失进程内上下文。
+   */
+  invalidateAll(): void {
+    this.disposeAll();
   }
 
   /** 释放全部（daemon 关停）。 */
