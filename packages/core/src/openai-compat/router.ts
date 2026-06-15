@@ -24,6 +24,8 @@ function genId(): string {
 export interface OpenAICompatDeps {
   /** 返回已加载本地模型的 OpenAI/Anthropic 兼容 baseUrl（http://host:port/v1）；非本地返回 undefined。 */
   localBaseUrl?: (model: string) => string | undefined;
+  /** 本地 llama-server 的 --api-key（设置后透传需带 Bearer）；未设返回 undefined。 */
+  localApiKey?: () => string | undefined;
   /** 透传所用 fetch（默认全局；测试可注入）。 */
   fetch?: typeof fetch;
   /** 云端流式经 pi-ai；非云端模型返回 null（回退到引擎）。 */
@@ -44,6 +46,7 @@ async function proxyToLocal(
   req: FastifyRequest,
   reply: FastifyReply,
   fetchImpl: typeof fetch,
+  apiKey?: string,
 ): Promise<void> {
   const ac = new AbortController();
   reply.raw.on("close", () => ac.abort());
@@ -51,7 +54,10 @@ async function proxyToLocal(
   try {
     upstream = await fetchImpl(`${base}${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+      },
       body: JSON.stringify(req.body ?? {}),
       signal: ac.signal,
     });
@@ -61,27 +67,30 @@ async function proxyToLocal(
   }
   reply.hijack();
   const raw = reply.raw;
-  raw.writeHead(upstream.status, {
-    "content-type": upstream.headers.get("content-type") ?? "application/json",
-    "cache-control": "no-cache",
-    connection: "keep-alive",
-    "access-control-allow-origin": req.headers.origin ?? "*",
-  });
-  if (!upstream.body) {
-    raw.end();
-    return;
-  }
-  const reader = upstream.body.getReader();
+  raw.on("error", () => {}); // 客户端断开后写 socket 不致命
   try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      raw.write(Buffer.from(value));
+    raw.writeHead(upstream.status, {
+      "content-type": upstream.headers.get("content-type") ?? "application/json",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+      "access-control-allow-origin": req.headers.origin ?? "*",
+    });
+    if (upstream.body) {
+      const reader = upstream.body.getReader();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done || raw.writableEnded || raw.destroyed) break;
+        raw.write(Buffer.from(value));
+      }
     }
   } catch {
     /* 客户端断开/上游中断：直接收尾 */
   } finally {
-    raw.end();
+    try {
+      raw.end();
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -110,46 +119,59 @@ export function registerOpenAICompat(
     const model = typeof body.model === "string" ? body.model : "";
     // 本地已加载模型 → 透传到 llama-server 原生 /v1/chat/completions。
     const localBase = model ? deps.localBaseUrl?.(model) : undefined;
-    if (localBase) return proxyToLocal(localBase, "/chat/completions", req, reply, deps.fetch ?? fetch);
+    if (localBase) return proxyToLocal(localBase, "/chat/completions", req, reply, deps.fetch ?? fetch, deps.localApiKey?.());
 
     const chatReq = openaiToChatRequest(body);
     if (!chatReq.model) return reply.code(400).send({ error: { message: "missing model" } });
 
-    // 云端流式 → pi-ai（统一 ModelRegistry/AuthStorage，含 OAuth/Anthropic 原生）。非云端返回 null → 回退引擎。
+    // 云端流式 → pi-ai（统一 ModelRegistry/AuthStorage，含 OAuth/Anthropic 原生）。非云端/出错 → 回退引擎。
     if (body.stream === true && deps.cloudStream) {
       const ac = new AbortController();
-      const piStream = await deps.cloudStream(chatReq.model, chatRequestToPiContext(chatReq), {
-        signal: ac.signal,
-        ...(chatReq.temperature != null ? { temperature: chatReq.temperature } : {}),
-        ...(chatReq.maxTokens != null ? { maxTokens: chatReq.maxTokens } : {}),
-      });
+      let piStream: AssistantMessageEventStream | null = null;
+      try {
+        piStream = await deps.cloudStream(chatReq.model, chatRequestToPiContext(chatReq), {
+          signal: ac.signal,
+          ...(chatReq.temperature != null ? { temperature: chatReq.temperature } : {}),
+          ...(chatReq.maxTokens != null ? { maxTokens: chatReq.maxTokens } : {}),
+        });
+      } catch {
+        piStream = null; // cloudStream 抛错 → 回退引擎路径
+      }
       if (piStream) {
         reply.raw.on("close", () => ac.abort());
         const id = genId();
         const created = Math.floor(Date.now() / 1000);
         reply.hijack();
         const raw = reply.raw;
-        raw.writeHead(200, {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          connection: "keep-alive",
-          "access-control-allow-origin": req.headers.origin ?? "*",
-        });
+        raw.on("error", () => {});
         const roleSent = { value: false };
         const state = newPiAdaptState();
+        const write = (s: string): void => {
+          if (!raw.writableEnded && !raw.destroyed) raw.write(s);
+        };
         try {
+          raw.writeHead(200, {
+            "content-type": "text/event-stream",
+            "cache-control": "no-cache",
+            connection: "keep-alive",
+            "access-control-allow-origin": req.headers.origin ?? "*",
+          });
           for await (const pev of piStream) {
             for (const ce of piEventToChatStreamEvents(pev, state)) {
               for (const chunk of streamEventToOpenAIChunks(ce, { id, created, model: chatReq.model, roleSent })) {
-                raw.write(`data: ${chunk}\n\n`);
+                write(`data: ${chunk}\n\n`);
               }
             }
           }
         } catch (err) {
-          raw.write(`data: ${JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
+          write(`data: ${JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
         } finally {
-          raw.write("data: [DONE]\n\n");
-          raw.end();
+          write("data: [DONE]\n\n");
+          try {
+            raw.end();
+          } catch {
+            /* ignore */
+          }
         }
         return;
       }
@@ -203,45 +225,55 @@ export function registerOpenAICompat(
     const body = req.body as AnthropicRequestBody;
     // 本地已加载模型 → 透传到 llama-server 原生 /v1/messages（含 tool_use，需 --jinja，已带）。
     const localBase = body.model ? deps.localBaseUrl?.(body.model) : undefined;
-    if (localBase) return proxyToLocal(localBase, "/messages", req, reply, deps.fetch ?? fetch);
+    if (localBase) return proxyToLocal(localBase, "/messages", req, reply, deps.fetch ?? fetch, deps.localApiKey?.());
 
     const chatReq = anthropicToChatRequest(body);
     if (!chatReq.model) return reply.code(400).send({ type: "error", error: { message: "missing model" } });
 
-    // 云端流式 → pi-ai；非云端返回 null → 回退引擎。
+    // 云端流式 → pi-ai；非云端/出错 → 回退引擎。
     if (body.stream === true && deps.cloudStream) {
       const ac = new AbortController();
-      const piStream = await deps.cloudStream(chatReq.model, chatRequestToPiContext(chatReq), {
-        signal: ac.signal,
-        ...(chatReq.temperature != null ? { temperature: chatReq.temperature } : {}),
-        ...(chatReq.maxTokens != null ? { maxTokens: chatReq.maxTokens } : {}),
-      });
+      let piStream: AssistantMessageEventStream | null = null;
+      try {
+        piStream = await deps.cloudStream(chatReq.model, chatRequestToPiContext(chatReq), {
+          signal: ac.signal,
+          ...(chatReq.temperature != null ? { temperature: chatReq.temperature } : {}),
+          ...(chatReq.maxTokens != null ? { maxTokens: chatReq.maxTokens } : {}),
+        });
+      } catch {
+        piStream = null;
+      }
       if (piStream) {
         reply.raw.on("close", () => ac.abort());
         const id = `msg_${Date.now().toString(36)}${(counter += 1).toString(36)}`;
         reply.hijack();
         const raw = reply.raw;
-        raw.writeHead(200, {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          connection: "keep-alive",
-          "access-control-allow-origin": req.headers.origin ?? "*",
-        });
+        raw.on("error", () => {});
         const tr = new AnthropicStreamTranslator(id, chatReq.model);
         const state = newPiAdaptState();
-        raw.write(tr.start());
+        const write = (s: string): void => {
+          if (s && !raw.writableEnded && !raw.destroyed) raw.write(s);
+        };
         try {
+          raw.writeHead(200, {
+            "content-type": "text/event-stream",
+            "cache-control": "no-cache",
+            connection: "keep-alive",
+            "access-control-allow-origin": req.headers.origin ?? "*",
+          });
+          write(tr.start());
           for await (const pev of piStream) {
-            for (const ce of piEventToChatStreamEvents(pev, state)) {
-              const frame = tr.event(ce);
-              if (frame) raw.write(frame);
-            }
+            for (const ce of piEventToChatStreamEvents(pev, state)) write(tr.event(ce));
           }
-          raw.write(tr.end());
+          write(tr.end());
         } catch (err) {
-          raw.write(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
+          write(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
         } finally {
-          raw.end();
+          try {
+            raw.end();
+          } catch {
+            /* ignore */
+          }
         }
         return;
       }

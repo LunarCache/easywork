@@ -2,6 +2,7 @@
 //  - 记忆：pi `context` 钩子注入召回 + `agent_end` 钩子被动抽取（保留 LocalMemoryProvider）。
 //  - 知识库 / session 检索 / MCP：桥成 pi customTools。
 import path from "node:path";
+import fs from "node:fs";
 import { Type } from "typebox";
 import type {
   ExtensionAPI,
@@ -51,7 +52,7 @@ export function toPiTool(tool: Tool, base: { sessionId: string; cwd: string }): 
       };
       const res = await tool.execute(params, ctx);
       // pi 以「抛出」表达工具错误（loop 捕获 → 作为 isError 的 tool result 喂回模型自纠）。
-      if (res.isError) throw new Error(contentText(res.content));
+      if (res.isError) throw new Error(contentText(res.content) || "tool_error");
       return { content: toPiContent(res.content), details: res.display ?? null };
     },
   };
@@ -94,19 +95,21 @@ export function memoryExtensionFactory(opts: {
   threadId: string;
   modelId: string;
   memory: MemoryProvider;
+  /** 召回缓存挂在 run 运行时上，由宿主每轮重置（避免同 query 跨轮复用陈旧召回）。 */
+  runtime: RunRuntime;
 }): ExtensionFactory {
-  // 同一轮运行内 query 不变 → 缓存召回结果，避免工具循环里反复 embedding。
-  let cache: { key: string; block: string } | null = null;
   return (pi: ExtensionAPI) => {
     pi.on("context", async (event: ContextEvent) => {
       const query = lastUserText(event.messages);
       if (!query) return;
-      if (!cache || cache.key !== query) {
+      const rt = opts.runtime;
+      // 工具循环里同一 query 复用本轮召回，避免反复 embedding；run() 开始已清空。
+      if (!rt.recall || rt.recall.key !== query) {
         const items = await opts.memory.recall({ query, topK: 6, minScore: 0.3 }).catch(() => [] as MemoryItem[]);
-        cache = { key: query, block: items.length ? formatRecall(items) : "" };
+        rt.recall = { key: query, block: items.length ? formatRecall(items) : "" };
       }
-      if (!cache.block) return;
-      const injected = { role: "user" as const, content: cache.block, timestamp: Date.now() };
+      if (!rt.recall.block) return;
+      const injected = { role: "user" as const, content: rt.recall.block, timestamp: Date.now() };
       return { messages: [injected, ...event.messages] };
     });
     pi.on("agent_end", async (event: AgentEndEvent) => {
@@ -121,12 +124,14 @@ export function memoryExtensionFactory(opts: {
   };
 }
 
-/** 每轮运行的权限上下文（run() 前由宿主写入；权限扩展闭包读取）。 */
+/** 每轮运行的权限/记忆上下文（run() 前由宿主写入/重置；扩展闭包读取）。 */
 export interface RunRuntime {
   mode: ApprovalMode;
   approval?: ApprovalGate;
   /** approve-always 记忆：本会话内该工具后续放行。 */
   alwaysApproved: Set<string>;
+  /** 本轮召回缓存（run() 开始时重置，避免同一 query 跨轮复用陈旧召回）。 */
+  recall?: { key: string; block: string };
 }
 
 const READ_TOOLS = new Set(["read", "ls", "grep", "find"]);
@@ -160,19 +165,37 @@ export function decideTool(name: string, mode: ApprovalMode): "allow" | "block" 
   return "approve"; // bash / mcp：除 full-auto 外均审批
 }
 
+/** 取路径的「真实」绝对路径：对最深的已存在祖先 realpath（解析软链接），再拼回不存在的尾段。 */
+function realResolve(abs: string): string {
+  const parts: string[] = [];
+  let cur = path.resolve(abs);
+  for (;;) {
+    try {
+      const base = fs.realpathSync(cur);
+      return parts.length ? path.join(base, ...parts.slice().reverse()) : base;
+    } catch {
+      const parent = path.dirname(cur);
+      if (parent === cur) return path.resolve(abs); // 到根仍不存在 → 退回词法
+      parts.push(path.basename(cur));
+      cur = parent;
+    }
+  }
+}
+
 /**
- * fs 工具的 path/file_path 参数是否逃出工作区（pi 自带工具不做路径沙箱，需我们兜住）。
+ * fs 工具的路径参数是否逃出工作区（pi 自带工具不做路径沙箱，需我们兜住）。
+ * 经 realpath 解析软链接后再比对，防止「工作区内软链接指向外部」绕过。
  * 返回越界的路径字符串，未越界返回 null。bash 是任意 shell，不在此静态检查（由审批把守）。
  */
 export function escapesCwd(toolName: string, input: unknown, cwd: string): string | null {
   if (classify(toolName) === "bash") return null;
   const obj = (input ?? {}) as Record<string, unknown>;
-  const root = path.resolve(cwd);
-  for (const key of ["path", "file_path", "dir", "directory"]) {
+  const root = realResolve(path.resolve(cwd));
+  for (const key of ["path", "file_path", "dir", "directory", "old_path", "new_path"]) {
     const v = obj[key];
     if (typeof v !== "string" || !v) continue;
-    const abs = path.resolve(root, v);
-    if (abs !== root && !abs.startsWith(root + path.sep)) return v;
+    const real = realResolve(path.resolve(path.resolve(cwd), v));
+    if (real !== root && !real.startsWith(root + path.sep)) return v;
   }
   return null;
 }

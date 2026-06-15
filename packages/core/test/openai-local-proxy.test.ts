@@ -152,6 +152,41 @@ describe("/v1 云端经 pi-ai", () => {
     await app.close();
   });
 
+  it("云端流中途出错：OpenAI 发 error 帧（不静默截断）", async () => {
+    const errEvents = [
+      { type: "text_delta", contentIndex: 0, delta: "partial", partial: {} },
+      { type: "error", reason: "error", error: { errorMessage: "rate limited" } },
+    ] as unknown as AssistantMessageEvent[];
+    const app = Fastify();
+    registerOpenAICompat(app, stubRegistry, { localBaseUrl: () => undefined, cloudStream: async () => fakePiStream(errEvents) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: { model: "cloud-z", messages: [{ role: "user", content: "hi" }], stream: true },
+    });
+    expect(res.body).toContain("rate limited");
+    expect(res.body).toContain("upstream_error");
+    await app.close();
+  });
+
+  it("云端流中途出错：Anthropic 发 error 事件且不伪装成 end_turn", async () => {
+    const errEvents = [
+      { type: "text_delta", contentIndex: 0, delta: "partial", partial: {} },
+      { type: "error", reason: "error", error: { errorMessage: "boom" } },
+    ] as unknown as AssistantMessageEvent[];
+    const app = Fastify();
+    registerOpenAICompat(app, stubRegistry, { localBaseUrl: () => undefined, cloudStream: async () => fakePiStream(errEvents) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      payload: { model: "cloud-z", messages: [{ role: "user", content: "hi" }], stream: true },
+    });
+    expect(res.body).toContain("event: error");
+    expect(res.body).toContain("boom");
+    expect(res.body).not.toContain("end_turn");
+    await app.close();
+  });
+
   it("cloudStream 返回 null（非云端）→ 回退引擎（stub 抛错 → 流式错误体）", async () => {
     const app = Fastify();
     registerOpenAICompat(app, stubRegistry, {

@@ -4,6 +4,11 @@ import { getClient } from "../lib/client.js";
 import { loadAgentPrefs, saveAgentPrefs, type AgentPrefs } from "../lib/prefs.js";
 import { SlidersIcon, BoxIcon, BrainIcon, GlobeIcon } from "../icons.js";
 
+/** 生成一个随机 api-key（暴露 0.0.0.0 时用）。 */
+function genApiKey(): string {
+  return "ew-" + crypto.randomUUID().replace(/-/g, "");
+}
+
 export function Settings({ onChange }: { onChange: () => void }) {
   const [prov, setProv] = useState({ id: "", baseUrl: "", apiKey: "", models: "" });
   const [providers, setProviders] = useState<{ id: string; baseUrl: string; models: string[] }[]>([]);
@@ -11,6 +16,7 @@ export function Settings({ onChange }: { onChange: () => void }) {
   const [agentPrefs, setAgentPrefs] = useState<AgentPrefs>(() => loadAgentPrefs());
   const [net, setNet] = useState<LocalNetInfo | null>(null);
   const [netBusy, setNetBusy] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState("");
 
   const setAgentPref = (key: keyof AgentPrefs, raw: string) => {
     const v = raw.trim() === "" ? undefined : Number(raw);
@@ -35,11 +41,17 @@ export function Settings({ onChange }: { onChange: () => void }) {
 
   const changeBind = async (host: "127.0.0.1" | "0.0.0.0") => {
     if (netBusy || net?.bindHost === host) return;
+    let apiKey: string | undefined;
+    if (host === "0.0.0.0") {
+      // 暴露到局域网必须有 api-key：用输入框 / 现有 / 自动生成。
+      apiKey = apiKeyInput.trim() || net?.apiKey || genApiKey();
+    }
     setNetBusy(true);
     setNote(host === "0.0.0.0" ? "正在重载模型并暴露到局域网…" : "正在重载模型并收回到本机…");
     try {
-      const r = await getClient().setLocalNet(host);
+      const r = await getClient().setLocalNet(host, apiKey);
       setNet(r);
+      setApiKeyInput("");
       setNote(host === "0.0.0.0" ? "已暴露到局域网（0.0.0.0）" : "已收回到仅本机（127.0.0.1）");
     } catch (e) {
       setNote(`切换失败：${e instanceof Error ? e.message : String(e)}`);
@@ -153,9 +165,20 @@ export function Settings({ onChange }: { onChange: () => void }) {
             局域网（0.0.0.0）
           </button>
         </div>
+        <div className="form" style={{ marginTop: 8 }}>
+          <input
+            placeholder="api-key（绑 0.0.0.0 必填；留空自动生成）"
+            type="text"
+            value={apiKeyInput}
+            onChange={(e) => setApiKeyInput(e.target.value)}
+          />
+          <button disabled={netBusy} onClick={() => setApiKeyInput(genApiKey())}>
+            生成
+          </button>
+        </div>
         {net?.bindHost === "0.0.0.0" && (
           <div className="note">
-            ⚠️ 已绑定 0.0.0.0：同局域网内任意设备都可访问你的本地模型（无鉴权）。仅在可信网络使用。
+            ⚠️ 已绑定 0.0.0.0：局域网设备需带 <code>Authorization: Bearer {net.apiKey}</code> 才能访问。请仅在可信网络使用。
           </div>
         )}
         {net && net.endpoints.length > 0 ? (

@@ -153,6 +153,7 @@ export class AnthropicStreamTranslator {
   private toolOpen = false;
   private outputTokens = 0;
   private finish: FinishReason = "stop";
+  private errored = false;
 
   constructor(
     private readonly id: string,
@@ -240,12 +241,21 @@ export class AnthropicStreamTranslator {
         this.finish = ev.finishReason ?? this.finish;
         return "";
       }
+      case "error": {
+        // 流中途出错：发 Anthropic error 事件并标记，end() 不再伪装成功收尾。
+        this.errored = true;
+        let out = this.closeOpenBlock();
+        out += this.frame("error", { type: "error", error: { type: "api_error", message: ev.message } });
+        return out;
+      }
       default:
         return "";
     }
   }
 
   end(): string {
+    // 已发 error 事件则不再发 message_delta（否则会把错误伪装成 end_turn）。
+    if (this.errored) return this.closeOpenBlock();
     let out = this.closeOpenBlock();
     out += this.frame("message_delta", {
       type: "message_delta",

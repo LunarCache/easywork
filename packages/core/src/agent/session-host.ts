@@ -86,6 +86,8 @@ export class SessionHost {
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
   private readonly registeredProviders = new Set<string>();
+  // H1：按 threadId 串行化 run（pi 会话 + 全局 subscribe 不可并发复用）。
+  private readonly runChain = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: SessionHostDeps) {
     this.agentDir = deps.agentDir ?? path.join(os.homedir(), ".easywork", "pi-agent");
@@ -137,6 +139,9 @@ export class SessionHost {
   private resolveModel(modelId: string): Model<Api> {
     const localBase = this.deps.local.baseUrlFor(modelId);
     if (localBase) {
+      // llama-server 设了 --api-key 时（0.0.0.0 暴露），pi 调用本机也需带该 key。
+      const key = this.deps.local.getApiKey?.() || "local";
+      this.authStorage.set("local", { type: "api_key", key });
       const ctx = this.deps.local.contexts()[modelId];
       return {
         id: modelId,
@@ -212,7 +217,9 @@ export class SessionHost {
     const runtime: RunRuntime = { mode: "approve-each", alwaysApproved: new Set() };
     // R3：记忆扩展（context 召回 + agent_end 抽取）+ R4 权限扩展（tool_call 审批）。
     const factories: ExtensionFactory[] = [];
-    if (this.deps.memory) factories.push(memoryExtensionFactory({ threadId, modelId, memory: this.deps.memory }));
+    if (this.deps.memory) {
+      factories.push(memoryExtensionFactory({ threadId, modelId, memory: this.deps.memory, runtime }));
+    }
     if (workspace) factories.push(permissionExtensionFactory(runtime, cwd));
     const resourceLoader = new DefaultResourceLoader({
       cwd,
@@ -246,14 +253,30 @@ export class SessionHost {
     return hosted;
   }
 
-  /** 跑一轮，产出我们的 `AgentEvent` 流（供 SSE 转发）。 */
+  /** 跑一轮，产出我们的 `AgentEvent` 流（供 SSE 转发）。按 threadId 串行化。 */
   async *run(input: EwAgentRunInput): AsyncGenerator<AgentEvent> {
+    const prev = this.runChain.get(input.threadId) ?? Promise.resolve();
+    let release!: () => void;
+    const mine = new Promise<void>((r) => {
+      release = r;
+    });
+    this.runChain.set(input.threadId, prev.then(() => mine));
+    await prev.catch(() => {}); // 等同 thread 上一轮收尾，避免并发复用同一 pi 会话
+    try {
+      yield* this.runOne(input);
+    } finally {
+      release();
+    }
+  }
+
+  private async *runOne(input: EwAgentRunInput): AsyncGenerator<AgentEvent> {
     const workspace = input.workspace ?? false;
     const hosted = await this.getOrCreate(input.threadId, input.modelId, input.cwd, workspace);
     const session = hosted.session;
     // R4：写入本轮权限上下文（工作区模式下 tool_call 扩展据此审批）。
     hosted.runtime.mode = input.approvalMode ?? "approve-each";
     hosted.runtime.approval = input.approval;
+    hosted.runtime.recall = undefined; // M3：每轮重置召回缓存
 
     // R5b：中断透传——信号 abort → 中止 pi 当前轮。
     const onAbort = (): void => {

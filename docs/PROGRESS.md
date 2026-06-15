@@ -2,6 +2,19 @@
 
 > 每完成一个里程碑更新此文件。最新在上。
 
+## 2026-06-15（续）— 代码 review 修复（pi 迁移 + /v1 + 本地暴露）
+
+三路并行 review 后修复确认问题：
+- **H1 并发串流**：`SessionHost.run` 按 threadId **串行化**（promise 链）——同一会话同一时刻只跑一轮，杜绝 pi 全局 subscribe 跨请求串流 + 共享 runtime 审批错配（IM 连发/双击/重连可触发）。
+- **H2 绑定 host 三连**：`LocalServerManager` 加 mutex（串行化 load/unload/applyNet/stopAll）；`applyNet` 逐个 try/catch **重载失败不清空全部**；`/settings/local-net` 成功后 `sessionHost.invalidateAll()` **重建会话避免指向旧端口**。
+- **H3 云端出错被吞/伪装**：在两个协议翻译器加 `error` 处理——OpenAI 发 error 帧、Anthropic 发 `event: error` 且 **不再伪装成 `end_turn`**（修本地引擎与云端两条路径）。
+- **0.0.0.0 强制 api-key**：`LlamaServerEngine --api-key`；`LocalServerManager.apiKey`（透传子进程）；`/settings/local-net` 绑 0.0.0.0 **必须**非空 key（否则 400），内部回环调用（pi/proxy/fact-extractor）一并带 Bearer；UI 加 api-key 输入 + 生成按钮 + 告警示范请求头。引擎自连接恒走 127.0.0.1 回环。
+- **M1 SSE 写已关闭 socket**：proxy/`/agent/run`/云端分支加 `raw.on("error")` + `writableEnded/destroyed` 守卫 + finally try/catch。
+- **M2 cloudStream 抛错**：try/catch 包裹 → 回退引擎而非 500。
+- **M3 召回缓存陈旧**：召回缓存挂到 `RunRuntime`，每轮 `run()` 重置。
+- **M4 软链接越界**：`escapesCwd` 经 `realpath` 解析（取最深已存在祖先）再比对，挡住"工作区内软链接指向外部"；并补 old_path/new_path 字段。
+- 结果：**176 测试全绿**（新增 symlink 越界、云端 error 终止、api-key 透传、no-strand 重载等），typecheck 19/19，改动源码 eslint 0，真机 e2e 通过无越界产物。
+
 ## 2026-06-15 — 内核换为 pi-coding-agent（托管 AgentSession，硬切）
 
 把 EasyWork 的 agent 内核从自研 loop **硬切**为托管 `@earendil-works/pi-coding-agent` 的 `createAgentSession`（无头嵌入），EasyWork 退化为宿主/集成层。分 R0–R5 推进，每阶段真机 e2e（本地 llama-server）验证：

@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import os from "node:os";
+import path from "node:path";
+import fs from "node:fs";
 import type { ApprovalGate, ApprovalMode, ApprovalVerdictResult } from "@ew/shared";
 import type { ExtensionAPI, ToolCallEvent, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
 import { decideTool, permissionExtensionFactory, escapesCwd, type RunRuntime } from "../src/agent/ew-extensions.js";
@@ -50,6 +53,25 @@ describe("escapesCwd", () => {
     expect(escapesCwd("edit", { path: "/etc/passwd" }, "/work")).toBe("/etc/passwd");
     // bash 不静态检查（任意 shell，由审批把守）。
     expect(escapesCwd("bash", { command: "rm -rf /" }, "/work")).toBeNull();
+    // old_path/new_path 也覆盖（重命名类工具）。
+    expect(escapesCwd("edit", { old_path: "../x", new_path: "a" }, "/work")).toBe("../x");
+  });
+
+  it("catches symlink-inside-workspace escape (realpath hardening)", () => {
+    const parent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-sym-")));
+    const cwd = path.join(parent, "ws");
+    fs.mkdirSync(cwd);
+    const outside = path.join(parent, "outside");
+    fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(cwd, "link")); // ws/link -> ../outside
+    try {
+      // 词法上 link/secret 在 cwd 内，但 realpath 指向 outside → 应被拦。
+      expect(escapesCwd("write", { path: "link/secret.txt" }, cwd)).toBe("link/secret.txt");
+      // 真正在 cwd 内的不拦。
+      expect(escapesCwd("write", { path: "sub/ok.txt" }, cwd)).toBeNull();
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
   });
 });
 

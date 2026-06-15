@@ -24,6 +24,8 @@ export interface LlamaServerOptions {
   gpuLayers?: number;
   /** embedding 模式：启动 --embedding 服务（用于本地记忆向量召回）。 */
   embedding?: boolean;
+  /** llama-server --api-key：设置后所有请求（含本机回环）需 Bearer 鉴权。用于 0.0.0.0 暴露。 */
+  apiKey?: string;
   /** 额外透传给 llama-server 的参数。 */
   extraArgs?: string[];
   /** 就绪探测超时（ms，默认 60s）。 */
@@ -63,8 +65,9 @@ export class LlamaServerEngine implements InferenceEngine {
     };
   }
 
+  // 自连接恒走回环：--host 只控制对外绑定，daemon 与 llama-server 同机，自身调用用 127.0.0.1。
   private baseUrl(): string {
-    return `http://${this.opts.host}:${this.opts.port}/v1`;
+    return `http://127.0.0.1:${this.opts.port}/v1`;
   }
 
   private buildArgs(): string[] {
@@ -78,6 +81,7 @@ export class LlamaServerEngine implements InferenceEngine {
     if (this.opts.contextSize) a.push("-c", String(this.opts.contextSize));
     // 默认全量 GPU 卸载（Mac=Metal）；CPU-only 构建会自动忽略。
     a.push("-ngl", String(this.opts.gpuLayers ?? 999));
+    if (this.opts.apiKey) a.push("--api-key", this.opts.apiKey);
     if (this.opts.extraArgs) a.push(...this.opts.extraArgs);
     return a;
   }
@@ -92,7 +96,7 @@ export class LlamaServerEngine implements InferenceEngine {
     });
 
     const deadline = Date.now() + (this.opts.readyTimeoutMs ?? 60_000);
-    const healthUrl = `http://${this.opts.host}:${this.opts.port}/health`;
+    const healthUrl = `http://127.0.0.1:${this.opts.port}/health`;
     while (Date.now() < deadline) {
       try {
         const res = await this.fetchImpl(healthUrl);
@@ -110,6 +114,7 @@ export class LlamaServerEngine implements InferenceEngine {
       baseUrl: this.baseUrl(),
       capabilities: this.capabilities,
       fetch: this.fetchImpl,
+      ...(this.opts.apiKey ? { apiKey: this.opts.apiKey } : {}),
     });
   }
 

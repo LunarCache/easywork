@@ -168,6 +168,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   const PROVIDERS_KEY = "providers";
   const MCP_KEY = "mcp.servers";
   const LOCAL_BIND_KEY = "local.bindHost";
+  const LOCAL_APIKEY_KEY = "local.apiKey";
   const persistProviders = (): void => {
     try {
       repo.setSetting(PROVIDERS_KEY, JSON.stringify(providers.dump()));
@@ -190,10 +191,11 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   } catch {
     /* 损坏的配置忽略 */
   }
-  // 恢复 llama-server 绑定 host（启动时无已加载模型，setBindHost 仅设字段）。
+  // 恢复 llama-server 绑定 host + api-key（启动时无已加载模型，applyNet 仅设字段）。
   try {
-    const savedBind = repo.getSetting(LOCAL_BIND_KEY);
-    if (savedBind && savedBind !== local.getBindHost()) void local.setBindHost(savedBind);
+    const savedBind = repo.getSetting(LOCAL_BIND_KEY) ?? undefined;
+    const savedKey = repo.getSetting(LOCAL_APIKEY_KEY) || undefined;
+    if (savedBind || savedKey) void local.applyNet({ bindHost: savedBind, apiKey: savedKey });
   } catch {
     /* 忽略 */
   }
@@ -291,25 +293,43 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     bindHost: local.getBindHost(),
   }));
 
-  // ---- 本地网络暴露：llama-server 绑定 host（127.0.0.1 仅本机 / 0.0.0.0 局域网） ----
+  // ---- 本地网络暴露：llama-server 绑定 host（127.0.0.1 仅本机 / 0.0.0.0 局域网，后者强制 api-key） ----
   app.get("/settings/local-net", async () => ({
     bindHost: local.getBindHost(),
+    apiKey: local.getApiKey() ?? null,
     lanIp: lanIPv4(),
     endpoints: local.endpoints(),
   }));
-  const LocalNetSchema = z.object({ bindHost: z.enum(["127.0.0.1", "0.0.0.0"]) });
+  const LocalNetSchema = z.object({
+    bindHost: z.enum(["127.0.0.1", "0.0.0.0"]),
+    apiKey: z.string().optional(),
+  });
   app.post("/settings/local-net", async (req, reply) => {
     const parsed = LocalNetSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request", detail: parsed.error.format() });
     }
-    await local.setBindHost(parsed.data.bindHost); // 重载已加载模型使其立即生效
+    const { bindHost } = parsed.data;
+    // 提供了 apiKey 用新值，否则沿用当前。绑 0.0.0.0 必须有非空 key。
+    const effectiveKey = parsed.data.apiKey !== undefined ? parsed.data.apiKey.trim() : local.getApiKey();
+    if (bindHost === "0.0.0.0" && !effectiveKey) {
+      return reply.code(400).send({ error: "api_key_required", message: "绑定 0.0.0.0 暴露到局域网时必须设置 api-key" });
+    }
+    await local.applyNet({ bindHost, apiKey: effectiveKey || undefined }); // 重载已加载模型立即生效
     try {
-      repo.setSetting(LOCAL_BIND_KEY, parsed.data.bindHost);
+      repo.setSetting(LOCAL_BIND_KEY, bindHost);
+      repo.setSetting(LOCAL_APIKEY_KEY, local.getApiKey() ?? "");
     } catch {
       /* 持久化失败不影响运行 */
     }
-    return { ok: true, bindHost: local.getBindHost(), lanIp: lanIPv4(), endpoints: local.endpoints() };
+    sessionHost.invalidateAll(); // 端口/key 变更 → 重建会话，避免指向旧端口/旧鉴权
+    return {
+      ok: true,
+      bindHost: local.getBindHost(),
+      apiKey: local.getApiKey() ?? null,
+      lanIp: lanIPv4(),
+      endpoints: local.endpoints(),
+    };
   });
 
   app.post("/models/load", async (req, reply) => {
@@ -463,13 +483,16 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     reply.raw.on("close", () => ac.abort());
     reply.hijack();
     const raw = reply.raw;
+    raw.on("error", () => {}); // 客户端断开后写 socket 不致命
     raw.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
       connection: "keep-alive",
       "access-control-allow-origin": req.headers.origin ?? "*",
     });
-    const send = (ev: AgentEvent) => raw.write(`data: ${JSON.stringify(ev)}\n\n`);
+    const send = (ev: AgentEvent) => {
+      if (!raw.writableEnded && !raw.destroyed) raw.write(`data: ${JSON.stringify(ev)}\n\n`);
+    };
     // 交互式审批门：危险工具经 SSE approval-request 事件挂起，等 /agent/approve 解析。
     const runApproval = new SseApprovalGate({
       registry: approvalRegistry,
@@ -524,8 +547,12 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     } catch (err) {
       send({ type: "error", message: err instanceof Error ? err.message : String(err) });
     } finally {
-      raw.write("data: [DONE]\n\n");
-      raw.end();
+      if (!raw.writableEnded && !raw.destroyed) raw.write("data: [DONE]\n\n");
+      try {
+        raw.end();
+      } catch {
+        /* ignore */
+      }
     }
   });
 
@@ -922,6 +949,7 @@ version: "0.1.0"
   // 本地模型透传到 llama-server；云端流式经 pi-ai（统一 ModelRegistry/AuthStorage）。
   registerOpenAICompat(app, registry, {
     localBaseUrl: (m) => local.baseUrlFor(m),
+    localApiKey: () => local.getApiKey(),
     cloudStream: (modelId, context, opts) => sessionHost.streamCloud(modelId, context, opts),
   });
 

@@ -169,7 +169,11 @@ export function streamEventToOpenAIChunks(
         finish_reason: FINISH_MAP[ev.finishReason] ?? "stop",
       });
       break;
-    // usage / reasoning / tool-call-end / error 在此略过（reasoning 可扩展为 delta.reasoning_content）。
+    case "error":
+      // 流中途出错：发 OpenAI 风格 error 帧（客户端可见，而非静默截断）。
+      out.push(JSON.stringify({ error: { message: ev.message, type: "upstream_error" } }));
+      break;
+    // usage / reasoning / tool-call-end 在此略过（reasoning 可扩展为 delta.reasoning_content）。
     default:
       break;
   }

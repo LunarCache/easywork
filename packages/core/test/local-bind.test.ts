@@ -74,4 +74,40 @@ describe("LocalServerManager 绑定 host", () => {
     expect(hosts).toEqual(["0.0.0.0"]);
     await mgr.stopAll();
   });
+
+  it("applyNet 同时切 host+apiKey：透传 --api-key 并报告", async () => {
+    const recs: { host?: string; apiKey?: string }[] = [];
+    const registry = new EngineRegistry();
+    const mgr = new LocalServerManager(registry, {
+      makeEngine: (id, o) => {
+        recs.push({ host: o.host, apiKey: o.apiKey });
+        return fakeEngine(id);
+      },
+    });
+    await mgr.load({ modelPath: "/m/a.gguf" });
+    await mgr.applyNet({ bindHost: "0.0.0.0", apiKey: "secret" });
+    expect(mgr.getApiKey()).toBe("secret");
+    expect(mgr.getBindHost()).toBe("0.0.0.0");
+    expect(recs.at(-1)).toEqual({ host: "0.0.0.0", apiKey: "secret" });
+    await mgr.stopAll();
+  });
+
+  it("重载中途单模型失败不连累其余（不清空全部）", async () => {
+    const starts: Record<string, number> = {};
+    const registry = new EngineRegistry();
+    const mgr = new LocalServerManager(registry, {
+      makeEngine: (id) => ({
+        ...fakeEngine(id),
+        async start() {
+          starts[id] = (starts[id] ?? 0) + 1;
+          if (starts[id] === 2 && id.includes("a.gguf")) throw new Error("rebind failed");
+        },
+      }),
+    });
+    await mgr.load({ modelPath: "/m/a.gguf" });
+    await mgr.load({ modelPath: "/m/b.gguf" });
+    await mgr.applyNet({ bindHost: "0.0.0.0", apiKey: "k" }); // a 重载失败、b 成功
+    expect(mgr.loadedIds()).toEqual(["/m/b.gguf"]); // a 掉了，但 b 仍在（未被连累清空）
+    await mgr.stopAll();
+  });
 });

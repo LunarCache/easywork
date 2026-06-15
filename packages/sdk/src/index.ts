@@ -66,6 +66,8 @@ export interface ModelsInfo {
 
 export interface LocalNetInfo {
   bindHost: string;
+  /** llama-server --api-key（绑 0.0.0.0 时必有）；未设为 null。 */
+  apiKey?: string | null;
   lanIp?: string;
   endpoints: LocalEndpoint[];
 }
@@ -222,9 +224,12 @@ export class EasyWorkClient {
     return this.getJSON<LocalNetInfo>("/settings/local-net");
   }
 
-  /** 切换本地 llama-server 绑定 host（127.0.0.1 仅本机 / 0.0.0.0 局域网）。重载已加载模型生效。 */
-  setLocalNet(bindHost: "127.0.0.1" | "0.0.0.0"): Promise<LocalNetInfo & { ok: boolean }> {
-    return this.postJSON<LocalNetInfo & { ok: boolean }>("/settings/local-net", { bindHost });
+  /** 切换本地 llama-server 绑定 host（0.0.0.0 必须带 apiKey）。重载已加载模型生效。 */
+  setLocalNet(bindHost: "127.0.0.1" | "0.0.0.0", apiKey?: string): Promise<LocalNetInfo & { ok: boolean }> {
+    return this.postJSON<LocalNetInfo & { ok: boolean }>("/settings/local-net", {
+      bindHost,
+      ...(apiKey !== undefined ? { apiKey } : {}),
+    });
   }
 
   /** 运行 agent（pi 托管会话），流式发 AgentEvent。 */

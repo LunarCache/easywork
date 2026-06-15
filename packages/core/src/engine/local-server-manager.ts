@@ -50,12 +50,14 @@ export interface LocalServerManagerOptions {
   /** 引擎工厂（默认 LlamaServerEngine；测试可注入）。 */
   makeEngine?: (
     id: string,
-    opts: LocalLoadOptions & { port: number; host?: string; binaryPath?: string },
+    opts: LocalLoadOptions & { port: number; host?: string; apiKey?: string; binaryPath?: string },
   ) => LocalEngineLike;
   /** 最大常驻模型数；超出按 LRU 卸载。默认 env EW_MAX_LOADED_MODELS 或 3。 */
   maxLoaded?: number;
   /** llama-server 绑定 host：127.0.0.1（默认，仅本机）/ 0.0.0.0（局域网可达）。 */
   bindHost?: string;
+  /** llama-server --api-key（绑 0.0.0.0 暴露时必须）。 */
+  apiKey?: string;
   /** 取当前时间（测试可注入确定性时钟）。 */
   now?: () => number;
 }
@@ -70,7 +72,10 @@ export class LocalServerManager {
   private readonly binaryPath?: string;
   private readonly maxLoaded: number;
   private bindHost: string;
+  private apiKey?: string;
   private readonly now: () => number;
+  // H2：串行化所有 mutating 操作（load/unload/applyNet/stopAll），避免并发改 handles 竞争。
+  private opChain: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly registry: EngineRegistry,
@@ -79,6 +84,7 @@ export class LocalServerManager {
     if (opts.binaryPath) this.binaryPath = opts.binaryPath;
     this.maxLoaded = Math.max(1, opts.maxLoaded ?? (Number(process.env.EW_MAX_LOADED_MODELS) || 3));
     this.bindHost = opts.bindHost ?? "127.0.0.1";
+    if (opts.apiKey) this.apiKey = opts.apiKey;
     this.now = opts.now ?? Date.now;
     this.makeEngine =
       opts.makeEngine ??
@@ -92,12 +98,27 @@ export class LocalServerManager {
           ...(o.embeddingMode ? { embedding: true } : {}),
           port: o.port,
           ...(o.host ? { host: o.host } : {}),
+          ...(o.apiKey ? { apiKey: o.apiKey } : {}),
           ...(o.binaryPath ? { binaryPath: o.binaryPath } : {}),
         }));
   }
 
+  /** 串行执行 mutating 操作（promise 链 mutex）。 */
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.opChain.then(fn, fn);
+    this.opChain = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
   /** 加载一个本地模型（起 llama-server 并注册路由）。id = modelPath。 */
-  async load(opts: LocalLoadOptions): Promise<{ id: string; contextSize: number }> {
+  load(opts: LocalLoadOptions): Promise<{ id: string; contextSize: number }> {
+    return this.serialize(() => this.loadUnlocked(opts));
+  }
+
+  private async loadUnlocked(opts: LocalLoadOptions): Promise<{ id: string; contextSize: number }> {
     const id = opts.modelPath;
     const existing = this.handles.get(id);
     if (existing) {
@@ -108,7 +129,7 @@ export class LocalServerManager {
     while (this.handles.size >= this.maxLoaded) {
       const lru = [...this.handles.values()].sort((a, b) => a.lastUsed - b.lastUsed)[0];
       if (!lru) break;
-      await this.unload(lru.id);
+      await this.unloadUnlocked(lru.id);
     }
     const port = await getFreePort();
     const engineId = `local:${path.basename(opts.modelPath)}`;
@@ -116,6 +137,7 @@ export class LocalServerManager {
       ...opts,
       port,
       host: this.bindHost,
+      ...(this.apiKey ? { apiKey: this.apiKey } : {}),
       ...(this.binaryPath ? { binaryPath: this.binaryPath } : {}),
     });
     await engine.start();
@@ -149,13 +171,38 @@ export class LocalServerManager {
     return this.bindHost;
   }
 
-  /** 切换绑定 host：更新默认并整体重载已加载模型使其立即生效。 */
-  async setBindHost(host: string): Promise<void> {
-    if (host === this.bindHost) return;
-    this.bindHost = host;
-    const optsList = [...this.handles.values()].map((h) => h.opts);
-    await Promise.all([...this.handles.keys()].map((id) => this.unload(id)));
-    for (const o of optsList) await this.load(o);
+  /** 当前 llama-server --api-key（未设为 undefined）。 */
+  getApiKey(): string | undefined {
+    return this.apiKey;
+  }
+
+  /** 切换绑定 host（兼容旧调用）。 */
+  setBindHost(host: string): Promise<void> {
+    return this.applyNet({ bindHost: host });
+  }
+
+  /**
+   * 应用本地网络设置（绑定 host 与/或 api-key），并整体重载已加载模型使其立即生效。
+   * 串行化 + 逐个 try/catch：单个模型重载失败不连累其余（不会清空全部）。
+   */
+  applyNet(opts: { bindHost?: string; apiKey?: string | undefined }): Promise<void> {
+    return this.serialize(async () => {
+      const nextHost = opts.bindHost ?? this.bindHost;
+      const nextKey = "apiKey" in opts ? opts.apiKey : this.apiKey;
+      if (nextHost === this.bindHost && nextKey === this.apiKey) return;
+      this.bindHost = nextHost;
+      this.apiKey = nextKey || undefined;
+      const optsList = [...this.handles.values()].map((h) => h.opts);
+      for (const id of [...this.handles.keys()]) await this.unloadUnlocked(id);
+      for (const o of optsList) {
+        try {
+          await this.loadUnlocked(o);
+        } catch (err) {
+          // 重载失败（如 0.0.0.0 绑定被拒）：跳过该模型，不连累其余、不清空全部。
+          console.error(`[easywork] 重载模型失败（绑定变更后）: ${o.modelPath}`, err);
+        }
+      }
+    });
   }
 
   /** 已加载本地模型的对外端点（供 /models 发现、外部直连 llama-server）。 */
@@ -195,7 +242,11 @@ export class LocalServerManager {
     return out;
   }
 
-  async unload(id: string): Promise<void> {
+  unload(id: string): Promise<void> {
+    return this.serialize(() => this.unloadUnlocked(id));
+  }
+
+  private async unloadUnlocked(id: string): Promise<void> {
     const h = this.handles.get(id);
     if (!h) return;
     this.handles.delete(id);
@@ -208,8 +259,10 @@ export class LocalServerManager {
     return [...this.handles.keys()];
   }
 
-  async stopAll(): Promise<void> {
-    await Promise.all([...this.handles.values()].map((h) => h.engine.stop().catch(() => {})));
-    this.handles.clear();
+  stopAll(): Promise<void> {
+    return this.serialize(async () => {
+      await Promise.all([...this.handles.values()].map((h) => h.engine.stop().catch(() => {})));
+      this.handles.clear();
+    });
   }
 }
