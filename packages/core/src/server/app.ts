@@ -32,6 +32,7 @@ import { ProviderManager, type CloudProviderConfig } from "../providers/manager.
 import { registerOpenAICompat } from "../openai-compat/router.js";
 import { ToolRegistry } from "../agent/tool-registry.js";
 import { runAgent } from "../agent/loop.js";
+import { SessionHost } from "../agent/session-host.js";
 import { ToolTurnRecorder } from "../agent/turn-recorder.js";
 import { ApprovalRegistry, SseApprovalGate } from "../agent/approval-sse.js";
 import { SqliteConversationRepo } from "../store/conversation.js";
@@ -117,6 +118,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
   });
   const providers = new ProviderManager(registry, opts.fetch ? { fetch: opts.fetch } : {});
+
+  // R1 宿主：pi-coding-agent 内核（EW_KERNEL=pi 时托管 /agent/run；默认走 legacy loop）。
+  const sessionHost = new SessionHost({ local, providers, agentDir: fsPath.join(defaultDataDir(), "pi-agent") });
 
   // Agent 运行时：工具注册表（内置工具 + Skills/MCP 动态 provider）。
   const workspaceDir = opts.workspaceDir ?? defaultDataDir();
@@ -526,6 +530,42 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         });
       }
     };
+
+    const persistFinal = (): void => {
+      if (finalContent) {
+        repo.appendMessage({
+          id: crypto.randomUUID(),
+          threadId,
+          role: "assistant",
+          seq: repo.nextSeq(threadId),
+          parts: [{ type: "text", text: finalContent }],
+          createdAt: new Date().toISOString(),
+        });
+      }
+    };
+
+    // R1：EW_KERNEL=pi → 托管 pi AgentSession（pi 在会话内自持历史，只发本轮用户文本）。
+    if (process.env.EW_KERNEL === "pi") {
+      const userText = lastUser?.role === "user" ? messageText(lastUser.content) : "";
+      try {
+        for await (const ev of sessionHost.run({
+          threadId,
+          modelId: parsed.data.model,
+          text: userText,
+          cwd: runWorkspaceDir,
+        })) {
+          if (ev.type === "final") finalContent = messageText(ev.message.content);
+          send(ev);
+        }
+        persistFinal();
+      } catch (err) {
+        send({ type: "error", message: err instanceof Error ? err.message : String(err) });
+      } finally {
+        raw.write("data: [DONE]\n\n");
+        raw.end();
+      }
+      return;
+    }
 
     const runInput = {
       threadId: parsed.data.threadId,
@@ -989,6 +1029,11 @@ version: "0.1.0"
     async stop() {
       await app.close();
       stopMemWatch();
+      try {
+        sessionHost.disposeAll();
+      } catch {
+        /* ignore */
+      }
       await local.stopAll().catch(() => {});
       await embeddings.stop().catch(() => {});
       try {
