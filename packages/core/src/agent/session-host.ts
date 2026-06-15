@@ -400,14 +400,21 @@ export function mapSessionEvent(ev: AgentSessionEvent): AgentEvent[] {
           call: { id: ev.toolCallId, name: ev.toolName, arguments: safeStringify(ev.args) },
         },
       ];
-    case "tool_execution_end":
+    case "tool_execution_end": {
+      // toPiTool 把我们的 display 放进 pi 的 details；带回去供 UI 渲染来源/引用/HTML 工件/diff。
+      const details = (ev.result as { details?: unknown } | undefined)?.details;
       return [
         {
           type: "tool-end",
           call: { id: ev.toolCallId, name: ev.toolName, arguments: "" },
-          result: { content: toolResultContent(ev.result), isError: ev.isError },
+          result: {
+            content: toolResultContent(ev.result),
+            isError: ev.isError,
+            ...(details != null ? { display: details } : {}),
+          },
         },
       ];
+    }
     case "message_end": {
       const u = ev.message.role === "assistant" ? ev.message.usage : undefined;
       if (u) {

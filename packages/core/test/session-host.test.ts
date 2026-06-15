@@ -65,6 +65,26 @@ describe("mapSessionEvent", () => {
     ]);
   });
 
+  it("tool_execution_end → 透传 display（pi details，供 UI 渲染来源/引用/工件）", () => {
+    const ev = {
+      type: "tool_execution_end",
+      toolCallId: "c1",
+      toolName: "web_search",
+      isError: false,
+      result: {
+        content: [{ type: "text", text: "结果" }],
+        details: [{ title: "T", url: "https://x" }],
+      },
+    } as unknown as AgentSessionEvent;
+    expect(mapSessionEvent(ev)).toEqual([
+      {
+        type: "tool-end",
+        call: { id: "c1", name: "web_search", arguments: "" },
+        result: { content: "结果", isError: false, display: [{ title: "T", url: "https://x" }] },
+      },
+    ]);
+  });
+
   it("message_end (assistant) → usage", () => {
     const ev = {
       type: "message_end",
