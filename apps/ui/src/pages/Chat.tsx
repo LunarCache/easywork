@@ -14,6 +14,7 @@ import {
   type PendingApproval,
   type UiImage,
   type UiMsg,
+  type UiTool,
 } from "../lib/agent-stream.js";
 import {
   loadSampling,
@@ -74,6 +75,88 @@ function CopyButton({ text }: { text: string }) {
     >
       {done ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
     </button>
+  );
+}
+
+/** 单个工具卡（web_search 来源卡 / 通用工具卡 + 引用/HTML 工件）。供时间线按序渲染。 */
+function ToolView({ t }: { t: UiTool }) {
+  if (t.name === "web_search") {
+    return (
+      <div className="toolsearch">
+        <div className="ts-head">
+          <GlobeIcon size={15} />
+          <span>
+            {t.status === "running" ? "正在搜索" : "已搜索"}
+            {toolQuery(t.args) && ` “${toolQuery(t.args)}”`}
+          </span>
+        </div>
+        {t.sources && t.sources.length > 0 && (
+          <div className="ts-chips">
+            {t.sources.map((s, j) => (
+              <a key={j} className="src-chip" href={s.url} target="_blank" rel="noreferrer" title={s.url}>
+                <img
+                  src={`https://www.google.com/s2/favicons?domain=${host(s.url)}&sz=64`}
+                  alt=""
+                  onError={(e) => (e.currentTarget.style.visibility = "hidden")}
+                />
+                <span>{s.title || host(s.url)}</span>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <details className={`toolcard ${t.status}`}>
+        <summary>
+          <WrenchIcon size={15} className="ticon" />
+          <span className="tname">{t.name}</span>
+          <span className="tlabel">
+            {t.status === "running" ? "调用中…" : t.status === "error" ? "失败" : "完成"}
+          </span>
+          <ChevronIcon size={14} className="chev" />
+        </summary>
+        <div className="toolbody">
+          <div className="tkv">
+            <span>参数</span>
+            <code>{t.args || "{}"}</code>
+          </div>
+          {t.result != null && (
+            <div className="tkv">
+              <span>结果</span>
+              <code>{t.result}</code>
+            </div>
+          )}
+        </div>
+      </details>
+      {t.citations && t.citations.length > 0 && (
+        <div className="citations">
+          <div className="cite-head">引用来源</div>
+          <div className="cite-list">
+            {t.citations.map((c) => (
+              <span key={c.id} className="cite-chip" title={c.source}>
+                <b>[{c.id}]</b> {c.source}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {t.html && (
+        <div className="artifact">
+          <div className="artifact-head">
+            <CodeIcon size={13} /> {t.htmlTitle || "HTML 工件"}
+          </div>
+          <iframe
+            className="artifact-frame"
+            sandbox="allow-scripts"
+            title={t.htmlTitle || "artifact"}
+            srcDoc={t.html}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -400,120 +483,47 @@ export function Chat({
                 {m.raw && <div className="text">{m.raw}</div>}
               </div>
             );
-          const { reasoning: thinkReason, answer } = splitThink(m.raw);
-          const reasoning = `${m.reasoning}\n${thinkReason}`.trim();
+          const answer = splitThink(m.raw).answer;
           const isLast = i === msgs.length - 1;
-          const thinking = busy && isLast && !answer;
+          const live = busy && isLast;
+          const blocks = m.blocks ?? [];
+          const lastIdx = blocks.length - 1;
           return (
             <div key={i} className="msg assistant">
               <div className="role">助手</div>
-              {reasoning &&
-                (() => {
-                  const dur = m.start && m.thinkEnd ? (m.thinkEnd - m.start) / 1000 : null;
-                  const label = thinking
+              {/* 有序时间线：思考 → 工具 → 思考 → … → 文本（保留真实先后顺序）。 */}
+              {blocks.map((b, bi) => {
+                if (b.kind === "reasoning") {
+                  const liveThis = live && bi === lastIdx;
+                  const dur = b.end ? (b.end - b.start) / 1000 : null;
+                  const label = liveThis
                     ? "思考中…"
                     : dur != null
                       ? `思考了 ${dur < 1 ? "<1" : Math.round(dur)} 秒`
                       : "思考过程";
                   return (
-                    <details className="reason" open={thinking}>
+                    <details key={bi} className="reason" open={liveThis}>
                       <summary>
                         <BrainIcon size={15} />
                         <span>{label}</span>
                         <ChevronIcon size={14} className="chev" />
                       </summary>
-                      <div className="reason-body">{reasoning}</div>
+                      <div className="reason-body">{b.text}</div>
                     </details>
                   );
-                })()}
-              {m.tools.map((t) =>
-                t.name === "web_search" ? (
-                  <div key={t.id} className="toolsearch">
-                    <div className="ts-head">
-                      <GlobeIcon size={15} />
-                      <span>
-                        {t.status === "running" ? "正在搜索" : "已搜索"}
-                        {toolQuery(t.args) && ` “${toolQuery(t.args)}”`}
-                      </span>
-                    </div>
-                    {t.sources && t.sources.length > 0 && (
-                      <div className="ts-chips">
-                        {t.sources.map((s, j) => (
-                          <a key={j} className="src-chip" href={s.url} target="_blank" rel="noreferrer" title={s.url}>
-                            <img
-                              src={`https://www.google.com/s2/favicons?domain=${host(s.url)}&sz=64`}
-                              alt=""
-                              onError={(e) => (e.currentTarget.style.visibility = "hidden")}
-                            />
-                            <span>{s.title || host(s.url)}</span>
-                          </a>
-                        ))}
-                      </div>
-                    )}
+                }
+                if (b.kind === "tool") return <ToolView key={bi} t={b.tool} />;
+                return (
+                  <div key={bi} className="text md">
+                    <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                      {b.text}
+                    </Markdown>
+                    {live && bi === lastIdx && <span className="cursor" />}
                   </div>
-                ) : (
-                <div key={t.id}>
-                  <details className={`toolcard ${t.status}`}>
-                    <summary>
-                      <WrenchIcon size={15} className="ticon" />
-                      <span className="tname">{t.name}</span>
-                      <span className="tlabel">
-                        {t.status === "running" ? "调用中…" : t.status === "error" ? "失败" : "完成"}
-                      </span>
-                      <ChevronIcon size={14} className="chev" />
-                    </summary>
-                    <div className="toolbody">
-                      <div className="tkv">
-                        <span>参数</span>
-                        <code>{t.args || "{}"}</code>
-                      </div>
-                      {t.result != null && (
-                        <div className="tkv">
-                          <span>结果</span>
-                          <code>{t.result}</code>
-                        </div>
-                      )}
-                    </div>
-                  </details>
-                  {t.citations && t.citations.length > 0 && (
-                    <div className="citations">
-                      <div className="cite-head">引用来源</div>
-                      <div className="cite-list">
-                        {t.citations.map((c) => (
-                          <span key={c.id} className="cite-chip" title={c.source}>
-                            <b>[{c.id}]</b> {c.source}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {t.html && (
-                    <div className="artifact">
-                      <div className="artifact-head">
-                        <CodeIcon size={13} /> {t.htmlTitle || "HTML 工件"}
-                      </div>
-                      <iframe
-                        className="artifact-frame"
-                        sandbox="allow-scripts"
-                        title={t.htmlTitle || "artifact"}
-                        srcDoc={t.html}
-                      />
-                    </div>
-                  )}
-                </div>
-                ),
-              )}
-              {answer ? (
-                <div className="text md">
-                  <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                    {answer}
-                  </Markdown>
-                  {busy && isLast && <span className="cursor" />}
-                  {!(busy && isLast) && <CopyButton text={answer} />}
-                </div>
-              ) : (
-                busy && isLast && m.tools.length === 0 && <div className="text">正在思考…</div>
-              )}
+                );
+              })}
+              {answer && !live && <CopyButton text={answer} />}
+              {blocks.length === 0 && live && <div className="text">正在思考…</div>}
             </div>
           );
         })}

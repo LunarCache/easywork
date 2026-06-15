@@ -228,33 +228,43 @@ export function Workspace({
                   <div className="bubble">{m.raw}</div>
                 </div>
               );
-            const { reasoning: tr, answer } = splitThink(m.raw);
-            const reasoning = `${m.reasoning}\n${tr}`.trim();
             const isLast = i === msgs.length - 1;
+            const live = busy && isLast;
+            const blocks = m.blocks ?? [];
+            const lastIdx = blocks.length - 1;
             return (
               <div key={i} className="msg assistant">
-                {reasoning && (
-                  <details className="reason" open={busy && isLast && !answer}>
-                    <summary>
-                      <BrainIcon size={15} /> <span>思考过程</span>
-                      <ChevronIcon size={14} className="chev" />
-                    </summary>
-                    <div className="reason-body">{reasoning}</div>
-                  </details>
-                )}
-                {m.tools.map((t) => (
-                  <ToolCardDispatch key={t.id} tool={t} />
-                ))}
-                {answer ? (
-                  <div className="text md">
-                    <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                      {answer}
-                    </Markdown>
-                    {busy && isLast && <span className="cursor" />}
-                  </div>
-                ) : (
-                  busy && isLast && m.tools.length === 0 && <div className="text">正在思考…</div>
-                )}
+                {/* 有序时间线：思考 → 工具 → 思考 → … → 文本。 */}
+                {blocks.map((b, bi) => {
+                  if (b.kind === "reasoning") {
+                    const liveThis = live && bi === lastIdx;
+                    const dur = b.end ? (b.end - b.start) / 1000 : null;
+                    const label = liveThis
+                      ? "思考中…"
+                      : dur != null
+                        ? `思考了 ${dur < 1 ? "<1" : Math.round(dur)} 秒`
+                        : "思考过程";
+                    return (
+                      <details key={bi} className="reason" open={liveThis}>
+                        <summary>
+                          <BrainIcon size={15} /> <span>{label}</span>
+                          <ChevronIcon size={14} className="chev" />
+                        </summary>
+                        <div className="reason-body">{b.text}</div>
+                      </details>
+                    );
+                  }
+                  if (b.kind === "tool") return <ToolCardDispatch key={bi} tool={b.tool} />;
+                  return (
+                    <div key={bi} className="text md">
+                      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                        {b.text}
+                      </Markdown>
+                      {live && bi === lastIdx && <span className="cursor" />}
+                    </div>
+                  );
+                })}
+                {blocks.length === 0 && live && <div className="text">正在思考…</div>}
               </div>
             );
           })}

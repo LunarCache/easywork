@@ -25,11 +25,19 @@ export interface UiImage {
   mimeType: string;
   data: string; // base64（无 data: 前缀）
 }
+/** 助手回复的有序时间线块：思考 → 工具 → 思考 → … → 文本（保留真实先后顺序）。 */
+export type UiBlock =
+  | { kind: "reasoning"; text: string; start: number; end?: number }
+  | { kind: "tool"; tool: UiTool }
+  | { kind: "text"; text: string };
+
 export interface UiMsg {
   role: "user" | "assistant";
   raw: string;
   reasoning: string;
   tools: UiTool[];
+  /** 有序时间线（渲染源）：思考/工具/文本按发生顺序排列。 */
+  blocks?: UiBlock[];
   images?: UiImage[];
   start?: number;
   thinkEnd?: number;
@@ -144,11 +152,15 @@ export function storedToUiMsgs(list: StoredMsg[]): UiMsg[] {
       continue;
     }
     if (m.role === "assistant") {
-      if (!bubble) bubble = { role: "assistant", raw: "", reasoning: "", tools: [] };
-      if (text) bubble.raw = bubble.raw ? `${bubble.raw}\n${text}` : text;
+      if (!bubble) bubble = { role: "assistant", raw: "", reasoning: "", tools: [], blocks: [] };
+      if (text) {
+        bubble.raw = bubble.raw ? `${bubble.raw}\n${text}` : text;
+        bubble.blocks!.push({ kind: "text", text });
+      }
       for (const c of m.toolCalls ?? []) {
         const t: UiTool = { id: c.id, name: c.name, args: c.arguments, status: "done" };
         bubble.tools.push(t);
+        bubble.blocks!.push({ kind: "tool", tool: t }); // 同一引用，下面打补丁即更新时间线
       }
       continue;
     }
@@ -173,43 +185,74 @@ export function storedToUiMsgs(list: StoredMsg[]): UiMsg[] {
  * 仅处理消息级事件：text / reasoning / tool-start / tool-end / tool-progress。
  * usage / approval-request / final / error 由调用方在 loop 层处理。
  */
+/** 收尾仍打开的思考块（设 end），便于显示"思考了 N 秒"。返回新数组。 */
+function closeReasoning(blocks: UiBlock[], now: number): UiBlock[] {
+  const last = blocks[blocks.length - 1];
+  if (last && last.kind === "reasoning" && last.end == null) {
+    return [...blocks.slice(0, -1), { ...last, end: now }];
+  }
+  return blocks;
+}
+
+/** 在时间线上更新某工具块（按 id）。 */
+function patchToolBlock(blocks: UiBlock[], id: string, patch: Partial<UiTool>): UiBlock[] {
+  return blocks.map((b) => (b.kind === "tool" && b.tool.id === id ? { kind: "tool", tool: { ...b.tool, ...patch } } : b));
+}
+
 export function applyAgentEvent(m: UiMsg, ev: AgentEvent): UiMsg {
+  const blocks = m.blocks ?? [];
   switch (ev.type) {
     case "text": {
+      const now = Date.now();
       const raw = m.raw + ev.text;
-      const start = m.start ?? Date.now();
+      const start = m.start ?? now;
       const ended = raw.includes("</think>") || (!!m.reasoning && splitThink(raw).answer.length > 0);
-      const thinkEnd = m.thinkEnd ?? (ended ? Date.now() : undefined);
-      return { ...m, raw, start, ...(thinkEnd ? { thinkEnd } : {}) };
+      const thinkEnd = m.thinkEnd ?? (ended ? now : undefined);
+      // 时间线：合并进末尾文本块，否则（思考/工具之后）新开文本块。
+      const nb = closeReasoning(blocks, now);
+      const last = nb[nb.length - 1];
+      const blocks2: UiBlock[] =
+        last && last.kind === "text"
+          ? [...nb.slice(0, -1), { kind: "text", text: last.text + ev.text }]
+          : [...nb, { kind: "text", text: ev.text }];
+      return { ...m, raw, start, blocks: blocks2, ...(thinkEnd ? { thinkEnd } : {}) };
     }
-    case "reasoning":
-      return { ...m, reasoning: m.reasoning + ev.text, start: m.start ?? Date.now() };
-    case "tool-start":
-      return {
-        ...m,
-        tools: [...m.tools, { id: ev.call.id, name: ev.call.name, args: ev.call.arguments, status: "running" }],
-      };
+    case "reasoning": {
+      const now = Date.now();
+      const last = blocks[blocks.length - 1];
+      const blocks2: UiBlock[] =
+        last && last.kind === "reasoning"
+          ? [...blocks.slice(0, -1), { ...last, text: last.text + ev.text }]
+          : [...blocks, { kind: "reasoning", text: ev.text, start: now }];
+      return { ...m, reasoning: m.reasoning + ev.text, start: m.start ?? now, blocks: blocks2 };
+    }
+    case "tool-start": {
+      const tool: UiTool = { id: ev.call.id, name: ev.call.name, args: ev.call.arguments, status: "running" };
+      const nb = closeReasoning(blocks, Date.now());
+      return { ...m, tools: [...m.tools, tool], blocks: [...nb, { kind: "tool", tool }] };
+    }
     case "tool-progress":
       return {
         ...m,
-        tools: m.tools.map((t) =>
-          t.id === ev.callId ? { ...t, output: (t.output ?? "") + ev.chunk } : t,
+        tools: m.tools.map((t) => (t.id === ev.callId ? { ...t, output: (t.output ?? "") + ev.chunk } : t)),
+        blocks: blocks.map((b) =>
+          b.kind === "tool" && b.tool.id === ev.callId
+            ? { kind: "tool", tool: { ...b.tool, output: (b.tool.output ?? "") + ev.chunk } }
+            : b,
         ),
       };
-    case "tool-end":
+    case "tool-end": {
+      const patch: Partial<UiTool> = {
+        result: String(ev.result.content),
+        status: ev.result.isError ? "error" : "done",
+        ...toolDisplayPatch((ev.result as { display?: unknown }).display),
+      };
       return {
         ...m,
-        tools: m.tools.map((t) =>
-          t.id === ev.call.id
-            ? {
-                ...t,
-                result: String(ev.result.content),
-                status: ev.result.isError ? "error" : "done",
-                ...toolDisplayPatch((ev.result as { display?: unknown }).display),
-              }
-            : t,
-        ),
+        tools: m.tools.map((t) => (t.id === ev.call.id ? { ...t, ...patch } : t)),
+        blocks: patchToolBlock(blocks, ev.call.id, patch),
       };
+    }
     default:
       return m;
   }
