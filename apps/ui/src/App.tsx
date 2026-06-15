@@ -10,7 +10,7 @@ import { KnowledgeBase } from "./pages/KnowledgeBase.js";
 import { Skills } from "./pages/Skills.js";
 import { Mcp } from "./pages/Mcp.js";
 import { Memory } from "./pages/Memory.js";
-import { BoxIcon, BrainIcon, ChatIcon, FolderTreeIcon, FolderClosedIcon, KbIcon, NewChatIcon, PanelIcon, SlidersIcon, SparkIcon, TrashIcon, WrenchIcon } from "./icons.js";
+import { BoxIcon, BrainIcon, ChatIcon, FolderTreeIcon, FolderClosedIcon, GlobeIcon, KbIcon, NewChatIcon, PanelIcon, SlidersIcon, SparkIcon, TrashIcon, WrenchIcon } from "./icons.js";
 
 type Tab = "chat" | "workspace" | "models" | "kb" | "skills" | "mcp" | "memory" | "settings";
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
@@ -227,17 +227,16 @@ export function App() {
           <button
             className={`profile ${status} ${menuOpen ? "open" : ""}`}
             onClick={() => setMenuOpen((v) => !v)}
-            title="EasyWork"
+            title={statusText}
           >
             <span className="avatar">
-              <SparkIcon size={15} />
+              <GlobeIcon size={15} />
             </span>
             <span className="pinfo">
-              <b>EasyWork</b>
-              <small>
+              <b>
                 <span className={`dot ${status === "ok" ? "ok" : status === "connecting" ? "" : "err"}`} />
                 {statusText}
-              </small>
+              </b>
             </span>
           </button>
         </div>
