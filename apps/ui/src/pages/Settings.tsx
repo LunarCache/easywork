@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
+import type { LocalNetInfo } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { loadAgentPrefs, saveAgentPrefs, type AgentPrefs } from "../lib/prefs.js";
-import { SlidersIcon, BoxIcon, BrainIcon } from "../icons.js";
+import { SlidersIcon, BoxIcon, BrainIcon, GlobeIcon } from "../icons.js";
 
 export function Settings({ onChange }: { onChange: () => void }) {
   const [prov, setProv] = useState({ id: "", baseUrl: "", apiKey: "", models: "" });
   const [providers, setProviders] = useState<{ id: string; baseUrl: string; models: string[] }[]>([]);
   const [note, setNote] = useState("");
   const [agentPrefs, setAgentPrefs] = useState<AgentPrefs>(() => loadAgentPrefs());
+  const [net, setNet] = useState<LocalNetInfo | null>(null);
+  const [netBusy, setNetBusy] = useState(false);
 
   const setAgentPref = (key: keyof AgentPrefs, raw: string) => {
     const v = raw.trim() === "" ? undefined : Number(raw);
@@ -23,7 +26,33 @@ export function Settings({ onChange }: { onChange: () => void }) {
     } catch {
       /* ignore */
     }
+    try {
+      setNet(await getClient().getLocalNet());
+    } catch {
+      /* ignore */
+    }
   }, []);
+
+  const changeBind = async (host: "127.0.0.1" | "0.0.0.0") => {
+    if (netBusy || net?.bindHost === host) return;
+    setNetBusy(true);
+    setNote(host === "0.0.0.0" ? "正在重载模型并暴露到局域网…" : "正在重载模型并收回到本机…");
+    try {
+      const r = await getClient().setLocalNet(host);
+      setNet(r);
+      setNote(host === "0.0.0.0" ? "已暴露到局域网（0.0.0.0）" : "已收回到仅本机（127.0.0.1）");
+    } catch (e) {
+      setNote(`切换失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setNetBusy(false);
+    }
+  };
+
+  /** 端点对外可用 URL：绑 0.0.0.0 时其他设备用本机局域网 IP。 */
+  const endpointUrl = (port: number): string => {
+    const host = net?.bindHost === "0.0.0.0" ? net?.lanIp ?? "0.0.0.0" : "127.0.0.1";
+    return `http://${host}:${port}/v1`;
+  };
 
   useEffect(() => {
     void refresh();
@@ -96,6 +125,51 @@ export function Settings({ onChange }: { onChange: () => void }) {
             {p.id} → {p.baseUrl} [{p.models.join(", ")}]
           </div>
         ))}
+      </section>
+
+      <section>
+        <div className="sec-head">
+          <span className="ico">
+            <GlobeIcon size={18} />
+          </span>
+          <div>
+            <h3>本地网络（暴露 llama-server）</h3>
+            <p className="hint">本地模型经 /v1 由本进程提供；也可让 llama-server 端口被本机/局域网其他服务直接调用。</p>
+          </div>
+        </div>
+        <div className="seg">
+          <button
+            className={net?.bindHost !== "0.0.0.0" ? "on" : ""}
+            disabled={netBusy}
+            onClick={() => void changeBind("127.0.0.1")}
+          >
+            仅本机（127.0.0.1）
+          </button>
+          <button
+            className={net?.bindHost === "0.0.0.0" ? "on" : ""}
+            disabled={netBusy}
+            onClick={() => void changeBind("0.0.0.0")}
+          >
+            局域网（0.0.0.0）
+          </button>
+        </div>
+        {net?.bindHost === "0.0.0.0" && (
+          <div className="note">
+            ⚠️ 已绑定 0.0.0.0：同局域网内任意设备都可访问你的本地模型（无鉴权）。仅在可信网络使用。
+          </div>
+        )}
+        {net && net.endpoints.length > 0 ? (
+          <div className="form-col">
+            <p className="hint">已加载模型端点（外部可直连）：</p>
+            {net.endpoints.map((ep) => (
+              <div key={ep.id} className="sub mono">
+                {ep.id.split("/").pop()} → {endpointUrl(ep.port)}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="hint">（暂无已加载的本地模型）</p>
+        )}
       </section>
     </div>
   );

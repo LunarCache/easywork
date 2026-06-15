@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import fsPath from "node:path";
+import os from "node:os";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   ChatMessageSchema,
@@ -166,6 +167,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   // ---- 持久化 provider / MCP 配置（重启后恢复）----
   const PROVIDERS_KEY = "providers";
   const MCP_KEY = "mcp.servers";
+  const LOCAL_BIND_KEY = "local.bindHost";
   const persistProviders = (): void => {
     try {
       repo.setSetting(PROVIDERS_KEY, JSON.stringify(providers.dump()));
@@ -187,6 +189,13 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     sessionHost.syncCloudProviders();
   } catch {
     /* 损坏的配置忽略 */
+  }
+  // 恢复 llama-server 绑定 host（启动时无已加载模型，setBindHost 仅设字段）。
+  try {
+    const savedBind = repo.getSetting(LOCAL_BIND_KEY);
+    if (savedBind && savedBind !== local.getBindHost()) void local.setBindHost(savedBind);
+  } catch {
+    /* 忽略 */
   }
   void (async () => {
     try {
@@ -277,7 +286,31 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     routed: registry.routedModels(),
     context: local.contexts(),
     engines: registry.list().map((e) => ({ id: e.id, capabilities: e.capabilities })),
+    // 本地 llama-server 对外端点（发现/外部直连）+ 当前绑定 host。
+    endpoints: local.endpoints(),
+    bindHost: local.getBindHost(),
   }));
+
+  // ---- 本地网络暴露：llama-server 绑定 host（127.0.0.1 仅本机 / 0.0.0.0 局域网） ----
+  app.get("/settings/local-net", async () => ({
+    bindHost: local.getBindHost(),
+    lanIp: lanIPv4(),
+    endpoints: local.endpoints(),
+  }));
+  const LocalNetSchema = z.object({ bindHost: z.enum(["127.0.0.1", "0.0.0.0"]) });
+  app.post("/settings/local-net", async (req, reply) => {
+    const parsed = LocalNetSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request", detail: parsed.error.format() });
+    }
+    await local.setBindHost(parsed.data.bindHost); // 重载已加载模型使其立即生效
+    try {
+      repo.setSetting(LOCAL_BIND_KEY, parsed.data.bindHost);
+    } catch {
+      /* 持久化失败不影响运行 */
+    }
+    return { ok: true, bindHost: local.getBindHost(), lanIp: lanIPv4(), endpoints: local.endpoints() };
+  });
 
   app.post("/models/load", async (req, reply) => {
     const parsed = LocalLoadOptionsSchema.safeParse(req.body);
@@ -951,6 +984,16 @@ function isExistingDir(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** 取本机第一个非内部 IPv4（绑定 0.0.0.0 时供其他设备直连 llama-server）。 */
+function lanIPv4(): string | undefined {
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const ni of list ?? []) {
+      if (ni.family === "IPv4" && !ni.internal) return ni.address;
+    }
+  }
+  return undefined;
 }
 
 /** 构造全局记忆的冻结快照系统块（参考 Hermes）：会话期固定，置顶注入。全空则返回 ""。 */

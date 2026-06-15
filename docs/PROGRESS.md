@@ -26,6 +26,7 @@
   - Step2 **云端经 pi-ai**：云端**流式**请求 → `SessionHost.streamCloud`（复用 R2 的 ModelRegistry/AuthStorage，含 OAuth/Anthropic 原生）→ `pi-adapt` 把 pi 事件映射回我们的 `ChatStreamEvent`，**复用既有** `streamEventToOpenAIChunks`/`AnthropicStreamTranslator`。云端**非流式**仍走引擎（OpenAICompatibleEngine）。
   - `EngineRegistry`/`LlamaServerEngine` 仍保留：撑本地进程管理、`/v1` 非流式回退、fact-extractor、embedding。
   - 更正：早前说"llama-server 不支持 Anthropic"有误——llama.cpp 已原生支持 `/v1/messages`（PR #17570），故本地透传可直接复用。
+  - **本地端口暴露**：`LocalServerManager` 加可配置绑定 host（`setBindHost`/`getBindHost`/`endpoints`），默认 `127.0.0.1` 仅本机、可选 `0.0.0.0` 局域网；切换时重载已加载模型立即生效，持久化到 settings。内部 `baseUrlFor` 恒走 `127.0.0.1` 回环（即使绑 0.0.0.0）。`/models` + `GET/POST /settings/local-net` 暴露端点与 LAN IP；UI「设置 → 本地网络」可切换并展示各模型直连 URL（0.0.0.0 带未鉴权告警）。
 - **未做（明确）**：持久化仍以 `ConversationRepo` 为真相源（未切 pi `SessionManager` 为真相源——那是涉及 UI/SDK 的独立大改，无用户可见收益）。
 - 结果：**156 测试全绿**（+8），typecheck 19/19，改动文件 eslint 0，真机 e2e 通过且无越界产物。
 

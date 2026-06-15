@@ -24,8 +24,20 @@ interface LocalHandle {
   engine: InferenceEngine & { start(): Promise<void>; stop(): Promise<void> };
   contextSize: number;
   lastUsed: number;
+  /** 实际绑定 host（--host）：127.0.0.1 仅本机 / 0.0.0.0 局域网可达。 */
   host: string;
   port: number;
+  /** 原始加载参数（用于切换绑定 host 后整体重载）。 */
+  opts: LocalLoadOptions;
+}
+
+/** 单个已加载本地模型的对外端点（供发现/外部直连 llama-server）。 */
+export interface LocalEndpoint {
+  id: string;
+  host: string;
+  port: number;
+  /** OpenAI/Anthropic 兼容 baseUrl（host=0.0.0.0 时其他设备改用本机局域网 IP）。 */
+  baseUrl: string;
 }
 
 export interface LocalEngineLike extends InferenceEngine {
@@ -36,9 +48,14 @@ export interface LocalEngineLike extends InferenceEngine {
 export interface LocalServerManagerOptions {
   binaryPath?: string;
   /** 引擎工厂（默认 LlamaServerEngine；测试可注入）。 */
-  makeEngine?: (id: string, opts: LocalLoadOptions & { port: number; binaryPath?: string }) => LocalEngineLike;
+  makeEngine?: (
+    id: string,
+    opts: LocalLoadOptions & { port: number; host?: string; binaryPath?: string },
+  ) => LocalEngineLike;
   /** 最大常驻模型数；超出按 LRU 卸载。默认 env EW_MAX_LOADED_MODELS 或 3。 */
   maxLoaded?: number;
+  /** llama-server 绑定 host：127.0.0.1（默认，仅本机）/ 0.0.0.0（局域网可达）。 */
+  bindHost?: string;
   /** 取当前时间（测试可注入确定性时钟）。 */
   now?: () => number;
 }
@@ -52,6 +69,7 @@ export class LocalServerManager {
   private readonly makeEngine: NonNullable<LocalServerManagerOptions["makeEngine"]>;
   private readonly binaryPath?: string;
   private readonly maxLoaded: number;
+  private bindHost: string;
   private readonly now: () => number;
 
   constructor(
@@ -60,6 +78,7 @@ export class LocalServerManager {
   ) {
     if (opts.binaryPath) this.binaryPath = opts.binaryPath;
     this.maxLoaded = Math.max(1, opts.maxLoaded ?? (Number(process.env.EW_MAX_LOADED_MODELS) || 3));
+    this.bindHost = opts.bindHost ?? "127.0.0.1";
     this.now = opts.now ?? Date.now;
     this.makeEngine =
       opts.makeEngine ??
@@ -72,6 +91,7 @@ export class LocalServerManager {
           ...(typeof o.gpuLayers === "number" ? { gpuLayers: o.gpuLayers } : {}),
           ...(o.embeddingMode ? { embedding: true } : {}),
           port: o.port,
+          ...(o.host ? { host: o.host } : {}),
           ...(o.binaryPath ? { binaryPath: o.binaryPath } : {}),
         }));
   }
@@ -95,6 +115,7 @@ export class LocalServerManager {
     const engine = this.makeEngine(engineId, {
       ...opts,
       port,
+      host: this.bindHost,
       ...(this.binaryPath ? { binaryPath: this.binaryPath } : {}),
     });
     await engine.start();
@@ -107,16 +128,44 @@ export class LocalServerManager {
       engine,
       contextSize: opts.contextSize ?? 0,
       lastUsed: this.now(),
-      host: "127.0.0.1",
+      host: this.bindHost,
       port,
+      opts,
     });
     return { id, contextSize: opts.contextSize ?? 0 };
   }
 
-  /** 已加载本地模型的 OpenAI 兼容 baseUrl（供 pi-ai openai-completions 驱动）。未加载返回 undefined。 */
+  /**
+   * 已加载本地模型的内部 baseUrl（供 daemon 自身代理 + pi-ai 驱动）。
+   * 恒用 127.0.0.1 回环：即使绑定 0.0.0.0，本机回环始终可达。未加载返回 undefined。
+   */
   baseUrlFor(modelId: string): string | undefined {
     const h = this.handles.get(modelId);
-    return h ? `http://${h.host}:${h.port}/v1` : undefined;
+    return h ? `http://127.0.0.1:${h.port}/v1` : undefined;
+  }
+
+  /** 当前 llama-server 绑定 host（127.0.0.1 / 0.0.0.0）。 */
+  getBindHost(): string {
+    return this.bindHost;
+  }
+
+  /** 切换绑定 host：更新默认并整体重载已加载模型使其立即生效。 */
+  async setBindHost(host: string): Promise<void> {
+    if (host === this.bindHost) return;
+    this.bindHost = host;
+    const optsList = [...this.handles.values()].map((h) => h.opts);
+    await Promise.all([...this.handles.keys()].map((id) => this.unload(id)));
+    for (const o of optsList) await this.load(o);
+  }
+
+  /** 已加载本地模型的对外端点（供 /models 发现、外部直连 llama-server）。 */
+  endpoints(): LocalEndpoint[] {
+    return [...this.handles.values()].map((h) => ({
+      id: h.id,
+      host: h.host,
+      port: h.port,
+      baseUrl: `http://${h.host}:${h.port}/v1`,
+    }));
   }
 
   /** 包装引擎：调用 chat/chatStream/embed 时更新 lastUsed（供 LRU）。 */

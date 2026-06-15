@@ -47,10 +47,27 @@ export interface ClientOptions {
   fetch?: typeof fetch;
 }
 
+export interface LocalEndpoint {
+  id: string;
+  host: string;
+  port: number;
+  baseUrl: string;
+}
+
 export interface ModelsInfo {
   routed: string[];
   context?: Record<string, number>;
   engines: { id: string; capabilities: EngineCapabilities }[];
+  /** 本地 llama-server 对外端点（发现/外部直连）。 */
+  endpoints?: LocalEndpoint[];
+  /** 当前 llama-server 绑定 host。 */
+  bindHost?: string;
+}
+
+export interface LocalNetInfo {
+  bindHost: string;
+  lanIp?: string;
+  endpoints: LocalEndpoint[];
 }
 
 export interface ProviderInfo {
@@ -198,6 +215,16 @@ export class EasyWorkClient {
       method: "DELETE",
       headers: this.headers(),
     });
+  }
+
+  /** 本地 llama-server 网络暴露：当前绑定 host + 局域网 IP + 各模型端点。 */
+  getLocalNet(): Promise<LocalNetInfo> {
+    return this.getJSON<LocalNetInfo>("/settings/local-net");
+  }
+
+  /** 切换本地 llama-server 绑定 host（127.0.0.1 仅本机 / 0.0.0.0 局域网）。重载已加载模型生效。 */
+  setLocalNet(bindHost: "127.0.0.1" | "0.0.0.0"): Promise<LocalNetInfo & { ok: boolean }> {
+    return this.postJSON<LocalNetInfo & { ok: boolean }>("/settings/local-net", { bindHost });
   }
 
   /** 运行 agent（pi 托管会话），流式发 AgentEvent。 */
