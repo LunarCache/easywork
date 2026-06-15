@@ -64,9 +64,11 @@ export async function buildEwCustomTools(opts: {
   repo?: ConversationRepo;
   kb?: KnowledgeBaseStore;
   mcp?: McpClientManager;
+  builtins?: Tool[];
 }): Promise<PiToolDefinition[]> {
   const base = { sessionId: opts.sessionId, cwd: opts.cwd };
   const tools: Tool[] = [];
+  if (opts.builtins) tools.push(...opts.builtins);
   if (opts.memory) tools.push(makeMemoryTool(opts.memory));
   if (opts.repo) tools.push(makeSessionSearchTool(opts.repo));
   if (opts.kb) tools.push(makeSearchKnowledgeBaseTool(opts.kb));

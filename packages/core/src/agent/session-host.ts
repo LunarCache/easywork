@@ -13,7 +13,7 @@ import {
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { Model, Api } from "@earendil-works/pi-ai";
-import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode } from "@ew/shared";
+import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, Tool } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { LocalServerManager } from "../engine/local-server-manager.js";
@@ -43,6 +43,8 @@ export interface SessionHostDeps {
   kb?: KnowledgeBaseStore;
   /** R3：MCP 工具（桥成 customTools）。 */
   mcp?: McpClientManager;
+  /** R5：内置工具（时间/计算器/HTTP/web_search）桥成 customTools。 */
+  builtins?: Tool[];
 }
 
 /** 单轮运行输入。 */
@@ -199,6 +201,7 @@ export class SessionHost {
       ...(this.deps.repo ? { repo: this.deps.repo } : {}),
       ...(this.deps.kb ? { kb: this.deps.kb } : {}),
       ...(this.deps.mcp ? { mcp: this.deps.mcp } : {}),
+      ...(this.deps.builtins ? { builtins: this.deps.builtins } : {}),
     });
     const { session } = await createAgentSession({
       model,

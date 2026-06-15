@@ -20,11 +20,8 @@ export {
   streamEventToOpenAIChunks,
 } from "./openai-compat/translate.js";
 
-// Agent
-export { runAgent, type AgentDeps } from "./agent/loop.js";
-export { ToolRegistry } from "./agent/tool-registry.js";
-export { parseToolCallsFromText, stripToolCallMarkup } from "./agent/healing.js";
-export { AutoApproveGate } from "./agent/approval.js";
+// Agent（pi-coding-agent 托管内核）
+export { SessionHost, type SessionHostDeps, type EwAgentRunInput } from "./agent/session-host.js";
 
 // 会话存储 + 记忆 embedding
 export { SqliteConversationRepo } from "./store/conversation.js";

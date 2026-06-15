@@ -17,8 +17,6 @@ import {
   type McpServerConfig,
   type MemoryLayer,
   type MemoryProvider,
-  type Project,
-  type Tool,
 } from "@ew/shared";
 import { LlamaServerEngine } from "@ew/providers";
 import { builtinTools } from "@ew/tools";
@@ -30,21 +28,14 @@ import { EngineRegistry } from "../engine/registry.js";
 import { ModelManager } from "../models/manager.js";
 import { ProviderManager, type CloudProviderConfig } from "../providers/manager.js";
 import { registerOpenAICompat } from "../openai-compat/router.js";
-import { ToolRegistry } from "../agent/tool-registry.js";
-import { runAgent } from "../agent/loop.js";
 import { SessionHost } from "../agent/session-host.js";
-import { ToolTurnRecorder } from "../agent/turn-recorder.js";
 import { ApprovalRegistry, SseApprovalGate } from "../agent/approval-sse.js";
 import { SqliteConversationRepo } from "../store/conversation.js";
 import { EmbeddingService } from "../memory/embedding-service.js";
 import { buildFactExtractor } from "../memory/fact-extractor.js";
-import { makeMemoryTool } from "../memory/memory-tool.js";
-import { makeSessionSearchTool } from "../memory/session-search-tool.js";
-import { workspaceTools } from "../agent/workspace-approval.js";
 import { GitService } from "../git/git.js";
 import { listDir, readFileSafe } from "@ew/tools";
 import { KnowledgeBaseStore } from "../rag/store.js";
-import { makeSearchKnowledgeBaseTool, ragAutoInject } from "../rag/tool.js";
 import { parseFile } from "../rag/parse.js";
 import { LocalServerManager, getFreePort } from "../engine/local-server-manager.js";
 import {
@@ -61,7 +52,6 @@ export interface CoreServer {
   local: LocalServerManager;
   models: ModelManager;
   providers: ProviderManager;
-  tools: ToolRegistry;
   skills: SkillManager;
   mcp: McpClientManager;
   memory: LocalMemoryProvider;
@@ -119,15 +109,12 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   });
   const providers = new ProviderManager(registry, opts.fetch ? { fetch: opts.fetch } : {});
 
-  // Agent 运行时：工具注册表（内置工具 + Skills/MCP 动态 provider）。
+  // Agent 运行时：内置工具（时间/计算器/HTTP/web_search）由宿主桥成 pi customTools；
+  // Skills 由 pi 自身发现（resourceLoader）；MCP 由宿主桥成 customTools。
   const workspaceDir = opts.workspaceDir ?? defaultDataDir();
   const skillsDirs = opts.skillsDirs ?? [fsPath.join(defaultDataDir(), "skills")];
-  const tools = new ToolRegistry();
-  for (const t of builtinTools) tools.register(t);
   const skills = new SkillManager(skillsDirs);
   const mcp = new McpClientManager();
-  tools.addProvider("skills", skills.toolProvider());
-  tools.addProvider("mcp", mcp.toolProvider());
   // 交互式审批跨请求登记表（/agent/run 挂起 ↔ /agent/approve 解析）。
   const approvalRegistry = new ApprovalRegistry();
 
@@ -174,6 +161,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     repo,
     kb,
     mcp,
+    builtins: builtinTools,
   });
 
   // ---- 持久化 provider / MCP 配置（重启后恢复）----
@@ -441,50 +429,12 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       return reply.code(404).send({ error: "model_not_loaded", message: String(err) });
     }
 
-    // 热重载 Skills，并把技能目录注入系统提示。
-    await skills.discover().catch(() => {});
-    const catalog = skills.systemPromptCatalog();
-    const history = catalog
-      ? [{ role: "system" as const, content: catalog }, ...parsed.data.history]
-      : [...parsed.data.history];
-    // 记忆工具（manage_memory：模型自治增改删）+ 会话检索（session_search：FTS5 历史）常驻。
-    const extraTools: Tool[] = [makeMemoryTool(memory), makeSessionSearchTool(repo)];
-    // RAG：仅当聊天开启「知识库」时启用——自动注入相关上下文，并按所选集合注入 search_knowledge_base 工具。
-    const useKb = parsed.data.kb === true;
-    const kbId = parsed.data.kbId;
-    if (useKb) {
-      extraTools.push(makeSearchKnowledgeBaseTool(kb, kbId));
-      const lu = parsed.data.history[parsed.data.history.length - 1];
-      const q = lu?.role === "user" ? messageText(lu.content) : "";
-      if (q) {
-        const inj = await ragAutoInject(kb, q, kbId ? { kbId } : {}).catch(() => null);
-        if (inj) history.unshift({ role: "system" as const, content: inj.context });
-      }
-    }
-    // 冻结快照（参考 Hermes）：会话期间固定的全局记忆作为系统块置顶注入，护 prefix cache。
-    // 历史检索交给 session_search（FTS5），故关闭动态 recall（见下方 recallOptions）。
-    const snapshot = await buildMemorySnapshot(memory);
-    if (snapshot) history.unshift({ role: "system" as const, content: snapshot });
-    // Think 开关：把 /think 或 /no_think 注入给模型（Qwen3 等），但不污染持久化的用户消息。
-    if (parsed.data.think !== undefined && history.length > 0) {
-      const last = history[history.length - 1]!;
-      if (last.role === "user") {
-        const directive = parsed.data.think ? " /think" : " /no_think";
-        history[history.length - 1] = { ...last, content: `${messageText(last.content)}${directive}` };
-      }
-    }
-
-    // 工作区：按 projectId 解析项目根 + 审批策略；注入 fs/exec 工具与项目指令（含 AGENTS.md）。
+    // pi 内核托管：会话内自持历史/技能/compaction，并自行加载项目上下文（AGENTS.md）。
+    // 记忆召回/抽取、知识库、MCP、内置工具均由宿主以扩展/customTools 注入（见 SessionHost）。
     const threadId = parsed.data.threadId;
     const projectId = parsed.data.projectId ?? repo.getThread(threadId)?.projectId ?? undefined;
     const project = projectId ? repo.getProject(projectId) : null;
-    let runWorkspaceDir = workspaceDir;
-    if (project?.workspaceDir) {
-      runWorkspaceDir = project.workspaceDir;
-      extraTools.push(...workspaceTools(project.approvalMode ?? "approve-each"));
-      const instr = workspaceInstructions(project);
-      if (instr) history.unshift({ role: "system" as const, content: instr });
-    }
+    const runWorkspaceDir = project?.workspaceDir ?? workspaceDir;
 
     // 持久化（应用内会话历史）：确保 thread 存在并追加本轮用户消息。
     const lastUser = parsed.data.history[parsed.data.history.length - 1];
@@ -526,90 +476,22 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       emit: (ev) => send(ev),
       signal: ac.signal,
     });
-    // 从事件流重建并持久化 agent loop 的工具往返（对齐 Hermes：完整历史含 tool_calls/results）。
-    const recorder = new ToolTurnRecorder();
-    const persistRecorded = (msgs: ReturnType<ToolTurnRecorder["push"]>): void => {
-      for (const m of msgs) {
-        repo.appendMessage({
-          id: crypto.randomUUID(),
-          threadId,
-          role: m.role,
-          seq: repo.nextSeq(threadId),
-          parts: m.parts,
-          ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
-          ...(m.toolResults ? { toolResults: m.toolResults } : {}),
-          createdAt: new Date().toISOString(),
-        });
-      }
-    };
 
-    const persistFinal = (): void => {
-      if (finalContent) {
-        repo.appendMessage({
-          id: crypto.randomUUID(),
-          threadId,
-          role: "assistant",
-          seq: repo.nextSeq(threadId),
-          parts: [{ type: "text", text: finalContent }],
-          createdAt: new Date().toISOString(),
-        });
-      }
-    };
-
-    // R1：EW_KERNEL=pi → 托管 pi AgentSession（pi 在会话内自持历史，只发本轮用户文本）。
-    if (process.env.EW_KERNEL === "pi") {
-      const userText = lastUser?.role === "user" ? messageText(lastUser.content) : "";
-      try {
-        for await (const ev of sessionHost.run({
-          threadId,
-          modelId: parsed.data.model,
-          text: userText,
-          cwd: runWorkspaceDir,
-          // 工作区模式：有项目工作目录 → 启用 bash/edit/write + 审批；否则聊天模式收窄。
-          workspace: !!project?.workspaceDir,
-          approval: runApproval,
-          approvalMode: project?.approvalMode ?? "approve-each",
-        })) {
-          if (ev.type === "final") finalContent = messageText(ev.message.content);
-          send(ev);
-        }
-        persistFinal();
-      } catch (err) {
-        send({ type: "error", message: err instanceof Error ? err.message : String(err) });
-      } finally {
-        raw.write("data: [DONE]\n\n");
-        raw.end();
-      }
-      return;
-    }
-
-    const runInput = {
-      threadId: parsed.data.threadId,
-      model: parsed.data.model,
-      history,
-      ...(parsed.data.maxIterations ? { maxIterations: parsed.data.maxIterations } : {}),
-      ...(parsed.data.excludeTools ? { excludeTools: parsed.data.excludeTools } : {}),
-      ...(parsed.data.sampling ? { sampling: parsed.data.sampling } : {}),
-      signal: ac.signal,
-    };
+    const userText = lastUser?.role === "user" ? messageText(lastUser.content) : "";
     try {
-      for await (const ev of runAgent(runInput, {
-        resolveEngine: (m) => registry.resolve(m),
-        tools,
+      for await (const ev of sessionHost.run({
+        threadId,
+        modelId: parsed.data.model,
+        text: userText,
+        cwd: runWorkspaceDir,
+        // 工作区模式：有项目工作目录 → 启用 bash/edit/write + 审批；否则聊天模式收窄。
+        workspace: !!project?.workspaceDir,
         approval: runApproval,
-        workspaceDir: runWorkspaceDir,
-        memory,
-        // 全局记忆已由冻结快照置顶注入、历史由 session_search 检索；关闭动态 recall 避免重复注入。
-        recallOptions: { enabled: false },
-        // 工具中间进度（run_command 流式输出）直接写 SSE。
-        onToolProgress: (ev) => send(ev),
-        ...(extraTools.length ? { extraTools } : {}),
+        approvalMode: project?.approvalMode ?? "approve-each",
       })) {
-        persistRecorded(recorder.push(ev));
         if (ev.type === "final") finalContent = messageText(ev.message.content);
         send(ev);
       }
-      // 追加助手最终回复（无工具的收尾轮）。
       if (finalContent) {
         repo.appendMessage({
           id: crypto.randomUUID(),
@@ -1024,7 +906,6 @@ version: "0.1.0"
     local,
     models,
     providers,
-    tools,
     skills,
     mcp,
     memory,
@@ -1078,27 +959,6 @@ function isExistingDir(p: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** 工作区项目指令：project.instructions + 项目根的 AGENTS.md（若存在），拼成系统块。 */
-function workspaceInstructions(project: Project): string {
-  const parts: string[] = [];
-  if (project.instructions?.trim()) parts.push(project.instructions.trim());
-  if (project.workspaceDir) {
-    for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-      try {
-        const txt = fs.readFileSync(fsPath.join(project.workspaceDir, name), "utf8");
-        if (txt.trim()) {
-          parts.push(`# ${name}\n${txt.trim()}`);
-          break;
-        }
-      } catch {
-        /* 不存在则跳过 */
-      }
-    }
-  }
-  if (parts.length === 0) return "";
-  return `你正在工作区「${project.name}」（目录：${project.workspaceDir}）中工作。可用 fs_* 工具读写文件、run_command 执行命令（路径限定在工作区内）。\n\n${parts.join("\n\n")}`;
 }
 
 /** 构造全局记忆的冻结快照系统块（参考 Hermes）：会话期固定，置顶注入。全空则返回 ""。 */

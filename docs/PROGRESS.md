@@ -2,6 +2,19 @@
 
 > 每完成一个里程碑更新此文件。最新在上。
 
+## 2026-06-15 — 内核换为 pi-coding-agent（托管 AgentSession，硬切）
+
+把 EasyWork 的 agent 内核从自研 loop **硬切**为托管 `@earendil-works/pi-coding-agent` 的 `createAgentSession`（无头嵌入），EasyWork 退化为宿主/集成层。分 R0–R5 推进，每阶段真机 e2e（本地 llama-server）验证：
+
+- **R0**：`scripts/spike-session.mjs` 证明 AgentSession 可无头嵌入 + 本地模型驱动 + 自带工具 + 自动 compaction。
+- **R1**：`agent/session-host.ts` — `SessionHost` 封装 createAgentSession，按 threadId 复用会话；`mapSessionEvent` 把 pi `AgentSessionEvent` 映射为我们的 SSE `AgentEvent`（唯一边界翻译）。
+- **R2**：单一落盘共享 `AuthStorage`/`ModelRegistry`；`syncCloudProviders` 把云端 provider（key/headers/baseUrl）对账进 pi；本地走 `baseUrlFor`。
+- **R3**：`agent/ew-extensions.ts` — 记忆经 pi `context`（召回注入）+ `agent_end`（事实抽取）扩展；`toPiTool` 把我们的 `Tool` 桥成 pi customTool；`manage_memory`/`session_search`/`search_knowledge_base`/MCP/内置工具均以 customTools 注入。
+- **R4**：pi `tool_call` 钩子映射审批 4 档（read-only/approve-each/auto-edits/full-auto）经 `ApprovalGate`（沿用 approval-request SSE）；工作区/聊天模式工具收窄。
+- **R5（硬切清理）**：`/agent/run` 仅走 pi（移除 `EW_KERNEL` 过渡门 + legacy 分支）；删除自研内核 `agent/{loop,healing,turn-recorder,tool-registry,workspace-approval,approval}.ts` 及其测试；内置工具桥成 customTools 保留能力。**保留**（仍在用）：`EngineRegistry`/`LocalServerManager`/`ProviderManager`（撑 `/v1`·`/chat/stream`·fact-extractor）、`approval-sse`、`memory/session/rag` 工具、`@ew/tools`。
+  - **待办（R5b，已知未做）**：`/v1`·`/chat/stream` 仍是引擎直连（非 pi-ai）；持久化仍用 `ConversationRepo`（未切 pi `SessionManager`）；`/agent/run` 的 abort 未透传给 pi；MCP 工具在会话创建时快照（运行时增删需重建会话）。
+  - 结果：**148 测试全绿**（删 ~36 legacy 测试），typecheck 19/19，改动文件 eslint 0。
+
 ## 阶段总览
 
 - [x] **阶段 0 — 地基**：CLAUDE.md、monorepo 骨架、`@ew/shared`、`@ew/engine-worker`、`@ew/core`+`@ew/sdk`+`@ew/daemon` 端到端贯通 ✅
