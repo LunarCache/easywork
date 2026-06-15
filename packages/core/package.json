@@ -20,6 +20,8 @@
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.79.3",
+    "@earendil-works/pi-ai": "0.79.3",
     "@ew/mcp": "*",
     "@ew/memory": "*",
     "@ew/providers": "*",
@@ -27,6 +29,7 @@
     "@ew/skills": "*",
     "@ew/tools": "*",
     "fastify": "^5.2.0",
+    "typebox": "1.1.38",
     "zod": "^3.24.1"
   },
   "devDependencies": {
