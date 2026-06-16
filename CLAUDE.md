@@ -61,7 +61,10 @@ resources/        图标、默认 skills、模型 catalog
 - **HTTP**：Fastify（schema-first、原生 SSE）
 - **契约/校验**：zod + zod-to-json-schema（一份 schema → TS 类型 + 函数调用 JSON Schema）
 - **本地 DB**：`node:sqlite`（Node 内置 DatabaseSync，**零原生编译**，Node 26 可用；规避 better-sqlite3 在新 ABI 上编译失败的 #1 打包风险）
-- **记忆向量召回**：本地 CPU embedding（参考 Hermes，默认 **nomic-embed-text** 768 维，经 `llama-server --embedding` 运行）+ **混合召回**（语义 cosine ⊕ 词法，0.75/0.25 加权）。语义分**一律走 sqlite-vec**（`vec0` 虚拟表，`distance_metric=cosine`，经 `node:sqlite` `loadExtension`；rowid 须传 `BigInt`）——**JS 余弦 brute-force 已移除**。记忆与**知识库 RAG 共用** `@ew/memory` 的 `SqliteVecIndex`（KB 用 `kb_vec` 表，dense 分走它、再与词法 RRF 融合）。`embedding` blob 仍存于源表（`memory_items` / `kb_chunks`，durable 重建源），vec 表是查询索引、随写/改/删/reindex 同步。未启用 embedding（或扩展无二进制）时降级为纯词法。**注入分两路**：会话期**冻结快照**（`buildMemorySnapshot`，全量持久记忆，记忆扩展闭包内缓存、每轮置顶注入）+ 每轮**动态召回**（按相关度 top-K）。被动抽取的事实带来源 `sessionId`，删除对话时经 `deleteBySession` 一并清除（模型 `manage_memory`/手工写入的无 sessionId 全局事实不受影响）。
+- **记忆——作用域化**：每条记忆带 `scope`。**全局池**（`global` = 对话记忆，所有对话共享，层 user-profile/agent-memory/skills）+ **每工作区私有池**（`ws:<projectId>`，互相隔离、独立于全局，层 conventions/decisions/pitfalls）。工作区会话只读叠加全局 `user-profile`（共享身份），写只进本工作区池（`visibleScopes` 决定可见集）。删对话按 `sessionId` 清其抽取的事实；删工作区按 `deleteByScope(ws:<id>)` 清整池。
+- **记忆——注入（纯渐进式披露，借鉴 Skill）**：`before_agent_start` 钩子把**记忆清单**（仅标题/要点，`buildMemoryManifest`）拼进**系统提示词**，让模型知道有哪些记忆；全文经 **`recall_memory` 工具**按需取（语义检索）。**已移除冻结快照全量灌入 + 每轮自动召回**。写记忆用 `manage_memory`（按 scope 参数化）。
+- **记忆——抽取（模型抽取 + 批量，非每轮）**：`buildFactExtractor` 用对话模型抽取（提示词按 scope 切换：工作区盯变动/约束/坑，对话盯身份/偏好/技巧）。触发：一轮结束挂 **~90s 空闲去抖**定时器；**上下文压缩前**（`session_before_compact`）/ **会话关闭**（`session_shutdown`）立即批量抽一次（回看窗口 `EXTRACT_WINDOW`，重叠由词法去重兜住）。
+- **向量召回引擎**：本地 CPU embedding（默认 **nomic-embed-text** 768 维，`llama-server --embedding`）+ **混合召回**（语义 0.75 ⊕ 词法 0.25）。语义分**一律走 sqlite-vec**（`vec0`，`distance_metric=cosine`，`node:sqlite` `loadExtension`；rowid 须 `BigInt`）——JS 余弦已移除。记忆与**知识库 RAG 共用** `@ew/memory` 的 `SqliteVecIndex`（KB 用 `kb_vec` 表 + 词法 RRF）。`embedding` blob 存于源表（`memory_items`/`kb_chunks`，durable 重建源），vec 表是查询索引、随写/改/删/reindex 同步；扩展无二进制时降级纯词法。
 - **UI**：React 19 + Vite + @assistant-ui/react + @tanstack/react-router + Zustand + TanStack Query
 - **桌面**：Tauri 2（Rust 外壳 + TS 前端；sidecar 启动 Node daemon）
 - **库构建**：tsup（esbuild）
@@ -76,7 +79,7 @@ resources/        图标、默认 skills、模型 catalog
 - `InferenceEngine`：`chat()` / `chatStream(): AsyncIterable<ChatStreamEvent>` / `embed?()` + `capabilities`。本地引擎额外 `load/unload/loaded`。
 - `ChatStreamEvent`：判别联合 `text-delta` / `tool-call-start|args-delta|end` / `reasoning-delta` / `usage` / `done`。**不用裸字符串流**（无法表达 text 与 tool call 交织）。
 - `Tool` / `ToolProvider`：内置工具、MCP 工具统一成 `Tool`，再经 `toPiTool` 桥成 pi customTool（含 `ApprovalGate`）。**注**：自研 `ToolRegistry`/agent loop 已删除，agent 内核 = pi `AgentSession`。
-- `MemoryProvider`：`recall/write/edit/list/delete/deleteBySession/observe`。本地 = 分层 markdown（真相源）+ sqlite-vec 语义（回退 JS 余弦）⊕ 词法混合召回。
+- `MemoryProvider`：`recall/write/edit/list/delete/deleteBySession/deleteByScope/observe`（均带 `scope`）。本地 = 作用域化分层记忆（全局 markdown 为真相源、可手工编辑回灌；工作区 DB-only）+ sqlite-vec 语义 ⊕ 词法混合召回。
 - `AgentEvent`（SSE 对外事件）：`text/reasoning/tool-start/tool-end/tool-progress/approval-request/memory-recall/usage/final/error`。`mapSessionEvent` 把 pi 事件映射到它。
 - `ChannelConnector`：`start/stop/onInbound/reply`。`resolveThreadForChannel(kind, channelUserId)` 映射渠道身份到 thread → 跨渠道同一大脑。
 

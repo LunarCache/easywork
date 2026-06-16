@@ -1,5 +1,6 @@
 // R3 — EasyWork 专有能力以 pi 扩展/customTool 形式接入托管的 AgentSession：
-//  - 记忆：pi `context` 钩子注入召回 + `agent_end` 钩子被动抽取（保留 LocalMemoryProvider）。
+//  - 记忆：渐进式披露（`before_agent_start` 注入「记忆清单」到系统提示词 + recall_memory 工具按需取全文）
+//          + 批量被动抽取（空闲去抖 / 压缩 / 关闭时，非每轮）。作用域化（global 对话池 + 每工作区独立池）。
 //  - 知识库 / session 检索 / MCP：桥成 pi customTools。
 import path from "node:path";
 import fs from "node:fs";
@@ -9,52 +10,80 @@ import type {
   ExtensionFactory,
   ToolDefinition as PiToolDefinition,
   AgentToolResult,
-  ContextEvent,
   AgentEndEvent,
+  BeforeAgentStartEvent,
   ToolCallEvent,
   ToolCallEventResult,
 } from "@earendil-works/pi-coding-agent";
-import type {
-  Tool,
-  ToolExecContext,
-  ApprovalGate,
-  ApprovalMode,
-  SamplingParams,
-  MemoryProvider,
-  MemoryItem,
-  MemoryLayer,
-  ContentPart,
-  ConversationRepo,
+import {
+  GLOBAL_SCOPE,
+  isWorkspaceScope,
+  visibleScopes,
+  type Tool,
+  type ToolExecContext,
+  type ApprovalGate,
+  type ApprovalMode,
+  type SamplingParams,
+  type MemoryProvider,
+  type MemoryLayer,
+  type ScopeView,
+  type ContentPart,
+  type ConversationRepo,
 } from "@ew/shared";
 import type { KnowledgeBaseStore } from "../rag/store.js";
 import type { McpClientManager } from "@ew/mcp";
 import { makeMemoryTool } from "../memory/memory-tool.js";
+import { makeRecallMemoryTool } from "../memory/recall-memory-tool.js";
 import { makeSessionSearchTool } from "../memory/session-search-tool.js";
 import { makeSearchKnowledgeBaseTool } from "../rag/tool.js";
 
-/** 注入记忆块的前缀标记（用于在 context 钩子里识别并跳过本扩展自己注入的消息）。 */
-const RECALL_MARKER = "【相关记忆】";
-/** 冻结快照前缀标记（会话期固定的全量持久记忆，置顶注入）。 */
-const SNAPSHOT_MARKER = "【持久记忆】";
+/** 被动抽取的空闲去抖时长：一轮结束后停顿这么久没有新输入，才批量抽取一次。 */
+const EXTRACT_IDLE_MS = 90_000;
+/** 单次抽取回看的消息窗口上限（去重防膨胀，重叠由 isDuplicateFact 兜住）。 */
+const EXTRACT_WINDOW = 24;
+
+/** (scope,layer) → 清单里的人类标签。 */
+function manifestLabel(scope: string, layer: MemoryLayer): string {
+  const GLOBAL: Record<string, string> = {
+    "user-profile": "用户画像",
+    "agent-memory": "长期记忆",
+    skills: "技能/流程",
+  };
+  const WS: Record<string, string> = {
+    conventions: "本工程·约定/约束",
+    decisions: "本工程·变动/决策",
+    pitfalls: "本工程·坑/教训",
+  };
+  if (isWorkspaceScope(scope)) return WS[layer] ?? layer;
+  // 工作区会话里叠加的全局层 → 标注「全局·」
+  return GLOBAL[layer] ?? layer;
+}
+
+function oneLine(text: string, max = 80): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
 
 /**
- * 构造冻结记忆快照（参考 Hermes）：会话开始时把全量持久记忆（user-profile/agent-memory/skills）
- * 拍平为一段文本，会话期固定置顶注入；与「动态召回」（每轮按相关度检索）互补。空则返回 ""。
+ * 构造「记忆清单」（渐进式披露的常驻索引，借鉴 Skill 的描述常驻）：按可见作用域+层列出每条要点
+ * （仅标题/截断），不灌全文；让模型知道有哪些记忆存在，细节经 recall_memory 工具按需取。空则 ""。
  */
-export async function buildMemorySnapshot(memory: MemoryProvider): Promise<string> {
-  const layers: { layer: MemoryLayer; title: string }[] = [
-    { layer: "user-profile", title: "用户画像" },
-    { layer: "agent-memory", title: "长期记忆" },
-    { layer: "skills", title: "技能/流程" },
-  ];
-  const blocks: string[] = [];
-  for (const { layer, title } of layers) {
-    const items = await memory.list({ layer });
-    if (items.length === 0) continue;
-    blocks.push(`## ${title}\n${items.map((i) => `- ${i.text}`).join("\n")}`);
+export async function buildMemoryManifest(memory: MemoryProvider, views: ScopeView[]): Promise<string> {
+  const sections: string[] = [];
+  for (const v of views) {
+    for (const layer of v.layers) {
+      const items = await memory.list({ scope: v.scope, layer });
+      if (items.length === 0) continue;
+      const lines = items.map((it) => `- ${oneLine(it.text)}`);
+      sections.push(`### ${manifestLabel(v.scope, layer)}\n${lines.join("\n")}`);
+    }
   }
-  if (blocks.length === 0) return "";
-  return `${SNAPSHOT_MARKER}（本次会话期间固定；需变更请用 manage_memory 工具）：\n\n${blocks.join("\n\n")}`;
+  if (sections.length === 0) return "";
+  return (
+    `# 你的长期记忆（清单）\n` +
+    `下面只列要点；需要某条完整内容、或想按主题检索记忆时，调用 recall_memory 工具。` +
+    `要新增/修改记忆用 manage_memory 工具。\n\n${sections.join("\n\n")}`
+  );
 }
 
 /** 桥接工具默认自动批准：MCP/KB/记忆无需 EW 审批；pi 自带工具的审批由 pi 自身负责。 */
@@ -82,10 +111,12 @@ export function toPiTool(tool: Tool, base: { sessionId: string; cwd: string }): 
   };
 }
 
-/** 组装 EasyWork 专有 customTools（记忆管理 / session 检索 / 知识库 / MCP）。 */
+/** 组装 EasyWork 专有 customTools（记忆管理/检索 · session 检索 · 知识库 · MCP）。 */
 export async function buildEwCustomTools(opts: {
   sessionId: string;
   cwd: string;
+  /** 记忆作用域（global / ws:<id>）；决定 manage_memory/recall_memory 读写哪个池。 */
+  memoryScope?: string;
   memory?: MemoryProvider;
   repo?: ConversationRepo;
   kb?: KnowledgeBaseStore;
@@ -93,9 +124,13 @@ export async function buildEwCustomTools(opts: {
   builtins?: Tool[];
 }): Promise<PiToolDefinition[]> {
   const base = { sessionId: opts.sessionId, cwd: opts.cwd };
+  const scope = opts.memoryScope ?? GLOBAL_SCOPE;
   const tools: Tool[] = [];
   if (opts.builtins) tools.push(...opts.builtins);
-  if (opts.memory) tools.push(makeMemoryTool(opts.memory));
+  if (opts.memory) {
+    tools.push(makeMemoryTool(opts.memory, scope));
+    tools.push(makeRecallMemoryTool(opts.memory, scope));
+  }
   if (opts.repo) tools.push(makeSessionSearchTool(opts.repo));
   if (opts.kb) tools.push(makeSearchKnowledgeBaseTool(opts.kb));
   if (opts.mcp) {
@@ -114,60 +149,70 @@ export async function buildEwCustomTools(opts: {
   return tools.map((t) => toPiTool(t, base));
 }
 
-/** 记忆扩展工厂：context 注入冻结快照（会话期固定）+ 动态召回（每轮）+ agent_end 被动事实抽取。 */
+/**
+ * 记忆扩展工厂（渐进式披露 + 批量抽取）：
+ * - `before_agent_start`：把「记忆清单」注入系统提示词（常驻、只列要点，全文经 recall_memory 取）。
+ * - 抽取：不再每轮。一轮结束挂去抖定时器（~90s）；停顿/上下文压缩/会话关闭时批量抽一次本作用域记忆。
+ * 作用域：global（对话池）或 ws:<id>（工作区私有池）；工作区清单额外含全局 user-profile（只读）。
+ */
 export function memoryExtensionFactory(opts: {
   threadId: string;
   modelId: string;
+  scope: string;
   memory: MemoryProvider;
-  /** 召回缓存挂在 run 运行时上，由宿主每轮重置（避免同 query 跨轮复用陈旧召回）。 */
   runtime: RunRuntime;
 }): ExtensionFactory {
-    // 冻结快照：会话内计算一次并缓存（首个 context 事件触发）；之后每轮置顶注入同一段文本。
-    // 与 RunRuntime.recall（每轮按相关度动态检索）不同，快照在会话期固定。
-    let snapshot: string | null = null;
-    return (pi: ExtensionAPI) => {
-    pi.on("context", async (event: ContextEvent) => {
-      const rt = opts.runtime;
-      if (snapshot === null) {
-        snapshot = await buildMemorySnapshot(opts.memory).catch(() => "");
-      }
-      const query = lastUserText(event.messages);
-      // 动态召回：有用户输入才查；同 query 在工具循环里复用本轮缓存（run() 开始已清空）。
-      if (query && (!rt.recall || rt.recall.key !== query)) {
-        const items = await opts.memory.recall({ query, topK: 6, minScore: 0.3 }).catch(() => [] as MemoryItem[]);
-        rt.recall = { key: query, block: items.length ? formatRecall(items) : "" };
-      }
-      const recallBlock = query ? rt.recall?.block : "";
-      const inject: { role: "user"; content: string; timestamp: number }[] = [];
-      if (snapshot) inject.push({ role: "user", content: snapshot, timestamp: Date.now() });
-      if (recallBlock) inject.push({ role: "user", content: recallBlock, timestamp: Date.now() });
-      if (inject.length === 0) return;
-      return { messages: [...inject, ...event.messages] };
+  const views = visibleScopes(opts.scope);
+  let pending: { role: string; content: string }[] = []; // 最近一次 agent_end 的对话快照
+  let dirty = false; // 自上次抽取以来有无新内容
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const extractNow = (): void => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    if (!dirty) return;
+    dirty = false;
+    const window = pending.slice(-EXTRACT_WINDOW);
+    if (window.length === 0) return;
+    // 后台抽取（不 await）：写入本作用域；isDuplicateFact 兜住窗口重叠。
+    void opts.memory
+      .observe({ messages: window, sessionId: opts.threadId, scope: opts.scope, model: opts.modelId })
+      .catch(() => {});
+  };
+
+  return (pi: ExtensionAPI) => {
+    pi.on("before_agent_start", async (event: BeforeAgentStartEvent) => {
+      const manifest = await buildMemoryManifest(opts.memory, views).catch(() => "");
+      if (!manifest) return;
+      return { systemPrompt: `${event.systemPrompt}\n\n${manifest}` };
     });
     pi.on("agent_end", (event: AgentEndEvent) => {
-      // 用户取消的这一轮「不计入上下文」：也不据此抽取记忆事实。
+      // 用户取消的这一轮「不计入上下文」：不纳入抽取（上下文回滚由宿主处理）。
       if (opts.runtime.aborted) return;
-      const messages = event.messages
+      pending = event.messages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role, content: contentText(m.content as string | ContentPart[]) }))
-        .filter((m) => !m.content.startsWith(RECALL_MARKER) && !m.content.startsWith(SNAPSHOT_MARKER));
-      // 后台抽取事实：不 await——否则 pi 会等它跑完才让 run 收尾，SSE 迟迟不关。
-      // 抽取是 best-effort，放到后台跑。
-      void opts.memory
-        .observe({ messages, sessionId: opts.threadId, model: opts.modelId })
-        .catch(() => {});
+        .filter((m) => m.content.trim().length > 0);
+      dirty = true;
+      // 去抖：停顿 EXTRACT_IDLE_MS 没有新一轮才抽取（unref 不阻塞退出）。
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(extractNow, EXTRACT_IDLE_MS);
+      timer.unref?.();
     });
+    // 上下文压缩前 / 会话关闭前：把积累的内容立即抽取（避免被淘汰或丢尾部）。
+    pi.on("session_before_compact", () => extractNow());
+    pi.on("session_shutdown", () => extractNow());
   };
 }
 
-/** 每轮运行的权限/记忆上下文（run() 前由宿主写入/重置；扩展闭包读取）。 */
+/** 每轮运行的权限/采样上下文（run() 前由宿主写入/重置；扩展闭包读取）。 */
 export interface RunRuntime {
   mode: ApprovalMode;
   approval?: ApprovalGate;
   /** approve-always 记忆：本会话内该工具后续放行。 */
   alwaysApproved: Set<string>;
-  /** 本轮召回缓存（run() 开始时重置，避免同一 query 跨轮复用陈旧召回）。 */
-  recall?: { key: string; block: string };
   /** 本轮采样参数（run() 前写入；streamFn 包装读取，注入 provider 请求）。 */
   sampling?: SamplingParams;
   /** 本轮是否被用户取消（取消则跳过记忆抽取；上下文回滚由宿主处理）。 */
@@ -258,24 +303,6 @@ export function permissionExtensionFactory(runtime: RunRuntime, cwd: string): Ex
       return {};
     });
   };
-}
-
-/** 召回项渲染成注入块（带标记，便于识别/跳过）。 */
-function formatRecall(items: MemoryItem[]): string {
-  const lines = items.map((it) => `- [${it.layer}] ${it.text}`);
-  return `${RECALL_MARKER}（供参考，未必相关）：\n${lines.join("\n")}`;
-}
-
-/** 取最后一条「非注入」的用户消息文本。 */
-function lastUserText(messages: ContextEvent["messages"]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m?.role !== "user") continue;
-    const t = contentText(m.content as string | ContentPart[]);
-    if (t.startsWith(RECALL_MARKER) || t.startsWith(SNAPSHOT_MARKER)) continue;
-    if (t.trim()) return t;
-  }
-  return "";
 }
 
 /** pi/EW 内容（string | parts）→ 纯文本。 */

@@ -1,13 +1,12 @@
-import type { ChatMessage, InferenceEngine } from "@ew/shared";
-import { messageText } from "@ew/shared";
+import type { ChatMessage, InferenceEngine, MemoryLayer } from "@ew/shared";
+import { isWorkspaceScope, messageText } from "@ew/shared";
 import type { ExtractedFact, FactExtractor } from "@ew/memory";
 
-const LAYERS = ["user-profile", "agent-memory", "skills"] as const;
-
-const SYSTEM_PROMPT = `你是记忆抽取器。从对话中抽取值得长期保存的【持久事实】，忽略一次性、临时、与任务无关或闲聊的内容。
+/** 对话/全局作用域：关于「用户这个人」。 */
+const GLOBAL_PROMPT = `你是记忆抽取器。从对话中抽取值得长期保存的【持久事实】，忽略一次性、临时、与任务无关或闲聊的内容。
 分层：
 - user-profile：用户的身份/角色/长期偏好（如"用户是后端工程师"、"偏好简洁回答"、"习惯用中文交流"）。
-- agent-memory：助手应跨会话记住的客观事实或约定（如"项目部署在 AWS"、"天气查询用 open-meteo"）。
+- agent-memory：助手应跨会话记住的客观事实或约定（如"天气查询用 open-meteo"）。
 - skills：用户教给助手的可复用操作流程或技巧。
 规则：
 - 只输出真正持久、明确的事实；不确定就不要输出。
@@ -15,6 +14,19 @@ const SYSTEM_PROMPT = `你是记忆抽取器。从对话中抽取值得长期保
 - 每条事实简洁成句、自包含（不要"它/这个/上面"等指代）。
 - 没有可抽取的内容就返回空数组。
 严格只输出 JSON，形如：{"facts":[{"layer":"user-profile|agent-memory|skills","text":"..."}]}`;
+
+/** 工作区作用域：关于「这个工程」。 */
+const WORKSPACE_PROMPT = `你是工程记忆抽取器。从这段工作中抽取对【后续在本工程里干活】有长期价值的要点，忽略一次性、过程性、闲聊内容。
+分层：
+- conventions：本工程特定的约定/约束/偏好（如"用 npm 不用 pnpm"、"必须兼容 Node 26"、"不要改 unsloth/ 目录"）。
+- decisions：做过的关键变动/决策——记「做了什么 + 为什么」的摘要，不要记代码 diff（diff 由 git 保存）。
+- pitfalls：踩过的坑/教训及规避方法（如"X 接口在并发下会错配，须串行化"）。
+规则：
+- 只输出对将来有复用价值、明确的要点；不确定就不要输出。
+- 不要输出"已有记忆"里已存在或语义等价的条目。
+- 每条简洁成句、自包含（不要"它/这个/上面"等指代）。
+- 没有可抽取的内容就返回空数组。
+严格只输出 JSON，形如：{"facts":[{"layer":"conventions|decisions|pitfalls","text":"..."}]}`;
 
 export interface FactExtractorDeps {
   /** 解析 model id → 引擎（通常是 EngineRegistry.resolve）。 */
@@ -28,7 +40,7 @@ export interface FactExtractorDeps {
  * 模型未路由 / 无 model / 解析失败时安全返回 []，记忆降级为仅启发式摘要。
  */
 export function buildFactExtractor(deps: FactExtractorDeps): FactExtractor {
-  return async ({ messages, existing, model }) => {
+  return async ({ messages, existing, layers, scope, model }) => {
     if (!model) return [];
     let engine: InferenceEngine;
     try {
@@ -49,11 +61,12 @@ export function buildFactExtractor(deps: FactExtractorDeps): FactExtractor {
     const existingText = existing.length
       ? existing.map((e) => `[${e.layer}] ${e.text}`).join("\n")
       : "（无）";
+    const systemPrompt = isWorkspaceScope(scope) ? WORKSPACE_PROMPT : GLOBAL_PROMPT;
     const chatMessages: ChatMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       {
         role: "user",
-        content: `已有记忆：\n${existingText}\n\n对话：\n${convo}\n\n抽取持久事实，按要求输出 JSON。`,
+        content: `已有记忆：\n${existingText}\n\n对话：\n${convo}\n\n抽取持久要点，按要求输出 JSON。`,
       },
     ];
 
@@ -64,12 +77,12 @@ export function buildFactExtractor(deps: FactExtractorDeps): FactExtractor {
       maxTokens: deps.maxTokens ?? 512,
       responseFormat: { type: "json_object" },
     });
-    return parseFacts(messageText(res.message.content));
+    return parseFacts(messageText(res.message.content), layers);
   };
 }
 
-/** 解析模型输出为事实列表：截出 JSON 对象 → 校验 layer/text。 */
-function parseFacts(raw: string): ExtractedFact[] {
+/** 解析模型输出为事实列表：截出 JSON 对象 → 校验 layer（须在本作用域允许集内）/text。 */
+function parseFacts(raw: string, layers: readonly MemoryLayer[]): ExtractedFact[] {
   const json = extractJsonObject(raw);
   if (!json) return [];
   let parsed: unknown;
@@ -86,8 +99,8 @@ function parseFacts(raw: string): ExtractedFact[] {
     const layer = (f as { layer?: unknown }).layer;
     const text = (f as { text?: unknown }).text;
     if (typeof text !== "string" || !text.trim()) continue;
-    if (typeof layer !== "string" || !LAYERS.includes(layer as (typeof LAYERS)[number])) continue;
-    out.push({ layer: layer as ExtractedFact["layer"], text: text.trim() });
+    if (typeof layer !== "string" || !layers.includes(layer as MemoryLayer)) continue;
+    out.push({ layer: layer as MemoryLayer, text: text.trim() });
   }
   return out;
 }

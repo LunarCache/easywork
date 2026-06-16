@@ -1,14 +1,54 @@
 import { z } from "zod";
 
 /**
- * 记忆分层（均为全局、跨会话）。会话级历史已由 ConversationRepo 完整存档 + FTS5 全文检索
- * （session_search 工具）承载，不再有 session-summary 截断摘要层。
+ * 记忆分层。两类作用域用不同分层（形状不同）：
+ * - 全局（= 对话记忆，所有对话共享）：user-profile / agent-memory / skills——关于「你这个人」。
+ * - 工作区（每个工程独立）：conventions / decisions / pitfalls——关于「这个工程」。
+ * 会话级历史由 ConversationRepo 完整存档 + FTS5（session_search 工具）承载，不在记忆层。
  */
-export const MemoryLayerSchema = z.enum(["user-profile", "agent-memory", "skills"]);
+export const GLOBAL_LAYERS = ["user-profile", "agent-memory", "skills"] as const;
+export const WORKSPACE_LAYERS = ["conventions", "decisions", "pitfalls"] as const;
+export const MemoryLayerSchema = z.enum([...GLOBAL_LAYERS, ...WORKSPACE_LAYERS]);
 export type MemoryLayer = z.infer<typeof MemoryLayerSchema>;
+
+/** 记忆作用域：全局（对话共享）或某工作区（隔离）。存为字符串。 */
+export const GLOBAL_SCOPE = "global";
+export function workspaceScope(projectId: string): string {
+  return `ws:${projectId}`;
+}
+export function isWorkspaceScope(scope: string): boolean {
+  return scope.startsWith("ws:");
+}
+/** 某作用域允许的分层。 */
+export function layersForScope(scope: string): readonly MemoryLayer[] {
+  return isWorkspaceScope(scope) ? WORKSPACE_LAYERS : GLOBAL_LAYERS;
+}
+
+/** 一个会话「能看到」的作用域+层。写入只进主作用域（visibleScopes[0]）。 */
+export interface ScopeView {
+  scope: string;
+  layers: readonly MemoryLayer[];
+}
+/**
+ * 某会话可见的记忆视图：
+ * - 全局/对话会话：global 全部层。
+ * - 工作区会话：本工作区全部层 + 全局 user-profile（你的身份/偏好,只读叠加）。
+ * 第一项为「主作用域」(写入目标)。
+ */
+export function visibleScopes(scope: string): ScopeView[] {
+  if (isWorkspaceScope(scope)) {
+    return [
+      { scope, layers: WORKSPACE_LAYERS },
+      { scope: GLOBAL_SCOPE, layers: ["user-profile"] },
+    ];
+  }
+  return [{ scope: GLOBAL_SCOPE, layers: GLOBAL_LAYERS }];
+}
 
 export const MemoryItemSchema = z.object({
   id: z.string(),
+  /** 作用域：缺省 = global（对话/全局池）；工作区为 ws:<projectId>。 */
+  scope: z.string().optional(),
   layer: MemoryLayerSchema,
   text: z.string(),
   sessionId: z.string().optional(),
@@ -20,6 +60,8 @@ export type MemoryItem = z.infer<typeof MemoryItemSchema>;
 
 export const RecallQuerySchema = z.object({
   query: z.string(),
+  /** 限定作用域；缺省 = global。 */
+  scope: z.string().optional(),
   sessionId: z.string().optional(),
   layers: z.array(MemoryLayerSchema).optional(),
   topK: z.number().int().positive().optional(),
@@ -39,7 +81,7 @@ export interface MemoryProvider {
   recall(q: RecallQuery): Promise<MemoryItem[]>;
   write(item: MemoryWrite): Promise<MemoryItem>;
   edit(id: string, patch: Partial<Pick<MemoryItem, "text" | "meta">>): Promise<MemoryItem>;
-  list(filter?: { layer?: MemoryLayer; sessionId?: string }): Promise<MemoryItem[]>;
+  list(filter?: { scope?: string; layer?: MemoryLayer; sessionId?: string }): Promise<MemoryItem[]>;
   delete(id: string): Promise<void>;
   /**
    * 删除某会话抽取出的记忆事实（被动抽取写入时带 sessionId）。返回删除条数。
@@ -47,9 +89,11 @@ export interface MemoryProvider {
    * 全局事实（无 sessionId）不受影响。
    */
   deleteBySession(sessionId: string): Promise<number>;
+  /** 删除某作用域的全部记忆（删除工作区时清其私有记忆池）。返回删除条数。 */
+  deleteByScope(scope: string): Promise<number>;
   /**
-   * 轮后抽取钩子：摘要 + 抽取持久事实，写入对应分层。
-   * model 为当轮对话所用模型 id（已加载），实现可复用它做 LLM 事实抽取。
+   * 抽取钩子：抽取持久事实写入对应作用域的分层。
+   * scope 缺省 = global（对话池）；工作区传 ws:<id>。model 为当轮模型 id（已加载），可复用做 LLM 抽取。
    */
-  observe(input: { messages: unknown[]; sessionId: string; model?: string }): Promise<void>;
+  observe(input: { messages: unknown[]; sessionId: string; scope?: string; model?: string }): Promise<void>;
 }

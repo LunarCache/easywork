@@ -73,6 +73,11 @@ export class Mem0MemoryProvider implements MemoryProvider {
     return 0;
   }
 
+  async deleteByScope(): Promise<number> {
+    /* Mem0 作用域映射待接入真实账号时补全。 */
+    return 0;
+  }
+
   async observe(input: { messages: unknown[]; sessionId: string }): Promise<void> {
     await this.fetchImpl(`${this.baseUrl}/v1/memories/`, {
       method: "POST",

@@ -10,8 +10,11 @@ import {
   LocalLoadOptionsSchema,
   McpServerConfigSchema,
   SamplingParamsSchema,
+  MemoryLayerSchema,
   messageText,
   normalizeContent,
+  GLOBAL_SCOPE,
+  workspaceScope,
   type AgentEvent,
   type DownloadEvent,
   type McpServerConfig,
@@ -518,6 +521,8 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         // 工作区模式：按项目审批档位。对话模式：auto-edits —— 写在工作区内放行（escapesCwd 限定），
         // bash 经审批（可产出网页/构建等 artifacts，但每条命令需用户确认）。
         workspace: isWorkspace,
+        // 记忆作用域：工作区会话用本工程私有池（隔离）；对话会话用全局池（共享）。
+        memoryScope: isWorkspace && projectId ? workspaceScope(projectId) : GLOBAL_SCOPE,
         approval: runApproval,
         approvalMode: isWorkspace ? (project?.approvalMode ?? "approve-each") : "auto-edits",
         signal: ac.signal,
@@ -800,12 +805,13 @@ version: "0.1.0"
   });
   app.delete("/projects/:id", async (req) => {
     const id = (req.params as { id: string }).id;
-    // 删除工作区时，连同其下会话一并彻底删除（消息 + pi 会话上下文/落盘文件 + 抽取的记忆事实），不留孤儿会话。
+    // 删除工作区时，连同其下会话一并彻底删除（消息 + pi 会话上下文/落盘文件），不留孤儿会话。
     for (const t of repo.listThreads({ projectId: id })) {
       repo.deleteThread(t.id);
       sessionHost.dispose(t.id);
-      await memory.deleteBySession(t.id).catch(() => 0);
     }
+    // 工作区的私有记忆池整体清除（隔离作用域 ws:<id>）。
+    await memory.deleteByScope(workspaceScope(id)).catch(() => 0);
     repo.deleteProject(id);
     return { ok: true };
   });
@@ -947,15 +953,17 @@ version: "0.1.0"
 
   // ---- 记忆 ----
   const MemoryWriteSchema = z.object({
-    layer: z.enum(["user-profile", "agent-memory", "skills"]),
+    scope: z.string().optional(),
+    layer: MemoryLayerSchema,
     text: z.string(),
     sessionId: z.string().optional(),
     meta: z.record(z.string(), z.unknown()).optional(),
   });
   app.get("/memory", async (req) => {
-    const q = req.query as { layer?: string; sessionId?: string };
+    const q = req.query as { scope?: string; layer?: string; sessionId?: string };
     return {
       items: await memory.list({
+        ...(q.scope ? { scope: q.scope } : {}),
         ...(q.layer ? { layer: q.layer as never } : {}),
         ...(q.sessionId ? { sessionId: q.sessionId } : {}),
       }),
@@ -986,11 +994,12 @@ version: "0.1.0"
 
   // 召回（调试/检视；带相关度分数）。
   app.get("/memory/recall", async (req, reply) => {
-    const q = req.query as { q?: string; topK?: string; sessionId?: string };
+    const q = req.query as { q?: string; topK?: string; sessionId?: string; scope?: string };
     if (!q.q) return reply.code(400).send({ error: "missing_query" });
     return {
       hits: await memory.recall({
         query: q.q,
+        ...(q.scope ? { scope: q.scope } : {}),
         ...(q.sessionId ? { sessionId: q.sessionId } : {}),
         ...(q.topK ? { topK: Number(q.topK) } : {}),
       }),
@@ -1125,5 +1134,5 @@ function lanIPv4(): string | undefined {
   return undefined;
 }
 
-// 冻结快照构造已下沉到 agent/ew-extensions.ts（运行时在记忆扩展里注入）。此处再导出供测试/外部复用。
-export { buildMemorySnapshot } from "../agent/ew-extensions.js";
+// 记忆清单（渐进式披露）构造在 agent/ew-extensions.ts；此处再导出供测试/外部复用。
+export { buildMemoryManifest } from "../agent/ew-extensions.js";

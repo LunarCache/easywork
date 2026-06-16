@@ -3,12 +3,15 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import type * as NodeSqlite from "node:sqlite";
-import type {
-  MemoryItem,
-  MemoryLayer,
-  MemoryProvider,
-  MemoryWrite,
-  RecallQuery,
+import {
+  GLOBAL_LAYERS,
+  GLOBAL_SCOPE,
+  layersForScope,
+  type MemoryItem,
+  type MemoryLayer,
+  type MemoryProvider,
+  type MemoryWrite,
+  type RecallQuery,
 } from "@ew/shared";
 import { lexicalScore } from "./cosine.js";
 import { SqliteVecIndex } from "./vec-index.js";
@@ -17,49 +20,53 @@ import { SqliteVecIndex } from "./vec-index.js";
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof NodeSqlite;
 type SqliteDB = InstanceType<typeof NodeSqlite.DatabaseSync>;
 
-/** 文本批量向量化（注入 node-llama-cpp / 云端 embed）。 */
+/** 文本批量向量化（注入 llama-server / 云端 embed）。 */
 export type Embedder = (texts: string[]) => Promise<number[][]>;
 
 /** LLM 抽取出的一条持久事实（带目标分层）。 */
 export interface ExtractedFact {
-  layer: "user-profile" | "agent-memory" | "skills";
+  layer: MemoryLayer;
   text: string;
 }
 
 /**
  * LLM 事实抽取器：对话 → 候选持久事实。注入以解耦引擎依赖（本包仅依赖 @ew/shared）。
+ * 提示词按 scope 切换（工作区盯「变动/约束/坑」，对话盯「身份/偏好/技巧」）。
  * 不可用/失败时应返回 [] 或抛错（observe 会吞掉，不影响主流程）。
  */
 export type FactExtractor = (input: {
   messages: { role: string; content: unknown }[];
-  /** 各全局层已有事实，供模型去重（避免重复抽取）。 */
+  /** 同作用域已有事实，供模型去重（避免重复抽取）。 */
   existing: ExtractedFact[];
+  /** 本作用域允许写入的分层。 */
+  layers: readonly MemoryLayer[];
+  /** 作用域（global / ws:<id>），供抽取器切换提示词。 */
+  scope: string;
   /** 抽取所用模型 id（通常复用当轮对话模型，已加载）。 */
   model?: string;
 }) => Promise<ExtractedFact[]>;
 
-const GLOBAL_FACT_LAYERS = ["user-profile", "agent-memory", "skills"] as const;
 /** 与同层已有事实词法重叠达到此阈值则视为重复，跳过写入（防记忆膨胀）。 */
 const FACT_DEDUP_THRESHOLD = 0.85;
 
 export interface LocalMemoryOptions {
-  /** 分层 markdown 目录。 */
+  /** 分层 markdown 目录（仅全局作用域生成镜像，可手工编辑）。 */
   dir: string;
   /** SQLite 索引文件路径（:memory: 可用于测试）。 */
   dbPath: string;
   /** 可选向量化函数；缺省则用词法召回。 */
   embed?: Embedder;
-  /** 可选 LLM 事实抽取器；提供则 observe 额外抽取持久事实写入全局层。 */
+  /** 可选 LLM 事实抽取器；提供则 observe 额外抽取持久事实写入对应作用域。 */
   extract?: FactExtractor;
   /**
    * sqlite-vec 可加载扩展（.dylib/.so/.dll）路径。语义召回唯一引擎（已移除 JS 余弦 brute-force）：
-   * 提供且加载成功 → cosine KNN 向量索引；缺失/加载失败/平台不支持 → 无语义分，召回退化为
-   * 纯词法（embedding blob 仍存于 memory_items 作派生重建源）。
+   * 提供且加载成功 → cosine KNN 向量索引；缺失/平台不支持 → 无语义分，召回退化为纯词法。
    */
   vecExtensionPath?: string;
 }
 
-const LAYER_FILE: Record<MemoryLayer, string> = {
+/** 仅全局作用域有 markdown 镜像（人类可读/可编辑）；工作区记忆为 DB-only。 */
+const LAYER_FILE: Record<(typeof GLOBAL_LAYERS)[number], string> = {
   "user-profile": "user-profile.md",
   "agent-memory": "agent-memory.md",
   skills: "skills.md",
@@ -68,6 +75,7 @@ const LAYER_FILE: Record<MemoryLayer, string> = {
 interface Row {
   rowid?: number | bigint;
   id: string;
+  scope: string;
   layer: MemoryLayer;
   session_id: string | null;
   text: string;
@@ -77,8 +85,8 @@ interface Row {
 }
 
 /**
- * 本地默认记忆提供商：分层 markdown（人类可读/可编辑的真相源）+ SQLite 索引 + 向量/词法召回。
- * 写操作生成 markdown 镜像；startWatching() 监听用户手工编辑并经 syncFromMarkdown 回灌索引（变更才重嵌）。
+ * 本地默认记忆提供商：作用域化（global 对话池 + 每工作区独立池）的分层记忆。
+ * 全局作用域生成 markdown 镜像（真相源，可手工编辑回灌）；语义召回走 sqlite-vec。
  */
 export class LocalMemoryProvider implements MemoryProvider {
   readonly id = "local";
@@ -112,6 +120,12 @@ export class LocalMemoryProvider implements MemoryProvider {
       CREATE INDEX IF NOT EXISTS idx_mem_layer ON memory_items(layer);
       CREATE INDEX IF NOT EXISTS idx_mem_session ON memory_items(session_id);
     `);
+    // 迁移：旧库无 scope 列 → 加上并把存量归入 global。
+    const cols = this.db.prepare(`PRAGMA table_info(memory_items)`).all() as unknown as { name: string }[];
+    if (!cols.some((c) => c.name === "scope")) {
+      this.db.exec(`ALTER TABLE memory_items ADD COLUMN scope TEXT NOT NULL DEFAULT '${GLOBAL_SCOPE}'`);
+    }
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_mem_scope ON memory_items(scope)`);
     if (opts.vecExtensionPath) {
       this.vec = new SqliteVecIndex(this.db, "vec_items");
       this.vec.load(opts.vecExtensionPath); // 失败抛出：sqlite-vec 是必备依赖
@@ -133,6 +147,7 @@ export class LocalMemoryProvider implements MemoryProvider {
   private toItem(r: Row): MemoryItem {
     return {
       id: r.id,
+      scope: r.scope,
       layer: r.layer,
       text: r.text,
       ...(r.session_id ? { sessionId: r.session_id } : {}),
@@ -153,26 +168,19 @@ export class LocalMemoryProvider implements MemoryProvider {
 
   async write(item: MemoryWrite): Promise<MemoryItem> {
     const id = randomUUID();
+    const scope = item.scope ?? GLOBAL_SCOPE;
     const updatedAt = new Date().toISOString();
     const emb = await this.embedOne(item.text);
     const buf = emb ? Buffer.from(emb.buffer) : null;
     const info = this.db
       .prepare(
-        `INSERT INTO memory_items (id, layer, session_id, text, embedding, updated_at, meta)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO memory_items (id, scope, layer, session_id, text, embedding, updated_at, meta)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(
-        id,
-        item.layer,
-        item.sessionId ?? null,
-        item.text,
-        buf,
-        updatedAt,
-        item.meta ? JSON.stringify(item.meta) : null,
-      );
+      .run(id, scope, item.layer, item.sessionId ?? null, item.text, buf, updatedAt, item.meta ? JSON.stringify(item.meta) : null);
     if (buf) this.vecSet(info.lastInsertRowid, buf);
-    this.regenerateMarkdown(item.layer);
-    return { id, updatedAt, ...item };
+    this.regenerateMarkdown(scope, item.layer);
+    return { id, updatedAt, ...item, scope };
   }
 
   async edit(id: string, patch: Partial<Pick<MemoryItem, "text" | "meta">>): Promise<MemoryItem> {
@@ -189,14 +197,18 @@ export class LocalMemoryProvider implements MemoryProvider {
       .prepare(`UPDATE memory_items SET text = ?, embedding = ?, updated_at = ?, meta = ? WHERE id = ?`)
       .run(text, buf, updatedAt, meta, id);
     if (patch.text) this.vecSet(row.rowid, buf); // 文本变了才会重嵌 → 同步向量
-    this.regenerateMarkdown(row.layer);
+    this.regenerateMarkdown(row.scope, row.layer);
     return this.toItem({ ...row, text, updated_at: updatedAt, meta });
   }
 
-  async list(filter?: { layer?: MemoryLayer; sessionId?: string }): Promise<MemoryItem[]> {
+  async list(filter?: { scope?: string; layer?: MemoryLayer; sessionId?: string }): Promise<MemoryItem[]> {
     let sql = `SELECT * FROM memory_items`;
     const where: string[] = [];
     const params: (string | null)[] = [];
+    if (filter?.scope) {
+      where.push("scope = ?");
+      params.push(filter.scope);
+    }
     if (filter?.layer) {
       where.push("layer = ?");
       params.push(filter.layer);
@@ -212,50 +224,54 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   async delete(id: string): Promise<void> {
-    const row = this.db.prepare(`SELECT rowid, layer FROM memory_items WHERE id = ?`).get(id) as unknown as
-      | { rowid: number | bigint; layer: MemoryLayer }
+    const row = this.db.prepare(`SELECT rowid, scope, layer FROM memory_items WHERE id = ?`).get(id) as unknown as
+      | { rowid: number | bigint; scope: string; layer: MemoryLayer }
       | undefined;
     this.db.prepare(`DELETE FROM memory_items WHERE id = ?`).run(id);
     if (row) {
       this.vecSet(row.rowid, null);
-      this.regenerateMarkdown(row.layer);
+      this.regenerateMarkdown(row.scope, row.layer);
     }
   }
 
   /** 删除某会话被动抽取写入的记忆事实（带 session_id 的条目）。返回删除条数。 */
   async deleteBySession(sessionId: string): Promise<number> {
     const rows = this.db
-      .prepare(`SELECT rowid, layer FROM memory_items WHERE session_id = ?`)
-      .all(sessionId) as unknown as { rowid: number | bigint; layer: MemoryLayer }[];
+      .prepare(`SELECT rowid, scope, layer FROM memory_items WHERE session_id = ?`)
+      .all(sessionId) as unknown as { rowid: number | bigint; scope: string; layer: MemoryLayer }[];
     if (rows.length === 0) return 0;
     this.db.prepare(`DELETE FROM memory_items WHERE session_id = ?`).run(sessionId);
     for (const r of rows) this.vecSet(r.rowid, null);
-    for (const layer of new Set(rows.map((r) => r.layer))) this.regenerateMarkdown(layer);
+    for (const sl of uniqueScopeLayers(rows)) this.regenerateMarkdown(sl.scope, sl.layer);
+    return rows.length;
+  }
+
+  /** 删除某作用域全部记忆（删除工作区时清其私有池）。返回删除条数。 */
+  async deleteByScope(scope: string): Promise<number> {
+    const rows = this.db
+      .prepare(`SELECT rowid, layer FROM memory_items WHERE scope = ?`)
+      .all(scope) as unknown as { rowid: number | bigint; layer: MemoryLayer }[];
+    if (rows.length === 0) return 0;
+    this.db.prepare(`DELETE FROM memory_items WHERE scope = ?`).run(scope);
+    for (const r of rows) this.vecSet(r.rowid, null);
+    for (const layer of new Set(rows.map((r) => r.layer))) this.regenerateMarkdown(scope, layer);
     return rows.length;
   }
 
   async recall(q: RecallQuery): Promise<MemoryItem[]> {
     const topK = q.topK ?? 6;
     const minScore = q.minScore ?? 0;
-    // 候选：指定 layers，否则全部全局层。
-    let rows: Row[];
-    if (q.layers?.length) {
-      const placeholders = q.layers.map(() => "?").join(",");
-      rows = this.db
-        .prepare(`SELECT rowid, * FROM memory_items WHERE layer IN (${placeholders})`)
-        .all(...q.layers) as unknown as Row[];
-    } else {
-      rows = this.db
-        .prepare(`SELECT rowid, * FROM memory_items WHERE layer IN ('user-profile','agent-memory','skills')`)
-        .all() as unknown as Row[];
-    }
+    const scope = q.scope ?? GLOBAL_SCOPE;
+    const layers = q.layers?.length ? q.layers : layersForScope(scope);
+    const placeholders = layers.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(`SELECT rowid, * FROM memory_items WHERE scope = ? AND layer IN (${placeholders})`)
+      .all(scope, ...layers) as unknown as Row[];
 
     const queryEmb = await this.embedOne(q.query);
-    // 语义分一律走 sqlite-vec（cosine KNN，距离=1-相似度）。无 embedding 模型 → queryEmb 为 null
-    // → 纯词法（不再有 JS 余弦兜底）。
+    // 语义分一律走 sqlite-vec（全库 KNN，再按本作用域 rowid 取分）；无 embedding → 纯词法。
     const semByRowid = queryEmb ? (this.vec?.knn(queryEmb) ?? null) : null;
 
-    // 混合召回（参考 Hermes：语义 ⊕ 词法）：有语义分则加权融合，否则退化为纯词法。
     const scored = rows.map((r) => {
       const lex = lexicalScore(q.query, r.text);
       const sem = semByRowid?.get(String(r.rowid));
@@ -306,56 +322,56 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   /**
-   * 轮后记忆抽取：LLM 事实抽取（注入 extractor 时）——把持久的用户偏好/事实/技能写入全局层，带去重。
-   * 会话历史本身由 ConversationRepo 完整存档（不再写截断的会话摘要）。
+   * 记忆抽取（注入 extractor 时）：把持久事实写入对应作用域，带去重 + 来源 sessionId。
+   * scope 缺省 = global（对话池）；工作区传 ws:<id>。会话历史本身由 ConversationRepo 完整存档。
    */
-  async observe(input: { messages: unknown[]; sessionId: string; model?: string }): Promise<void> {
+  async observe(input: { messages: unknown[]; sessionId: string; scope?: string; model?: string }): Promise<void> {
     if (!this.extract) return;
     const msgs = input.messages as { role: string; content: unknown }[];
-    await this.extractFacts(msgs, input.sessionId, input.model);
+    await this.extractFacts(msgs, input.sessionId, input.scope ?? GLOBAL_SCOPE, input.model);
   }
 
-  /** LLM 抽取持久事实并去重写入全局层（带来源 sessionId，便于删除对话时一并清除；失败不影响主流程）。 */
+  /** LLM 抽取持久事实并去重写入指定作用域（带来源 sessionId；失败不影响主流程）。 */
   private async extractFacts(
     messages: { role: string; content: unknown }[],
     sessionId: string,
+    scope: string,
     model?: string,
   ): Promise<void> {
     if (!this.extract) return;
+    const layers = layersForScope(scope);
     try {
-      const existing = this.globalFacts();
+      const existing = this.scopeFacts(scope, layers);
       const facts = await this.extract({
         messages,
         existing,
+        layers,
+        scope,
         ...(model ? { model } : {}),
       });
       for (const f of facts) {
         const text = f.text.trim();
-        if (!text || !GLOBAL_FACT_LAYERS.includes(f.layer)) continue;
+        if (!text || !layers.includes(f.layer)) continue; // 作用域外的层一律忽略
         if (this.isDuplicateFact(f.layer, text, existing)) continue;
-        await this.write({ layer: f.layer, text, sessionId }); // 带来源会话 → 删对话时可一并清除
+        await this.write({ scope, layer: f.layer, text, sessionId });
         existing.push({ layer: f.layer, text }); // 同批内也去重
       }
     } catch {
-      /* 抽取失败不影响摘要与主流程 */
+      /* 抽取失败不影响主流程 */
     }
   }
 
-  /** 读取所有全局层（user-profile/agent-memory/skills）已有事实。 */
-  private globalFacts(): ExtractedFact[] {
-    const placeholders = GLOBAL_FACT_LAYERS.map(() => "?").join(",");
+  /** 读取某作用域（指定层）的已有事实，供抽取去重。 */
+  private scopeFacts(scope: string, layers: readonly MemoryLayer[]): ExtractedFact[] {
+    const placeholders = layers.map(() => "?").join(",");
     const rows = this.db
-      .prepare(`SELECT layer, text FROM memory_items WHERE layer IN (${placeholders})`)
-      .all(...GLOBAL_FACT_LAYERS) as unknown as { layer: ExtractedFact["layer"]; text: string }[];
+      .prepare(`SELECT layer, text FROM memory_items WHERE scope = ? AND layer IN (${placeholders})`)
+      .all(scope, ...layers) as unknown as { layer: MemoryLayer; text: string }[];
     return rows.map((r) => ({ layer: r.layer, text: r.text }));
   }
 
   /** 候选事实是否与同层已有事实词法高度重叠（双向取大者，>= 阈值视为重复）。 */
-  private isDuplicateFact(
-    layer: ExtractedFact["layer"],
-    text: string,
-    existing: ExtractedFact[],
-  ): boolean {
+  private isDuplicateFact(layer: MemoryLayer, text: string, existing: ExtractedFact[]): boolean {
     for (const e of existing) {
       if (e.layer !== layer) continue;
       const sim = Math.max(lexicalScore(text, e.text), lexicalScore(e.text, text));
@@ -364,36 +380,39 @@ export class LocalMemoryProvider implements MemoryProvider {
     return false;
   }
 
-  private regenerateMarkdown(layer: MemoryLayer): void {
+  /** 仅全局作用域生成 markdown 镜像；工作区记忆为 DB-only。 */
+  private regenerateMarkdown(scope: string, layer: MemoryLayer): void {
+    if (scope !== GLOBAL_SCOPE) return;
+    const file = LAYER_FILE[layer as (typeof GLOBAL_LAYERS)[number]];
+    if (!file) return;
     try {
       const rows = this.db
-        .prepare(`SELECT * FROM memory_items WHERE layer = ? ORDER BY updated_at`)
-        .all(layer) as unknown as Row[];
-      fs.writeFileSync(path.join(this.dir, LAYER_FILE[layer]), renderLayer(layer, rows));
+        .prepare(`SELECT * FROM memory_items WHERE scope = ? AND layer = ? ORDER BY updated_at`)
+        .all(GLOBAL_SCOPE, layer) as unknown as Row[];
+      fs.writeFileSync(path.join(this.dir, file), renderLayer(layer, rows));
     } catch {
       /* markdown 镜像失败不影响主流程 */
     }
   }
 
   /**
-   * 从 markdown 回灌到索引（markdown 为真相源）。解析每层文件的 `- 文本 <!-- id -->` 行：
-   * - 已有 id 且文本变化 → 更新 + 重嵌；
-   * - 无 id 的新行 → 新建条目（之后 regenerate 补上 id）；
-   * - 文件中不再出现的 id → 删除。
-   * 幂等：无变化则不写库、不重生成 markdown（避免 watcher 自激）。
+   * 从全局 markdown 回灌索引（markdown 为真相源；仅全局作用域）。解析 `- 文本 <!-- id -->`：
+   * 已有 id 文本变化 → 更新+重嵌；无 id 新行 → 新建；文件中消失的 id → 删除。
+   * 幂等：无变化则不写库、不重生成（避免 watcher 自激）。
    */
   async syncFromMarkdown(layer: MemoryLayer): Promise<boolean> {
-    const file = path.join(this.dir, LAYER_FILE[layer]);
+    const file = LAYER_FILE[layer as (typeof GLOBAL_LAYERS)[number]];
+    if (!file) return false;
     let content: string;
     try {
-      content = fs.readFileSync(file, "utf8");
+      content = fs.readFileSync(path.join(this.dir, file), "utf8");
     } catch {
       return false; // 文件不存在 → 跳过
     }
     const entries = parseLayerMarkdown(content);
     const rows = this.db
-      .prepare(`SELECT rowid, * FROM memory_items WHERE layer = ? ORDER BY updated_at`)
-      .all(layer) as unknown as Row[];
+      .prepare(`SELECT rowid, * FROM memory_items WHERE scope = ? AND layer = ? ORDER BY updated_at`)
+      .all(GLOBAL_SCOPE, layer) as unknown as Row[];
     const byId = new Map(rows.map((r) => [r.id, r]));
     const seenIds = new Set<string>();
     let changed = false;
@@ -413,20 +432,19 @@ export class LocalMemoryProvider implements MemoryProvider {
           changed = true;
         }
       } else if (e.text.trim()) {
-        // 新行（用户手工添加，无 id）
+        // 新行（用户手工添加，无 id）→ 写入全局作用域
         const id = randomUUID();
         const emb = await this.embedOne(e.text);
         const buf = emb ? Buffer.from(emb.buffer) : null;
         const info = this.db
           .prepare(
-            `INSERT INTO memory_items (id, layer, session_id, text, embedding, updated_at, meta) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+            `INSERT INTO memory_items (id, scope, layer, session_id, text, embedding, updated_at, meta) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
           )
-          .run(id, layer, null, e.text, buf, now);
+          .run(id, GLOBAL_SCOPE, layer, null, e.text, buf, now);
         if (buf) this.vecSet(info.lastInsertRowid, buf);
         changed = true;
       }
     }
-    // 文件中已删除的条目 → 从索引删除
     for (const r of rows) {
       if (!seenIds.has(r.id)) {
         this.db.prepare(`DELETE FROM memory_items WHERE id = ?`).run(r.id);
@@ -434,13 +452,11 @@ export class LocalMemoryProvider implements MemoryProvider {
         changed = true;
       }
     }
-    if (changed) this.regenerateMarkdown(layer);
+    if (changed) this.regenerateMarkdown(GLOBAL_SCOPE, layer);
     return changed;
   }
 
-  /**
-   * 监听 markdown 目录，用户手工编辑后自动回灌索引（去抖）。返回停止函数。
-   */
+  /** 监听全局 markdown 目录，用户手工编辑后自动回灌索引（去抖）。返回停止函数。 */
   startWatching(opts: { debounceMs?: number } = {}): () => void {
     const debounce = opts.debounceMs ?? 300;
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -460,7 +476,9 @@ export class LocalMemoryProvider implements MemoryProvider {
         fs.watch(this.dir, (_evt, filename) => {
           if (!filename) return;
           const fn = filename.toString();
-          const layer = (Object.keys(LAYER_FILE) as MemoryLayer[]).find((l) => LAYER_FILE[l] === fn);
+          const layer = (Object.keys(LAYER_FILE) as (typeof GLOBAL_LAYERS)[number][]).find(
+            (l) => LAYER_FILE[l] === fn,
+          );
           if (layer) onChange(layer);
         }),
       );
@@ -476,6 +494,19 @@ export class LocalMemoryProvider implements MemoryProvider {
   close(): void {
     this.db.close();
   }
+}
+
+/** 去重 (scope,layer) 组合。 */
+function uniqueScopeLayers(rows: { scope: string; layer: MemoryLayer }[]): { scope: string; layer: MemoryLayer }[] {
+  const seen = new Set<string>();
+  const out: { scope: string; layer: MemoryLayer }[] = [];
+  for (const r of rows) {
+    const key = `${r.scope} ${r.layer}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ scope: r.scope, layer: r.layer });
+  }
+  return out;
 }
 
 /** 解析一层 markdown 的条目：行形如 `- 文本 <!-- id -->`（id 可缺）。 */
@@ -499,4 +530,3 @@ function renderLayer(title: string, rows: Row[]): string {
   const lines = rows.map((r) => `- ${r.text.replace(/\n/g, " ")} <!-- ${r.id} -->`);
   return `# ${title}\n\n${lines.join("\n")}\n`;
 }
-

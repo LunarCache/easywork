@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { streamSimple, completeSimple } from "@earendil-works/pi-ai";
 import type { Model, Api, Context as PiContext, AssistantMessageEventStream, AssistantMessage } from "@earendil-works/pi-ai";
+import { GLOBAL_SCOPE } from "@ew/shared";
 import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, SamplingParams, Tool } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -55,6 +56,8 @@ export interface EwAgentRunInput {
   cwd: string;
   /** 是否工作区模式（启用 bash/edit/write + 审批；否则聊天模式收窄工具）。默认 false。 */
   workspace?: boolean;
+  /** 记忆作用域：global（对话池，缺省）或 ws:<projectId>（工作区私有池）。 */
+  memoryScope?: string;
   /** R4：本轮审批门（工作区模式下危险工具经此征询，发 approval-request SSE）。 */
   approval?: ApprovalGate;
   /** R4：工作区审批档位。默认 approve-each。 */
@@ -72,6 +75,7 @@ interface HostedSession {
   modelId: string;
   cwd: string;
   workspace: boolean;
+  memoryScope: string;
   runtime: RunRuntime;
   dispose: () => void;
 }
@@ -245,10 +249,22 @@ export class SessionHost {
     };
   }
 
-  /** 取/建该 thread 的会话。modelId/cwd/workspace 变化则重建。 */
-  private async getOrCreate(threadId: string, modelId: string, cwd: string, workspace: boolean): Promise<HostedSession> {
+  /** 取/建该 thread 的会话。modelId/cwd/workspace/scope 变化则重建。 */
+  private async getOrCreate(
+    threadId: string,
+    modelId: string,
+    cwd: string,
+    workspace: boolean,
+    memoryScope: string,
+  ): Promise<HostedSession> {
     const existing = this.sessions.get(threadId);
-    if (existing && existing.modelId === modelId && existing.cwd === cwd && existing.workspace === workspace) {
+    if (
+      existing &&
+      existing.modelId === modelId &&
+      existing.cwd === cwd &&
+      existing.workspace === workspace &&
+      existing.memoryScope === memoryScope
+    ) {
       return existing;
     }
     if (existing) {
@@ -258,10 +274,12 @@ export class SessionHost {
     const model = this.resolveModel(modelId);
     // R4：每会话一个权限运行时（run() 前写入 mode/approval）；仅工作区模式装载权限扩展。
     const runtime: RunRuntime = { mode: "approve-each", alwaysApproved: new Set() };
-    // R3：记忆扩展（context 召回 + agent_end 抽取）+ R4 权限扩展（tool_call 审批）。
+    // R3：记忆扩展（清单注入系统提示词 + 批量抽取）+ R4 权限扩展（tool_call 审批）。
     const factories: ExtensionFactory[] = [];
     if (this.deps.memory) {
-      factories.push(memoryExtensionFactory({ threadId, modelId, memory: this.deps.memory, runtime }));
+      factories.push(
+        memoryExtensionFactory({ threadId, modelId, scope: memoryScope, memory: this.deps.memory, runtime }),
+      );
     }
     // 权限/路径限定扩展：始终装载——escapesCwd 硬隔离让 read/edit/write 都不能逃出 cwd（工作区）；
     // bash 是任意 shell 无法按路径沙箱，经审批把守。工作区模式按项目档位；对话模式由调用方传 auto-edits
@@ -276,6 +294,7 @@ export class SessionHost {
     const customTools = await buildEwCustomTools({
       sessionId: threadId,
       cwd,
+      memoryScope,
       ...(this.deps.memory ? { memory: this.deps.memory } : {}),
       ...(this.deps.repo ? { repo: this.deps.repo } : {}),
       ...(this.deps.kb ? { kb: this.deps.kb } : {}),
@@ -314,7 +333,15 @@ export class SessionHost {
       });
     };
 
-    const hosted: HostedSession = { session, modelId, cwd, workspace, runtime, dispose: () => session.dispose() };
+    const hosted: HostedSession = {
+      session,
+      modelId,
+      cwd,
+      workspace,
+      memoryScope,
+      runtime,
+      dispose: () => session.dispose(),
+    };
     this.sessions.set(threadId, hosted);
     return hosted;
   }
@@ -337,12 +364,12 @@ export class SessionHost {
 
   private async *runOne(input: EwAgentRunInput): AsyncGenerator<AgentEvent> {
     const workspace = input.workspace ?? false;
-    const hosted = await this.getOrCreate(input.threadId, input.modelId, input.cwd, workspace);
+    const memoryScope = input.memoryScope ?? GLOBAL_SCOPE;
+    const hosted = await this.getOrCreate(input.threadId, input.modelId, input.cwd, workspace, memoryScope);
     const session = hosted.session;
     // R4：写入本轮权限上下文（工作区模式下 tool_call 扩展据此审批）。
     hosted.runtime.mode = input.approvalMode ?? "approve-each";
     hosted.runtime.approval = input.approval;
-    hosted.runtime.recall = undefined; // M3：每轮重置召回缓存
     hosted.runtime.sampling = input.sampling; // 采样参数（streamFn 包装读取）
     hosted.runtime.aborted = false; // 本轮是否被用户取消（取消则跳过记忆抽取 + 回滚上下文）
 

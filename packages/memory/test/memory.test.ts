@@ -195,6 +195,41 @@ describe("LocalMemoryProvider", () => {
     m.close();
   });
 
+  it("作用域隔离：工作区之间 + 工作区独立于全局（list/recall）", async () => {
+    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
+    await m.write({ scope: "global", layer: "agent-memory", text: "全局：天气用 open-meteo" });
+    await m.write({ scope: "ws:A", layer: "decisions", text: "A工程：迁移到 Tailwind v4" });
+    await m.write({ scope: "ws:B", layer: "decisions", text: "B工程：改用 sqlite-vec" });
+
+    // list 按作用域隔离
+    expect((await m.list({ scope: "ws:A" })).map((i) => i.text)).toEqual(["A工程：迁移到 Tailwind v4"]);
+    expect((await m.list({ scope: "ws:B" })).map((i) => i.text)).toEqual(["B工程：改用 sqlite-vec"]);
+    expect((await m.list({ scope: "global" })).map((i) => i.text)).toEqual(["全局：天气用 open-meteo"]);
+
+    // recall 默认 global，不串入工作区
+    const g = await m.recall({ query: "工程", topK: 10 });
+    expect(g.every((h) => !h.text.includes("工程"))).toBe(true);
+    // recall ws:A 只见 A，不见 B、不见全局
+    const a = await m.recall({ query: "工程", scope: "ws:A", topK: 10 });
+    expect(a.map((h) => h.text)).toEqual(["A工程：迁移到 Tailwind v4"]);
+    m.close();
+  });
+
+  it("deleteByScope：清空某工作区私有池，不动全局/别的工作区", async () => {
+    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
+    await m.write({ scope: "global", layer: "user-profile", text: "答复简洁" });
+    await m.write({ scope: "ws:A", layer: "pitfalls", text: "A坑1" });
+    await m.write({ scope: "ws:A", layer: "conventions", text: "A约定1" });
+    await m.write({ scope: "ws:B", layer: "pitfalls", text: "B坑1" });
+
+    expect(await m.deleteByScope("ws:A")).toBe(2);
+    expect(await m.list({ scope: "ws:A" })).toHaveLength(0);
+    expect((await m.list({ scope: "ws:B" })).map((i) => i.text)).toEqual(["B坑1"]);
+    expect((await m.list({ scope: "global" })).map((i) => i.text)).toEqual(["答复简洁"]);
+    expect(await m.deleteByScope("ws:A")).toBe(0); // 幂等
+    m.close();
+  });
+
   it("deleteBySession：删除某会话抽取的事实，保留全局/手工事实", async () => {
     const extract: FactExtractor = async () => [
       { layer: "user-profile", text: "用户在做记忆系统" },

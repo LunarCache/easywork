@@ -1,51 +1,74 @@
 import { z } from "zod";
 import { defineTool } from "@ew/tools";
-import type { MemoryLayer, MemoryProvider, Tool } from "@ew/shared";
+import {
+  GLOBAL_SCOPE,
+  isWorkspaceScope,
+  layersForScope,
+  type MemoryLayer,
+  type MemoryProvider,
+  type Tool,
+} from "@ew/shared";
 
 /**
- * 各全局层字符上限（参考 Hermes：USER.md 1375 / MEMORY.md 2200）。
+ * 各层字符上限（参考 Hermes：USER.md 1375 / MEMORY.md 2200）。
  * 接近上限时 add/replace 报错，逼模型合并或删旧条目，而非静默膨胀。
  */
-const LAYER_CAP: Record<"user-profile" | "agent-memory" | "skills", number> = {
+const LAYER_CAP: Record<MemoryLayer, number> = {
   "user-profile": 1375,
   "agent-memory": 2200,
   skills: 2200,
+  conventions: 1375,
+  decisions: 2200,
+  pitfalls: 2200,
 };
 
-const MANAGED_LAYERS = ["user-profile", "agent-memory", "skills"] as const;
+const LAYER_DESC: Record<MemoryLayer, string> = {
+  "user-profile": "用户身份/偏好",
+  "agent-memory": "你应记住的客观事实/约定",
+  skills: "可复用流程",
+  conventions: "本工程的约定/约束/偏好",
+  decisions: "做过的关键变动/决策（记 why，不记 diff）",
+  pitfalls: "踩过的坑/教训及规避",
+};
 
 /**
- * manage_memory 工具（参考 Hermes：模型自治、有界的长期记忆）。
- * 模型主动 add/replace/remove 持久事实到分层 markdown（user-profile/agent-memory/skills）。
+ * manage_memory 工具（参考 Hermes：模型自治、有界的长期记忆），按作用域参数化。
+ * - 对话/全局会话：分层 user-profile/agent-memory/skills（写入全局池）。
+ * - 工作区会话：分层 conventions/decisions/pitfalls（写入本工作区池，与全局/别的工作区隔离）。
  * replace/remove 用子串定位已有条目（无需全文）。与被动 LLM 抽取互补。
  */
-export function makeMemoryTool(memory: MemoryProvider): Tool {
+export function makeMemoryTool(memory: MemoryProvider, scope: string = GLOBAL_SCOPE): Tool {
+  const layers = layersForScope(scope);
+  const layerEnum = [...layers] as [string, ...string[]];
+  const layerHelp = layers.map((l) => `${l}=${LAYER_DESC[l]}`).join("，");
+  const where = isWorkspaceScope(scope) ? "本工作区（与全局/其他工作区隔离）" : "全局（所有对话共享）";
+
   return defineTool({
     name: "manage_memory",
-    description:
-      "管理你的长期记忆（跨会话持久）。add 新增事实；replace 用子串定位并改写已有条目；remove 删除。分层：user-profile=用户身份/偏好，agent-memory=你应记住的客观事实/约定，skills=可复用流程。每层有字符上限，满了需先合并/删除。",
+    description: `管理${where}的长期记忆。add 新增；replace 用子串定位并改写；remove 删除。分层：${layerHelp}。每层有字符上限，满了需先合并/删除。`,
     schema: z.object({
       action: z.enum(["add", "replace", "remove"]).describe("操作"),
-      layer: z.enum(MANAGED_LAYERS).describe("目标分层"),
+      layer: z.enum(layerEnum).describe("目标分层"),
       text: z.string().optional().describe("add 的新内容 / replace 的替换内容"),
       match: z.string().optional().describe("replace/remove 用于定位已有条目的子串"),
     }),
     requiresApproval: "never",
     async run({ action, layer, text, match }) {
       const ml = layer as MemoryLayer;
-      const items = await memory.list({ layer: ml });
+      if (!layers.includes(ml)) return err(`本会话不支持分层 ${layer}（可用：${layers.join("/")}）。`);
+      const cap = LAYER_CAP[ml];
+      const items = await memory.list({ scope, layer: ml });
 
       if (action === "add") {
         const t = (text ?? "").trim();
         if (!t) return err("add 需要 text。");
-        const cap = LAYER_CAP[layer];
         const used = items.reduce((n, it) => n + it.text.length, 0);
         if (used + t.length > cap) {
           return err(
             `${layer} 已用 ${used}/${cap} 字符，新增后超限。请先用 remove 删除过时条目或 replace 合并重叠条目，再重试。`,
           );
         }
-        const w = await memory.write({ layer: ml, text: t });
+        const w = await memory.write({ scope, layer: ml, text: t });
         return ok(`已记入 ${layer}（${used + t.length}/${cap}）：${t}`, { id: w.id });
       }
 
@@ -69,7 +92,6 @@ export function makeMemoryTool(memory: MemoryProvider): Tool {
       // replace
       const t = (text ?? "").trim();
       if (!t) return err("replace 需要 text（替换内容）。");
-      const cap = LAYER_CAP[layer];
       const used = items.reduce((n, it) => n + it.text.length, 0) - target.text.length;
       if (used + t.length > cap) {
         return err(`${layer} 替换后超限（${used + t.length}/${cap}）。请精简内容或删除其他条目。`);

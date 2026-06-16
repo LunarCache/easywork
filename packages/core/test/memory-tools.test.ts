@@ -3,10 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { LocalMemoryProvider } from "@ew/memory";
-import type { ToolExecContext, ToolResult } from "@ew/shared";
+import { GLOBAL_SCOPE, visibleScopes, workspaceScope, type ToolExecContext, type ToolResult } from "@ew/shared";
 import { makeMemoryTool } from "../src/memory/memory-tool.js";
 import { makeSessionSearchTool } from "../src/memory/session-search-tool.js";
-import { buildMemorySnapshot } from "../src/server/app.js";
+import { buildMemoryManifest } from "../src/server/app.js";
 import { SqliteConversationRepo } from "../src/store/conversation.js";
 
 let dir: string | undefined;
@@ -103,17 +103,32 @@ describe("session_search 工具", () => {
   });
 });
 
-describe("buildMemorySnapshot 冻结快照", () => {
-  it("全空 → 空串；有全局记忆 → 渲染分层块", async () => {
+describe("buildMemoryManifest 记忆清单（渐进式披露）", () => {
+  it("全空 → 空串；有记忆 → 列要点 + 提示用 recall_memory", async () => {
     const mem = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
-    expect(await buildMemorySnapshot(mem)).toBe("");
+    expect(await buildMemoryManifest(mem, visibleScopes(GLOBAL_SCOPE))).toBe("");
 
     await mem.write({ layer: "user-profile", text: "用户是工程师" });
     await mem.write({ layer: "agent-memory", text: "项目部署在 AWS" });
 
-    const snap = await buildMemorySnapshot(mem);
-    expect(snap).toContain("用户是工程师");
-    expect(snap).toContain("项目部署在 AWS");
+    const manifest = await buildMemoryManifest(mem, visibleScopes(GLOBAL_SCOPE));
+    expect(manifest).toContain("用户是工程师");
+    expect(manifest).toContain("项目部署在 AWS");
+    expect(manifest).toContain("recall_memory");
+    mem.close();
+  });
+
+  it("作用域隔离：工作区清单不含全局 agent-memory，但含全局 user-profile（共享身份）", async () => {
+    const mem = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
+    await mem.write({ scope: GLOBAL_SCOPE, layer: "user-profile", text: "答复请简洁" });
+    await mem.write({ scope: GLOBAL_SCOPE, layer: "agent-memory", text: "全局事实不该进工作区清单" });
+    const ws = workspaceScope("proj1");
+    await mem.write({ scope: ws, layer: "pitfalls", text: "并发下要串行化" });
+
+    const manifest = await buildMemoryManifest(mem, visibleScopes(ws));
+    expect(manifest).toContain("并发下要串行化"); // 本工作区
+    expect(manifest).toContain("答复请简洁"); // 全局 user-profile 共享
+    expect(manifest).not.toContain("全局事实不该进工作区清单"); // 全局 agent-memory 不可见
     mem.close();
   });
 });

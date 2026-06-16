@@ -76,7 +76,7 @@ describe("buildEwCustomTools", () => {
     const kb = {} as KnowledgeBaseStore;
     const tools = await buildEwCustomTools({ sessionId: "s", cwd: "/tmp", memory, repo, kb });
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["manage_memory", "search_knowledge_base", "session_search"]);
+    expect(names).toEqual(["manage_memory", "recall_memory", "search_knowledge_base", "session_search"]);
   });
 
   it("empty when no deps", async () => {
