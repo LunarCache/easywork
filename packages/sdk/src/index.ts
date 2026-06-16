@@ -451,11 +451,17 @@ export class EasyWorkClient {
     });
   }
 
-  /** 列出记忆条目（可按层过滤）。 */
-  async listMemory(layer?: string): Promise<{ id: string; layer: string; text: string; sessionId?: string; updatedAt: string }[]> {
+  /** 列出记忆条目（可按作用域/层过滤）。 */
+  async listMemory(
+    opts: { scope?: string; layer?: string } = {},
+  ): Promise<{ id: string; scope?: string; layer: string; text: string; sessionId?: string; updatedAt: string }[]> {
+    const qs = new URLSearchParams();
+    if (opts.scope) qs.set("scope", opts.scope);
+    if (opts.layer) qs.set("layer", opts.layer);
+    const q = qs.toString();
     const { items } = await this.getJSON<{
-      items: { id: string; layer: string; text: string; sessionId?: string; updatedAt: string }[];
-    }>(`/memory${layer ? `?layer=${encodeURIComponent(layer)}` : ""}`);
+      items: { id: string; scope?: string; layer: string; text: string; sessionId?: string; updatedAt: string }[];
+    }>(`/memory${q ? `?${q}` : ""}`);
     return items;
   }
 
@@ -504,10 +510,14 @@ export class EasyWorkClient {
     return this.getJSON(`/kb/search?${qs}`);
   }
 
-  /** 召回记忆（带相关度分数，调试/检视用）。 */
-  async recallMemory(query: string, topK?: number): Promise<{ text: string; score?: number; layer: string }[]> {
-    const qs = new URLSearchParams({ q: query, ...(topK ? { topK: String(topK) } : {}) });
-    const { hits } = await this.getJSON<{ hits: { text: string; score?: number; layer: string }[] }>(
+  /** 召回记忆（带相关度分数，调试/检视用；可限定作用域）。 */
+  async recallMemory(
+    query: string,
+    topK?: number,
+    scope?: string,
+  ): Promise<{ text: string; score?: number; layer: string; scope?: string }[]> {
+    const qs = new URLSearchParams({ q: query, ...(topK ? { topK: String(topK) } : {}), ...(scope ? { scope } : {}) });
+    const { hits } = await this.getJSON<{ hits: { text: string; score?: number; layer: string; scope?: string }[] }>(
       `/memory/recall?${qs}`,
     );
     return hits;

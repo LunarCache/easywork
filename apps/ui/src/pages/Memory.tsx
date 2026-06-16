@@ -1,26 +1,45 @@
 import { useCallback, useEffect, useState } from "react";
-import type { MemoryLayer } from "@ew/shared";
+import type { Project } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { SparkIcon, SearchIcon, EditIcon, TrashIcon, CheckIcon } from "../icons.js";
+import { SparkIcon, SearchIcon, EditIcon, TrashIcon, CheckIcon, FolderClosedIcon, ChatIcon } from "../icons.js";
 
 interface MemItem {
   id: string;
+  scope?: string;
   layer: string;
   text: string;
   sessionId?: string;
   updatedAt: string;
 }
 
-const LAYERS: { id: MemoryLayer | "all"; label: string }[] = [
+const GLOBAL_SCOPE = "global";
+// 各作用域的层标签（global = 对话/全局；ws = 工作区工程记忆）。
+const GLOBAL_LAYERS: { id: string; label: string }[] = [
   { id: "all", label: "全部" },
   { id: "user-profile", label: "用户画像" },
   { id: "agent-memory", label: "助手记忆" },
   { id: "skills", label: "技能" },
 ];
+const WORKSPACE_LAYERS: { id: string; label: string }[] = [
+  { id: "all", label: "全部" },
+  { id: "conventions", label: "约定/约束" },
+  { id: "decisions", label: "变动/决策" },
+  { id: "pitfalls", label: "坑/教训" },
+];
+const LAYER_LABEL: Record<string, string> = {
+  "user-profile": "用户画像",
+  "agent-memory": "助手记忆",
+  skills: "技能",
+  conventions: "约定/约束",
+  decisions: "变动/决策",
+  pitfalls: "坑/教训",
+};
 
 export function Memory() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [scope, setScope] = useState<string>(GLOBAL_SCOPE);
   const [items, setItems] = useState<MemItem[]>([]);
-  const [layer, setLayer] = useState<MemoryLayer | "all">("all");
+  const [layer, setLayer] = useState<string>("all");
   const [embStatus, setEmbStatus] = useState<{ ready: boolean; modelId?: string; dim: number } | null>(null);
   const [embBusy, setEmbBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -28,19 +47,45 @@ export function Memory() {
   const [hits, setHits] = useState<{ text: string; score?: number; layer: string }[] | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
 
+  const isWorkspace = scope !== GLOBAL_SCOPE;
+  const layerDefs = isWorkspace ? WORKSPACE_LAYERS : GLOBAL_LAYERS;
+
   const refresh = useCallback(async () => {
     try {
       const c = getClient();
-      setEmbStatus(await c.embeddingStatus());
-      setItems(await c.listMemory(layer === "all" ? undefined : layer));
+      setItems(await c.listMemory({ scope, ...(layer === "all" ? {} : { layer }) }));
     } catch {
       /* ignore */
     }
-  }, [layer]);
+  }, [scope, layer]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // 初次：拉取 embedding 状态 + 工作区列表（供作用域切换）。
+  useEffect(() => {
+    void (async () => {
+      const c = getClient();
+      try {
+        setEmbStatus(await c.embeddingStatus());
+      } catch {
+        /* ignore */
+      }
+      try {
+        setProjects(await c.listProjects());
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
+
+  // 切作用域时重置层过滤 + 召回结果。
+  const selectScope = (s: string) => {
+    setScope(s);
+    setLayer("all");
+    setHits(null);
+  };
 
   const enableEmbedding = async () => {
     setEmbBusy(true);
@@ -58,7 +103,7 @@ export function Memory() {
 
   const recall = async () => {
     if (!query.trim()) return;
-    setHits(await getClient().recallMemory(query.trim(), 6));
+    setHits(await getClient().recallMemory(query.trim(), 6, scope));
   };
 
   const saveEdit = async () => {
@@ -73,6 +118,8 @@ export function Memory() {
     await refresh();
   };
 
+  const scopeName = isWorkspace ? (projects.find((p) => `ws:${p.id}` === scope)?.name ?? "工作区") : "全局/对话";
+
   return (
     <div className="page">
       <div className="page-head">
@@ -81,12 +128,43 @@ export function Memory() {
         </span>
         <div>
           <h2>记忆</h2>
-          <p className="lead">分层 markdown 为真相源 + 本地向量/词法混合召回。生成前自动召回注入、生成后抽取写入。</p>
+          <p className="lead">
+            作用域化：全局池（所有对话共享）+ 每个工作区独立池（互相隔离）。系统提示词只注入「清单」，
+            模型按需用 recall_memory 取全文；对话停顿/压缩时批量抽取。
+          </p>
         </div>
       </div>
       {note && <div className="note">{note}</div>}
 
-      {/* 向量召回状态 */}
+      {/* 作用域选择 */}
+      <section>
+        <div className="sec-head">
+          <span className="ico">
+            <FolderClosedIcon size={18} />
+          </span>
+          <div>
+            <h3>作用域</h3>
+            <p className="hint">全局记忆与对话互通；工作区记忆只属于该工程，相互隔离、独立于全局。</p>
+          </div>
+        </div>
+        <div className="mem-scopes">
+          <button className={`mem-scope ${scope === GLOBAL_SCOPE ? "on" : ""}`} onClick={() => selectScope(GLOBAL_SCOPE)}>
+            <ChatIcon size={14} /> 全局 / 对话
+          </button>
+          {projects.map((p) => (
+            <button
+              key={p.id}
+              className={`mem-scope ${scope === `ws:${p.id}` ? "on" : ""}`}
+              onClick={() => selectScope(`ws:${p.id}`)}
+              title={p.workspaceDir}
+            >
+              <FolderClosedIcon size={14} /> {p.name}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* 向量召回状态（全局设施） */}
       <section>
         <div className="sec-head">
           <span className="ico green">
@@ -94,7 +172,7 @@ export function Memory() {
           </span>
           <div>
             <h3>向量召回</h3>
-            <p className="hint">本地 CPU embedding（nomic-embed-text）。未启用时降级为纯词法召回。</p>
+            <p className="hint">本地 CPU embedding（nomic-embed-text），经 sqlite-vec 检索。未启用时降级为纯词法。</p>
           </div>
         </div>
         <div className="sub">
@@ -105,27 +183,32 @@ export function Memory() {
         </button>
       </section>
 
-      {/* 召回测试 */}
+      {/* 召回测试（按当前作用域） */}
       <section>
         <div className="sec-head">
           <span className="ico blue">
             <SearchIcon size={18} />
           </span>
           <div>
-            <h3>召回测试</h3>
-            <p className="hint">输入查询，查看混合召回命中与相关度分数。</p>
+            <h3>召回测试 · {scopeName}</h3>
+            <p className="hint">输入查询，查看该作用域内的混合召回命中与相关度分数。</p>
           </div>
         </div>
         <div className="row" style={{ maxWidth: 640 }}>
           <div className="field">
             <SearchIcon size={16} />
-            <input placeholder="如：我养的宠物" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void recall()} />
+            <input
+              placeholder={isWorkspace ? "如：这个项目的约束" : "如：我养的宠物"}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void recall()}
+            />
           </div>
           <button onClick={() => void recall()}>召回</button>
         </div>
         {hits?.map((h, i) => (
           <div key={i} className="mem-hit">
-            <span className="mem-layer">{h.layer}</span>
+            <span className="mem-layer">{LAYER_LABEL[h.layer] ?? h.layer}</span>
             {h.text}
             {h.score != null && <span className="mem-score">{h.score.toFixed(3)}</span>}
           </div>
@@ -133,28 +216,34 @@ export function Memory() {
         {hits && hits.length === 0 && <div className="sub">无命中。</div>}
       </section>
 
-      {/* 浏览 */}
+      {/* 浏览（按当前作用域 + 层） */}
       <section>
         <div className="sec-head">
           <span className="ico violet">
             <SparkIcon size={18} />
           </span>
           <div>
-            <h3>记忆条目（{items.length}）</h3>
-            <p className="hint">markdown 文件可直接编辑，daemon 监听后自动回灌。</p>
+            <h3>
+              记忆条目 · {scopeName}（{items.length}）
+            </h3>
+            <p className="hint">
+              {isWorkspace
+                ? "工作区记忆为本工程私有；删除该工作区会一并清除。"
+                : "全局 markdown 文件可直接编辑，daemon 监听后自动回灌。"}
+            </p>
           </div>
         </div>
         <div className="mem-layers">
-          {LAYERS.map((l) => (
+          {layerDefs.map((l) => (
             <button key={l.id} className={`kb-coll ${layer === l.id ? "on" : ""}`} onClick={() => setLayer(l.id)}>
               {l.label}
             </button>
           ))}
         </div>
-        {items.length === 0 && <div className="sub">（该层暂无记忆）</div>}
+        {items.length === 0 && <div className="sub">（暂无记忆）</div>}
         {items.map((m) => (
           <div key={m.id} className="mem-item">
-            <span className="mem-layer">{m.layer}</span>
+            <span className="mem-layer">{LAYER_LABEL[m.layer] ?? m.layer}</span>
             {editing?.id === m.id ? (
               <>
                 <textarea
