@@ -793,7 +793,13 @@ version: "0.1.0"
     }
   });
   app.delete("/projects/:id", async (req) => {
-    repo.deleteProject((req.params as { id: string }).id);
+    const id = (req.params as { id: string }).id;
+    // 删除工作区时，连同其下会话一并彻底删除（消息 + pi 会话上下文/落盘文件），不留孤儿会话。
+    for (const t of repo.listThreads({ projectId: id })) {
+      repo.deleteThread(t.id);
+      sessionHost.dispose(t.id);
+    }
+    repo.deleteProject(id);
     return { ok: true };
   });
 
