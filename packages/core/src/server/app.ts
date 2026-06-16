@@ -456,25 +456,17 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     const project = projectId ? repo.getProject(projectId) : null;
     const runWorkspaceDir = project?.workspaceDir ?? workspaceDir;
 
-    // 持久化（应用内会话历史）：确保 thread 存在并追加本轮用户消息。
+    // 持久化（应用内会话历史）：确保 thread 存在。本轮消息延迟到成功结束才落库——
+    // 用户取消时整轮（用户消息 + 部分助手输出 + 工具往返）一律不计入历史/上下文。
     const lastUser = parsed.data.history[parsed.data.history.length - 1];
-    if (!repo.getThread(threadId)) {
+    const threadCreated = !repo.getThread(threadId);
+    if (threadCreated) {
       const title = lastUser ? messageText(lastUser.content).slice(0, 40) || "新会话" : "新会话";
       repo.createThread({
         id: threadId,
         modelId: parsed.data.model,
         title,
         ...(projectId ? { projectId } : {}),
-      });
-    }
-    if (lastUser?.role === "user") {
-      repo.appendMessage({
-        id: crypto.randomUUID(),
-        threadId,
-        role: "user",
-        seq: repo.nextSeq(threadId),
-        parts: normalizeContent(lastUser.content),
-        createdAt: new Date().toISOString(),
       });
     }
     let finalContent = "";
@@ -500,22 +492,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       signal: ac.signal,
     });
 
-    // 从事件流重建并持久化工具往返（assistant tool_calls + tool results），保证刷新后历史完整。
+    // 从事件流重建工具往返（assistant tool_calls + tool results），缓冲到本轮成功结束再落库。
     const recorder = new ToolTurnRecorder();
-    const persistRecorded = (msgs: ReturnType<ToolTurnRecorder["push"]>): void => {
-      for (const m of msgs) {
-        repo.appendMessage({
-          id: crypto.randomUUID(),
-          threadId,
-          role: m.role,
-          seq: repo.nextSeq(threadId),
-          parts: m.parts,
-          ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
-          ...(m.toolResults ? { toolResults: m.toolResults } : {}),
-          createdAt: new Date().toISOString(),
-        });
-      }
-    };
+    const recorded: ReturnType<ToolTurnRecorder["push"]> = [];
 
     const userText = lastUser?.role === "user" ? messageText(lastUser.content) : "";
     try {
@@ -532,19 +511,47 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         ...(parsed.data.sampling ? { sampling: parsed.data.sampling } : {}),
         ...(parsed.data.think !== undefined ? { think: parsed.data.think } : {}),
       })) {
-        persistRecorded(recorder.push(ev));
+        recorded.push(...recorder.push(ev));
         if (ev.type === "final") finalContent = messageText(ev.message.content);
         send(ev);
       }
-      if (finalContent) {
-        repo.appendMessage({
-          id: crypto.randomUUID(),
-          threadId,
-          role: "assistant",
-          seq: repo.nextSeq(threadId),
-          parts: [{ type: "text", text: finalContent }],
-          createdAt: new Date().toISOString(),
-        });
+      // 仅在「未被取消」时落库：用户取消 → 整轮不计入历史（与 pi 上下文回滚一致）。
+      if (!ac.signal.aborted) {
+        if (lastUser?.role === "user") {
+          repo.appendMessage({
+            id: crypto.randomUUID(),
+            threadId,
+            role: "user",
+            seq: repo.nextSeq(threadId),
+            parts: normalizeContent(lastUser.content),
+            createdAt: new Date().toISOString(),
+          });
+        }
+        for (const m of recorded) {
+          repo.appendMessage({
+            id: crypto.randomUUID(),
+            threadId,
+            role: m.role,
+            seq: repo.nextSeq(threadId),
+            parts: m.parts,
+            ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
+            ...(m.toolResults ? { toolResults: m.toolResults } : {}),
+            createdAt: new Date().toISOString(),
+          });
+        }
+        if (finalContent) {
+          repo.appendMessage({
+            id: crypto.randomUUID(),
+            threadId,
+            role: "assistant",
+            seq: repo.nextSeq(threadId),
+            parts: [{ type: "text", text: finalContent }],
+            createdAt: new Date().toISOString(),
+          });
+        }
+      } else if (threadCreated && repo.history(threadId).length === 0) {
+        // 新建会话的首轮即被取消 → 清掉这个空会话，避免侧栏残留空壳。
+        repo.deleteThread(threadId);
       }
     } catch (err) {
       send({ type: "error", message: err instanceof Error ? err.message : String(err) });

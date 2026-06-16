@@ -1,15 +1,42 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LocalNetInfo } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
-import { loadAgentPrefs, saveAgentPrefs, type AgentPrefs } from "../lib/prefs.js";
-import { SlidersIcon, BoxIcon, BrainIcon, GlobeIcon } from "../icons.js";
+import {
+  loadAgentPrefs,
+  saveAgentPrefs,
+  type AgentPrefs,
+  type Appearance,
+  type ColorTheme,
+  type ThemePrefs,
+} from "../lib/prefs.js";
+import { SlidersIcon, BoxIcon, BrainIcon, GlobeIcon, SunIcon, MoonIcon, MonitorIcon, PaletteIcon } from "../icons.js";
+
+const APPEARANCES: { id: Appearance; label: string; Icon: typeof SunIcon }[] = [
+  { id: "light", label: "浅色", Icon: SunIcon },
+  { id: "dark", label: "深色", Icon: MoonIcon },
+  { id: "system", label: "跟随系统", Icon: MonitorIcon },
+];
+const COLOR_THEMES: { id: ColorTheme; label: string; color: string }[] = [
+  { id: "black", label: "黑", color: "#333333" },
+  { id: "blue", label: "蓝", color: "#4E80F7" },
+  { id: "purple", label: "紫", color: "#9169BF" },
+  { id: "green", label: "绿", color: "#57A64B" },
+];
 
 /** 生成一个随机 api-key（暴露 0.0.0.0 时用）。 */
 function genApiKey(): string {
   return "ew-" + crypto.randomUUID().replace(/-/g, "");
 }
 
-export function Settings({ onChange }: { onChange: () => void }) {
+export function Settings({
+  onChange,
+  theme,
+  onThemeChange,
+}: {
+  onChange: () => void;
+  theme: ThemePrefs;
+  onThemeChange: (next: ThemePrefs) => void;
+}) {
   const [prov, setProv] = useState({ id: "", baseUrl: "", apiKey: "", models: "" });
   const [providers, setProviders] = useState<{ id: string; baseUrl: string; models: string[] }[]>([]);
   const [note, setNote] = useState("");
@@ -96,6 +123,50 @@ export function Settings({ onChange }: { onChange: () => void }) {
         </div>
       </div>
       {note && <div className="note">{note}</div>}
+
+      <section>
+        <div className="sec-head">
+          <span className="ico blue">
+            <PaletteIcon size={18} />
+          </span>
+          <div>
+            <h3>外观</h3>
+            <p className="hint">明暗模式与主题色（仅影响本机界面，立即生效）</p>
+          </div>
+        </div>
+        <div className="appearance-row">
+          <div className="appearance-block">
+            <span>明暗模式</span>
+            <div className="seg">
+              {APPEARANCES.map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  className={theme.appearance === id ? "on" : ""}
+                  onClick={() => onThemeChange({ ...theme, appearance: id })}
+                >
+                  <Icon size={14} style={{ marginRight: 5, verticalAlign: "-2px" }} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="appearance-block">
+            <span>主题色</span>
+            <div className="swatches">
+              {COLOR_THEMES.map(({ id, label, color }) => (
+                <button
+                  key={id}
+                  className={`swatch ${theme.colorTheme === id ? "on" : ""}`}
+                  style={{ background: color }}
+                  title={label}
+                  aria-label={label}
+                  onClick={() => onThemeChange({ ...theme, colorTheme: id })}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section>
         <div className="sec-head">

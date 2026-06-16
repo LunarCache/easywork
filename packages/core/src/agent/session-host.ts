@@ -344,9 +344,14 @@ export class SessionHost {
     hosted.runtime.approval = input.approval;
     hosted.runtime.recall = undefined; // M3：每轮重置召回缓存
     hosted.runtime.sampling = input.sampling; // 采样参数（streamFn 包装读取）
+    hosted.runtime.aborted = false; // 本轮是否被用户取消（取消则跳过记忆抽取 + 回滚上下文）
 
-    // R5b：中断透传——信号 abort → 中止 pi 当前轮。
+    // 用户取消「不计入上下文」：快照本轮 prompt 前的会话消息，取消时回滚到此（移除本轮用户消息 + 部分助手输出）。
+    const snapshot = session.agent.state.messages.slice();
+
+    // R5b：中断透传——信号 abort → 中止 pi 当前轮，并标记 aborted。
     const onAbort = (): void => {
+      hosted.runtime.aborted = true;
       void session.abort().catch(() => {});
     };
     if (input.signal) {
@@ -405,6 +410,14 @@ export class SessionHost {
     } finally {
       unsub();
       input.signal?.removeEventListener("abort", onAbort);
+      // 用户取消：回滚 pi 进程内上下文到本轮之前，使取消的这一轮「不计入上下文」（不影响后续轮）。
+      if (input.signal?.aborted) {
+        try {
+          session.agent.state.messages = snapshot;
+        } catch {
+          /* 回滚失败不致命：下轮仍可继续 */
+        }
+      }
     }
   }
 

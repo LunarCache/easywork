@@ -114,6 +114,8 @@ export function memoryExtensionFactory(opts: {
       return { messages: [injected, ...event.messages] };
     });
     pi.on("agent_end", (event: AgentEndEvent) => {
+      // 用户取消的这一轮「不计入上下文」：也不据此抽取记忆事实。
+      if (opts.runtime.aborted) return;
       const messages = event.messages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role, content: contentText(m.content as string | ContentPart[]) }))
@@ -137,6 +139,8 @@ export interface RunRuntime {
   recall?: { key: string; block: string };
   /** 本轮采样参数（run() 前写入；streamFn 包装读取，注入 provider 请求）。 */
   sampling?: SamplingParams;
+  /** 本轮是否被用户取消（取消则跳过记忆抽取；上下文回滚由宿主处理）。 */
+  aborted?: boolean;
 }
 
 const READ_TOOLS = new Set(["read", "ls", "grep", "find"]);

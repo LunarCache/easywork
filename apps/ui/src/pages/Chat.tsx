@@ -36,6 +36,7 @@ import {
   MicIcon,
   PlusBtnIcon,
   SlidersIcon,
+  StopIcon,
   ThinkIcon,
   WrenchIcon,
 } from "../icons.js";
@@ -179,7 +180,6 @@ export function Chat({
   const [busy, setBusy] = useState(false);
   const [think, setThink] = useState(false);
   const [web, setWeb] = useState(false);
-  const [code, setCode] = useState(false);
   const [kb, setKb] = useState(false);
   const [kbId, setKbId] = useState<string | undefined>(undefined); // undefined = 全部集合
   const [kbList, setKbList] = useState<{ kbId: string; docs: number; chunks: number }[]>([]);
@@ -364,6 +364,18 @@ export function Chat({
     }
   };
 
+  // 取消输出：中止在途请求（→ SSE 断开 → 后端回滚 pi 上下文、整轮不落库），并标记本条为已取消。
+  const stop = () => {
+    abortRef.current?.abort();
+    setApproval(null);
+    setMsgs((cur) => {
+      const next = cur.slice();
+      const last = next[next.length - 1];
+      if (last && last.role === "assistant") next[next.length - 1] = { ...last, cancelled: true };
+      return next;
+    });
+  };
+
   const respondApproval = async (verdict: "approve" | "approve-always" | "deny") => {
     if (!approval) return;
     const id = approval.id;
@@ -524,6 +536,7 @@ export function Chat({
               })}
               {answer && !live && <CopyButton text={answer} />}
               {blocks.length === 0 && live && <div className="text">正在思考…</div>}
+              {m.cancelled && <div className="cancel-note">已停止 · 本轮不计入上下文</div>}
             </div>
           );
         })}
@@ -597,9 +610,6 @@ export function Chat({
             <button className={`chip ${web ? "on" : ""}`} onClick={() => setWeb((v) => !v)} title="联网（需配置 web 工具/MCP）">
               <GlobeIcon size={15} /> 联网
             </button>
-            <button className={`chip ${code ? "on" : ""}`} onClick={() => setCode((v) => !v)} title="代码执行（默认关）">
-              <CodeIcon size={15} /> 代码
-            </button>
             <div className="kb-wrap">
               <button
                 className={`chip kb-chip ${kb ? "on" : ""}`}
@@ -651,9 +661,15 @@ export function Chat({
             <button className="cbtn" title="语音（即将支持）" disabled>
               <MicIcon size={18} />
             </button>
-            <button className="csend" onClick={() => void send()} disabled={busy || !model} title="发送">
-              <ArrowUpIcon size={18} />
-            </button>
+            {busy ? (
+              <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
+                <StopIcon size={15} fill="currentColor" />
+              </button>
+            ) : (
+              <button className="csend" onClick={() => void send()} disabled={!model} title="发送">
+                <ArrowUpIcon size={18} />
+              </button>
+            )}
           </div>
         </div>
         <div className="composer-note">本地 AI 也可能出错，请自行核实重要信息。</div>

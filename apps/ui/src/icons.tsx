@@ -39,4 +39,9 @@ export {
   GitBranch as GitBranchIcon,
   Undo2 as UndoIcon,
   GitCommitHorizontal as CommitIcon,
+  Sun as SunIcon,
+  Moon as MoonIcon,
+  Monitor as MonitorIcon,
+  Palette as PaletteIcon,
+  Square as StopIcon,
 } from "lucide-react";

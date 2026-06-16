@@ -41,6 +41,8 @@ export interface UiMsg {
   images?: UiImage[];
   start?: number;
   thinkEnd?: number;
+  /** 本轮被用户取消（部分输出，不计入上下文/历史）。 */
+  cancelled?: boolean;
 }
 
 export function splitThink(raw: string): { reasoning: string; answer: string } {

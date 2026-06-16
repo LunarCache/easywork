@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Project } from "@ew/shared";
 import { currentConfig, getClient, initRuntimeConfig } from "./lib/client.js";
+import { applyTheme, loadThemePrefs, saveThemePrefs, type ThemePrefs } from "./lib/prefs.js";
 import { pickWorkspaceDir } from "./lib/desktop.js";
 import { Chat } from "./pages/Chat.js";
 import { Workspace } from "./pages/Workspace.js";
@@ -42,6 +43,22 @@ export function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemePrefs>(loadThemePrefs);
+
+  // 外观：应用到 <html>；系统模式下跟随系统明暗变化。
+  useEffect(() => {
+    applyTheme(theme);
+    if (theme.appearance !== "system" || typeof matchMedia !== "function") return;
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyTheme(theme);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [theme]);
+
+  const changeTheme = useCallback((next: ThemePrefs) => {
+    setTheme(next);
+    saveThemePrefs(next);
+  }, []);
 
   const refreshThreads = useCallback(async () => {
     try {
@@ -266,7 +283,7 @@ export function App() {
         {tab === "skills" && <Skills />}
         {tab === "mcp" && <Mcp />}
         {tab === "memory" && <Memory />}
-        {tab === "settings" && <Settings onChange={check} />}
+        {tab === "settings" && <Settings onChange={check} theme={theme} onThemeChange={changeTheme} />}
       </main>
     </div>
   );
