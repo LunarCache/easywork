@@ -44,8 +44,10 @@ describe("LocalMemoryProvider", () => {
     m.close();
   });
 
-  it("向量语义召回（注入 embedder）", async () => {
-    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:", embed });
+  it("向量语义召回（sqlite-vec）", async () => {
+    const vp = vecPath();
+    if (!vp) return; // 无预编译二进制 → 跳过（语义召回唯一引擎）
+    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:", embed, vecExtensionPath: vp });
     await m.write({ layer: "user-profile", text: "I have a cat named Mimi" });
     await m.write({ layer: "user-profile", text: "Today's weather is sunny" });
     const hits = await m.recall({ query: "tell me about my cat", topK: 1, minScore: 0.1 });

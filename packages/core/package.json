@@ -30,11 +30,9 @@
     "@ew/skills": "*",
     "@ew/tools": "*",
     "fastify": "^5.2.0",
+    "sqlite-vec": "^0.1.9",
     "typebox": "1.1.38",
     "zod": "^3.24.1"
-  },
-  "optionalDependencies": {
-    "sqlite-vec": "^0.1.9"
   },
   "devDependencies": {
     "@ew/sdk": "*",

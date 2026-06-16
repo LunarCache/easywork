@@ -10,7 +10,7 @@ import type {
   MemoryWrite,
   RecallQuery,
 } from "@ew/shared";
-import { cosine, lexicalScore } from "./cosine.js";
+import { lexicalScore } from "./cosine.js";
 
 // node:sqlite 通过 createRequire 运行时加载（避免打包器静态解析这个较新的内置模块）。
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof NodeSqlite;
@@ -51,9 +51,9 @@ export interface LocalMemoryOptions {
   /** 可选 LLM 事实抽取器；提供则 observe 额外抽取持久事实写入全局层。 */
   extract?: FactExtractor;
   /**
-   * 可选 sqlite-vec 可加载扩展（.dylib/.so/.dll）路径。提供且加载成功时，语义召回走
-   * sqlite-vec 的向量索引（cosine KNN）；缺失/加载失败/平台不支持则静默回退到 JS 余弦
-   * brute-force（embedding blob 仍是真相源，行为不变）。
+   * sqlite-vec 可加载扩展（.dylib/.so/.dll）路径。语义召回唯一引擎（已移除 JS 余弦 brute-force）：
+   * 提供且加载成功 → cosine KNN 向量索引；缺失/加载失败/平台不支持 → 无语义分，召回退化为
+   * 纯词法（embedding blob 仍存于 memory_items 作派生重建源）。
    */
   vecExtensionPath?: string;
 }
@@ -326,26 +326,15 @@ export class LocalMemoryProvider implements MemoryProvider {
     }
 
     const queryEmb = await this.embedOne(q.query);
-    // 语义分来源优先 sqlite-vec（cosine KNN，距离=1-相似度）；k 取候选总数（小规模即精确，
-    // 与 brute-force 一致），超大库（>4096）退为近似 top-k。失败/不可用则用 JS 余弦兜底。
+    // 语义分一律走 sqlite-vec（cosine KNN，距离=1-相似度）；k 取候选总数（小规模即精确），
+    // 超大库（>4096）退为近似 top-k。无 embedding 模型 / 扩展未就绪 → 纯词法（不再有 JS 余弦兜底）。
     const semByRowid = this.vecSemScores(queryEmb, rows.length);
 
-    // 混合召回（参考 Hermes：语义 + 词法融合）：两者皆可用时加权，否则退化为词法。
+    // 混合召回（参考 Hermes：语义 ⊕ 词法）：有语义分则加权融合，否则退化为纯词法。
     const scored = rows.map((r) => {
       const lex = lexicalScore(q.query, r.text);
-      let score: number;
-      const semFromVec = semByRowid?.get(String(r.rowid));
-      if (semFromVec != null) {
-        score = 0.75 * semFromVec + 0.25 * lex;
-      } else if (!semByRowid && queryEmb && r.embedding) {
-        const sem = cosine(
-          queryEmb,
-          new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4),
-        );
-        score = 0.75 * sem + 0.25 * lex;
-      } else {
-        score = lex; // 无 embedding（或不在近似 top-k）→ 仅词法
-      }
+      const sem = semByRowid?.get(String(r.rowid));
+      const score = sem != null ? 0.75 * sem + 0.25 * lex : lex;
       return { item: { ...this.toItem(r), score }, score };
     });
     return scored

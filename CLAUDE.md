@@ -52,7 +52,7 @@ apps/
 resources/        图标、默认 skills、模型 catalog
 ```
 
-**依赖方向**：所有包依赖 `shared`，`shared` 不反向依赖。`core` 是**库**，被 `apps/daemon` 与 `apps/desktop` 共同消费。本地推理走外部 `llama-server` 二进制（子进程），DB 用 Node 内置 `node:sqlite`。**唯一原生件是 `sqlite-vec` 可加载扩展（可选依赖）**：加速记忆向量召回；缺失/平台无预编译二进制/加载失败时**自动回退 JS 余弦 brute-force**（行为不变），故不构成硬性 ABI/打包风险（`EW_DISABLE_SQLITE_VEC=1` 可强制关闭）。
+**依赖方向**：所有包依赖 `shared`，`shared` 不反向依赖。`core` 是**库**，被 `apps/daemon` 与 `apps/desktop` 共同消费。本地推理走外部 `llama-server` 二进制（子进程），DB 用 Node 内置 `node:sqlite`。**唯一原生件是 `sqlite-vec` 可加载扩展（`@ew/core` 依赖）**：记忆语义召回的**唯一引擎**（已移除 JS 余弦 brute-force）；它随包提供各平台预编译二进制（非源码编译，不同于早期 better-sqlite3 的 ABI 痛点）。极端情况下平台无对应二进制 → 记忆召回退化为纯词法（不崩溃）。
 
 ## 技术栈
 
@@ -61,7 +61,7 @@ resources/        图标、默认 skills、模型 catalog
 - **HTTP**：Fastify（schema-first、原生 SSE）
 - **契约/校验**：zod + zod-to-json-schema（一份 schema → TS 类型 + 函数调用 JSON Schema）
 - **本地 DB**：`node:sqlite`（Node 内置 DatabaseSync，**零原生编译**，Node 26 可用；规避 better-sqlite3 在新 ABI 上编译失败的 #1 打包风险）
-- **记忆向量召回**：本地 CPU embedding（参考 Hermes，默认 **nomic-embed-text** 768 维，经 `llama-server --embedding` 运行）+ **混合召回**（语义 cosine ⊕ 词法，0.75/0.25 加权）。语义分优先走 **sqlite-vec**（`vec0` 虚拟表，`distance_metric=cosine`，经 `node:sqlite` `loadExtension`；rowid 须传 `BigInt`）；扩展不可用时回退 JS 余弦 brute-force。`embedding` blob 仍存于 `memory_items`（真相源），`vec_items` 仅为派生加速索引、随写/改/删/reindex 同步。未启用 embedding 时降级为纯词法。**注入分两路**：会话期**冻结快照**（`buildMemorySnapshot`，全量持久记忆，记忆扩展闭包内缓存、每轮置顶注入）+ 每轮**动态召回**（按相关度 top-K）。被动抽取的事实带来源 `sessionId`，删除对话时经 `deleteBySession` 一并清除（模型 `manage_memory`/手工写入的无 sessionId 全局事实不受影响）。
+- **记忆向量召回**：本地 CPU embedding（参考 Hermes，默认 **nomic-embed-text** 768 维，经 `llama-server --embedding` 运行）+ **混合召回**（语义 cosine ⊕ 词法，0.75/0.25 加权）。语义分**一律走 sqlite-vec**（`vec0` 虚拟表，`distance_metric=cosine`，经 `node:sqlite` `loadExtension`；rowid 须传 `BigInt`）——**JS 余弦 brute-force 已移除**。`embedding` blob 仍存于 `memory_items`（durable 重建源），`vec_items` 是查询索引、随写/改/删/reindex 同步。未启用 embedding（或扩展无二进制）时降级为纯词法。**注入分两路**：会话期**冻结快照**（`buildMemorySnapshot`，全量持久记忆，记忆扩展闭包内缓存、每轮置顶注入）+ 每轮**动态召回**（按相关度 top-K）。被动抽取的事实带来源 `sessionId`，删除对话时经 `deleteBySession` 一并清除（模型 `manage_memory`/手工写入的无 sessionId 全局事实不受影响）。
 - **UI**：React 19 + Vite + @assistant-ui/react + @tanstack/react-router + Zustand + TanStack Query
 - **桌面**：Tauri 2（Rust 外壳 + TS 前端；sidecar 启动 Node daemon）
 - **库构建**：tsup（esbuild）

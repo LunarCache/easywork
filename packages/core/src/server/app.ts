@@ -137,7 +137,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     embed: (texts) => embeddings.embed(texts),
     // 轮后用当轮对话模型抽取持久事实写入全局层（复用已加载模型）。
     extract: buildFactExtractor({ resolveEngine: (m) => registry.resolve(m) }),
-    // sqlite-vec 可加载扩展（可选）：加速向量召回；缺失/平台不支持则自动回退 brute-force。
+    // sqlite-vec 可加载扩展：记忆语义召回唯一引擎（已移除 JS 余弦）；平台无二进制时召回退化为纯词法。
     ...(vecExtensionPath ? { vecExtensionPath } : {}),
   });
   // markdown 为真相源：监听用户手工编辑并回灌索引（内存库/测试不监听）。
@@ -1095,9 +1095,8 @@ function nextNewProjectDir(repo: SqliteConversationRepo): string {
   return fsPath.join(root, `NewProject${n}`);
 }
 
-/** 解析 sqlite-vec 可加载扩展路径（可选依赖）。未安装/平台无预编译二进制时返回 undefined → 召回回退 brute-force。 */
+/** 解析 sqlite-vec 可加载扩展路径（记忆语义召回唯一引擎）。平台无预编译二进制时返回 undefined → 召回退化为纯词法。 */
 function resolveVecExtensionPath(): string | undefined {
-  if (process.env.EW_DISABLE_SQLITE_VEC === "1") return undefined;
   try {
     const req = createRequire(import.meta.url);
     const sv = req("sqlite-vec") as { getLoadablePath?: () => string };
