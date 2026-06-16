@@ -28,6 +28,7 @@ import {
   NewChatIcon,
   RefreshIcon,
   TerminalIcon,
+  TrashIcon,
   UndoIcon,
   WrenchIcon,
 } from "../icons.js";
@@ -135,6 +136,25 @@ export function Workspace({
     setApproval(null);
     setThreadId(id);
   };
+  const deleteConversation = async () => {
+    if (!confirm("删除当前对话？此操作不可撤销（仅删会话记录，不动工作区文件）。")) return;
+    abortRef.current?.abort();
+    setApproval(null);
+    try {
+      await getClient().deleteThread(threadId);
+    } catch {
+      /* ignore */
+    }
+    const rest = threads.filter((t) => t.id !== threadId);
+    setThreads(rest);
+    // 切到剩余最近一条；都删光则回到空的默认会话。
+    if (rest[0]) setThreadId(rest[0].id);
+    else {
+      setMsgs([]);
+      setThreadId(`ws-${project.id}`);
+    }
+    void refreshThreads();
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -238,6 +258,11 @@ export function Workspace({
             ))}
             {!threads.some((t) => t.id === threadId) && <option value={threadId}>新对话</option>}
           </select>
+          {threads.some((t) => t.id === threadId) && (
+            <button className="ws-delchat" onClick={() => void deleteConversation()} title="删除当前对话">
+              <TrashIcon size={14} />
+            </button>
+          )}
           <span className="ws-sub">{project.workspaceDir}</span>
           <span className="bar-spacer" />
           {git.repo && (
