@@ -2,6 +2,28 @@
 
 > 每完成一个里程碑更新此文件。最新在上。
 
+## 2026-06-16 — 对话工件面板 + 记忆机制重构（作用域 / 渐进式披露 / 批量抽取 / sqlite-vec）
+
+### 对话模式右侧「工件」面板
+- 对话 cwd 改为**每会话目录** `~/.easywork/workspace/chats/<threadId>`（会话间隔离，删对话时一并清除）。
+- 新增 `GET /chat/:threadId/files`（列文件，缺目录返回空）+ `/chat/:threadId/file`（只读预览），经 `resolveWorkspacePath` 沙箱，挡 `../` 与绝对路径。
+- 前端 `Chat.tsx` 右侧 `ArtifactsPanel`：文件列表 + 类型图标 / 大小，点击预览（文本 / 代码内联、HTML 可切「预览(iframe)/源码」）；文件类工具完成即刷新、首次出现工件自动展开；标题栏「工件」开关带计数。
+
+### 向量召回完全改用 sqlite-vec（移除 JS 余弦 brute-force）
+- 抽出共享 `SqliteVecIndex`（`@ew/memory`）：封装 `vec0` 表的 load/ensureTable/set/knn（`distance_metric=cosine`，`node:sqlite` `loadExtension`，rowid 须 `BigInt`）。**记忆与知识库 RAG 共用**（KB 用 `kb_vec` 表 + 词法 RRF）。
+- `sqlite-vec` 升为 `@ew/core` 正式依赖（随包带各平台预编译二进制）；`embedding` blob 仍存源表作 durable 重建源，vec 表是查询索引、随写/改/删/reindex 同步；扩展无二进制时降级纯词法。`knn` 以全表 count 作 k（分区安全，多集合不漏）。
+
+### 记忆机制重构（按用户四项要求）
+- **作用域化**：每条记忆带 `scope`。**全局池**（`global`=对话记忆，所有对话共享，层 user-profile/agent-memory/skills）+ **每工作区私有池**（`ws:<projectId>`，互相隔离、独立于全局，层 conventions/decisions/pitfalls——盯约定/变动/坑，记 why 不记 diff）。工作区只读叠加全局 user-profile（共享身份），写只进本池（`visibleScopes`）。删对话按 `sessionId` 清抽取事实；删工作区按 `deleteByScope` 清整池（HTTP 端点拒清全局，护栏）。全局池保留 markdown 镜像可手改回灌，工作区池 DB-only。
+- **注入：纯渐进式披露（借鉴 Skill）**：`before_agent_start` 把「记忆清单」（仅标题，`buildMemoryManifest`）拼进系统提示词；全文经新增 `recall_memory` 工具按需语义检索取。`manage_memory` 按 scope 参数化。**移除冻结快照全量灌入 + 每轮自动召回**。
+- **抽取：模型抽取 + 批量（非每轮）**：调度由 **`ExtractionScheduler`（SessionHost 拥有，非 pi 扩展闭包）** 负责——增量缓冲新轮次（列表变短=压缩→重新基线，长突发不漏早期轮次），达 `maxTurns(24)` 立即分块抽、否则 ~90s 空闲去抖。提示词按 scope 切换；`turnsForExtraction` 把写文件/命令的工具调用压成摘要喂抽取器。`core.stop()` 停模型前 `flushAllExtraction()`（graceful 退出不丢尾部），删会话则 discard 不抽。
+- **记忆页 UI**：顶部作用域选择器（全局 + 各工作区）；层标签 / 浏览 / 编辑 / 删除 / 召回测试均按作用域；工作区可「清空本工作区记忆」（确认弹窗）。
+
+### 两轮 code-review 修复
+- M1：抽取窗口截尾改增量缓冲（长突发不漏）。L1：清空端点拒清全局。L2：工作区清单里全局层标「全局·」。L3：`recall_memory` minScore 0→0.1 去噪。
+- M2：移除压缩触发抽取（缓冲独立于 pi 上下文，不与主运行并发打模型）。L4：删对话清其工件目录。L5：抽取含工具摘要。L6：抽取调度移入宿主，停模型前 flush、删会话 discard（修「抽取正被删除的对话」隐患）；SIGKILL 仍丢（可接受）。
+- 结果：**196 测试全绿**（新增工件面板端点、作用域隔离/deleteByScope、`ExtractionScheduler`/`turnsForExtraction`、KB sqlite-vec 等），typecheck 19/19；多轮真机 e2e（HTTP 作用域读写召回互不串、工件面板 Playwright、L4/graceful 关停）。
+
 ## 2026-06-15（续）— 代码 review 修复（pi 迁移 + /v1 + 本地暴露）
 
 三路并行 review 后修复确认问题：

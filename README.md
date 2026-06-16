@@ -16,17 +16,17 @@
   - **真实工具审批流（4 档）**：`read-only` / `approve-each` / `auto-edits` / `full-auto`，经 pi `tool_call` 钩子映射；危险工具经 SSE 挂起，UI 弹窗「允许 / 总是允许 / 拒绝」。
   - **工作区路径限定**：fs 工具路径经 realpath 解析后硬拦越界（含软链接），bash 由审批把守。
   - 内置工具（桥成 pi customTool）：`get_time` / `calculator` / `http_get`（带 SSRF 防护）/ `web_search`。
-  - **记忆/知识库/会话检索**：以 pi 扩展（召回注入 + 事实抽取）+ customTools 接入。
+  - **记忆/知识库/会话检索**：记忆经 pi 扩展接入——**渐进式披露**（记忆「清单」注入系统提示词 + `recall_memory` 工具按需取全文，借鉴 Skill）+ **批量事实抽取**（空闲/关闭时，非每轮）；知识库 / 会话检索为 customTools。
   - **MCP**：stdio（默认禁用，需开关）+ HTTP；工具桥成 pi customTools；导入标准 `mcpServers` JSON。
   - **Skills**：pi 自带 skills（resourceLoader 发现）+ 应用内 Skills 管理。
-- **工作区模式**：在本地项目目录里读写文件 / 跑命令（git 改动审阅面板）；区别于纯聊天模式（聊天模式收窄工具，去 bash/edit/write）。
-- **文档知识库 RAG**：本地文件上传 → 异步解析（带进度）→ 分块 → 嵌入 → **RRF 混合检索**（语义 + 词法）→ 多集合作用域 → 首轮自动注入 + 引用来源。
-- **可插拔记忆**：分层 markdown 为真相源（文件可手改、监听自动回灌）+ JS 余弦 / 词法混合召回；条目可编辑 / 删除；Mem0 适配器。
+- **工作区模式**：在本地项目目录里读写文件 / 跑命令（git 改动审阅面板）。聊天模式也能写文件 / 跑命令，但**限定在每会话工件目录内**，右侧「工件」面板实时展示产出（网页 / 文件等）。
+- **文档知识库 RAG**：本地文件上传 → 异步解析（带进度）→ 分块 → 嵌入 → **RRF 混合检索**（sqlite-vec 语义 + 词法）→ 多集合作用域 → 首轮自动注入 + 引用来源。
+- **可插拔记忆（作用域化）**：**全局池**（所有对话共享）+ **每工作区私有池**（互相隔离、独立于全局，工作区盯约定 / 变动 / 坑）；**渐进式披露**注入（清单常驻 + 按需取全文）+ **批量抽取**（非每轮）；**sqlite-vec ⊕ 词法**混合召回；全局 markdown 可手改回灌；记忆页按作用域浏览 / 编辑 / 清空；Mem0 适配器。
 - **采样参数**：`temperature / top_p / top_k / min_p / repeat_penalty / frequency_penalty / presence_penalty / reasoning_effort`，全链路透传，**按模型**保存（聊天内快捷浮层）。
 - **多协议端点（网关）**：`/v1/chat/completions`（+stream）、`/v1/embeddings`、`/v1/models`（OpenAI 兼容）、`/v1/messages`（Anthropic 兼容）。本地模型**透传**到其 llama-server 原生端点（OpenAI + 原生 Anthropic）；云端**流式经 pi-ai**（统一鉴权，含 OAuth）。可让 Claude Code 等外部客户端直接指向。
 - **本地端口暴露**：llama-server 默认仅绑 `127.0.0.1`；可在「设置 → 本地网络」切到 `0.0.0.0` 让局域网其他服务直连（**强制设置 api-key**，未鉴权拒绝）。
 - **思维链**：`<think>` 与 gpt-oss harmony 多通道（analysis → 思考 / final → 正文）解析。
-- **桌面 UI**：聊天（流式 / 思维链 / 工具卡 / 引用 / HTML 工件 / 图片多模态 / 审批弹窗）、模型、知识库、Skills、MCP、记忆、设置 —— 各为独立页面。
+- **桌面 UI**：聊天（流式 / 思维链 / 工具卡 / 引用 / HTML 工件 / 图片多模态 / 审批弹窗 / 右侧「工件」面板）、模型、知识库、Skills、MCP、记忆（按作用域）、设置 —— 各为独立页面。
 
 ---
 
@@ -52,7 +52,7 @@
 
 - **Tauri 主进程（Rust）**：窗口 / 菜单 / 自动更新 + 以 sidecar spawn 并健康检查 daemon。读取 daemon stdout 首行的 `{baseUrl, token}`，经 `get_config` 注入 webview（连接信息对 UI 不可见）。
 - **Core daemon**：detached Node 子进程（`easywork serve`），也可独立无头运行。
-- **本地推理**：每个加载的模型一个 `llama-server` 子进程。**无原生 addon**（DB 用内置 `node:sqlite`，向量用 JS 余弦）。
+- **本地推理**：每个加载的模型一个 `llama-server` 子进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，记忆 / 知识库向量召回用；缺失则降级纯词法）。
 
 ---
 
@@ -63,7 +63,7 @@ packages/
   shared/         @ew/shared        纯 zod schema + 类型（契约层，零运行时依赖）
   core/           @ew/core          daemon 库：server / routes / SessionHost(托管 pi) / ew-extensions / /v1 网关 / RAG / store
   providers/      @ew/providers     LlamaServerEngine（--host/--api-key）/ OpenAICompatibleEngine / harmony 解析
-  memory/         @ew/memory        MemoryProvider：local（markdown + 混合召回）+ mem0
+  memory/         @ew/memory        MemoryProvider：local（作用域化分层 + SqliteVecIndex 语义 ⊕ 词法召回）+ mem0
   tools/          @ew/tools         内置工具 + SSRF 防护
   skills/         @ew/skills        Skills 发现 / 渐进披露 / 执行
   mcp/            @ew/mcp           MCP client（stdio + HTTP）
@@ -88,7 +88,7 @@ apps/
 | HTTP | Fastify（schema-first、原生 SSE） |
 | 契约 / 校验 | zod + zod-to-json-schema |
 | 本地 DB | `node:sqlite`（内置 DatabaseSync，零原生编译） |
-| 记忆 / RAG | 本地 CPU embedding（nomic-embed-text 768 维）+ 混合召回（语义 ⊕ 词法 / RRF） |
+| 记忆 / RAG | 本地 CPU embedding（nomic-embed-text 768 维）+ **sqlite-vec** 语义 ⊕ 词法混合召回（RRF）；记忆作用域化 + 渐进式披露 |
 | UI | React 19 + Vite + react-markdown |
 | 桌面 | Tauri 2（Rust 外壳 + TS 前端，sidecar 启动 daemon） |
 | 库构建 / 测试 | tsup（esbuild） / Vitest |
@@ -105,7 +105,7 @@ apps/
 ```bash
 npm install            # 安装全部 workspace 依赖
 npm run build          # turbo 构建全部包
-npm test               # vitest（176 测试）
+npm test               # vitest（196 测试）
 npm run typecheck      # 全量类型检查
 npm run lint           # eslint
 ```
