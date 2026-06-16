@@ -22,7 +22,8 @@ export function makeRecallMemoryTool(memory: MemoryProvider, scope: string): Too
       const topK = limit ?? 6;
       const all: MemoryItem[] = [];
       for (const v of views) {
-        const hits = await memory.recall({ query, scope: v.scope, layers: [...v.layers], topK, minScore: 0 });
+        // minScore 过滤掉无关项（纯词法 0 分噪声）；模型已主动检索，留相关的即可。
+        const hits = await memory.recall({ query, scope: v.scope, layers: [...v.layers], topK, minScore: 0.1 });
         all.push(...hits);
       }
       const byId = new Map<string, MemoryItem>();

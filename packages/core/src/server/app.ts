@@ -15,6 +15,7 @@ import {
   normalizeContent,
   GLOBAL_SCOPE,
   workspaceScope,
+  isWorkspaceScope,
   type AgentEvent,
   type DownloadEvent,
   type McpServerConfig,
@@ -991,10 +992,14 @@ version: "0.1.0"
     await memory.delete((req.params as { id: string }).id);
     return { ok: true };
   });
-  // 清空某作用域整池（如某工作区的私有记忆）。scope 经 encodeURIComponent 传入（含 ws: 前缀的冒号）。
+  // 清空某作用域整池（仅限工作区私有池）。scope 经 encodeURIComponent 传入（含 ws: 前缀的冒号）。
+  // 护栏：拒绝清空全局池——全局记忆只能逐条删/手工编辑 markdown，避免一键误删共享记忆。
   app.delete("/memory/scope/:scope", async (req, reply) => {
     const scope = (req.params as { scope: string }).scope;
     if (!scope) return reply.code(400).send({ error: "scope_required" });
+    if (!isWorkspaceScope(scope)) {
+      return reply.code(400).send({ error: "scope_not_clearable", message: "只能整池清空工作区作用域（ws:*）" });
+    }
     return { removed: await memory.deleteByScope(scope) };
   });
 
