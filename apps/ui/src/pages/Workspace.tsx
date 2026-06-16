@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -25,6 +25,7 @@ import {
   EditIcon,
   FilePlusIcon,
   GitBranchIcon,
+  NewChatIcon,
   RefreshIcon,
   TerminalIcon,
   UndoIcon,
@@ -47,7 +48,9 @@ export function Workspace({
   models: string[];
   onChanged: () => void;
 }) {
-  const threadId = `ws-${project.id}`;
+  // 一个工作区可有多条会话：默认线程 ws-<projectId>，新建得到 ws-<projectId>-<rand>。
+  const [threadId, setThreadId] = useState(`ws-${project.id}`);
+  const [threads, setThreads] = useState<{ id: string; title: string; updatedAt: string }[]>([]);
   const [model, setModel] = useState(models[0] ?? "");
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>(project.approvalMode ?? "approve-each");
   const [msgs, setMsgs] = useState<UiMsg[]>([]);
@@ -75,8 +78,37 @@ export function Workspace({
     }
   };
 
+  const refreshThreads = useCallback(async () => {
+    try {
+      setThreads(await getClient().listThreads({ projectId: project.id }));
+    } catch {
+      /* ignore */
+    }
+  }, [project.id]);
+
+  // 挂载该工作区：拉会话列表 + git，选中最近一次会话（无则用默认 ws- 线程）。
   useEffect(() => {
     setApprovalMode(project.approvalMode ?? "approve-each");
+    let cancelled = false;
+    void (async () => {
+      let list: { id: string; title: string; updatedAt: string }[] = [];
+      try {
+        list = await getClient().listThreads({ projectId: project.id });
+      } catch {
+        /* ignore */
+      }
+      if (cancelled) return;
+      setThreads(list);
+      if (list[0]) setThreadId(list[0].id); // listThreads 按 updatedAt desc
+      void refreshGit();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id]);
+
+  // 切换/初始会话 → 载入该会话历史。
+  useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
@@ -85,12 +117,24 @@ export function Workspace({
       } catch {
         if (!cancelled) setMsgs([]);
       }
-      if (!cancelled) void refreshGit();
     })();
     return () => {
       cancelled = true;
     };
-  }, [project.id]);
+  }, [threadId]);
+
+  const newConversation = () => {
+    abortRef.current?.abort();
+    setApproval(null);
+    setMsgs([]);
+    setThreadId(`ws-${project.id}-${crypto.randomUUID().slice(0, 8)}`);
+  };
+  const selectThread = (id: string) => {
+    if (id === threadId) return;
+    abortRef.current?.abort();
+    setApproval(null);
+    setThreadId(id);
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -148,6 +192,7 @@ export function Workspace({
       }
       onChanged();
       void refreshGit();
+      void refreshThreads();
     } catch (e) {
       if (!ac.signal.aborted)
         apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
@@ -177,6 +222,22 @@ export function Workspace({
           <span className="ws-title" title={project.workspaceDir}>
             {project.name}
           </span>
+          <button className="ws-newchat" onClick={newConversation} title="在该工作区新建对话">
+            <NewChatIcon size={15} />
+          </button>
+          <select
+            className="ws-thread-select"
+            value={threadId}
+            onChange={(e) => selectThread(e.target.value)}
+            title="切换该工作区的会话"
+          >
+            {threads.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title || "新会话"}
+              </option>
+            ))}
+            {!threads.some((t) => t.id === threadId) && <option value={threadId}>新对话</option>}
+          </select>
           <span className="ws-sub">{project.workspaceDir}</span>
           <span className="bar-spacer" />
           {git.repo && (

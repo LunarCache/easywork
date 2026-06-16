@@ -745,7 +745,10 @@ version: "0.1.0"
   });
 
   // ---- 会话 ----
-  app.get("/threads", async () => ({ threads: repo.listThreads() }));
+  app.get("/threads", async (req) => {
+    const projectId = (req.query as { projectId?: string }).projectId;
+    return { threads: repo.listThreads(projectId ? { projectId } : undefined) };
+  });
   app.get("/threads/:id/messages", async (req) => ({
     messages: repo.history((req.params as { id: string }).id),
   }));

@@ -340,10 +340,13 @@ export class EasyWorkClient {
     await this.postJSON("/agent/approve", { id, verdict });
   }
 
-  async listThreads(): Promise<{ id: string; title: string; updatedAt: string }[]> {
-    const { threads } = await this.getJSON<{ threads: { id: string; title: string; updatedAt: string }[] }>(
-      "/threads",
-    );
+  async listThreads(
+    filter?: { projectId?: string },
+  ): Promise<{ id: string; title: string; updatedAt: string; projectId?: string }[]> {
+    const qs = filter?.projectId ? `?projectId=${encodeURIComponent(filter.projectId)}` : "";
+    const { threads } = await this.getJSON<{
+      threads: { id: string; title: string; updatedAt: string; projectId?: string }[];
+    }>(`/threads${qs}`);
     return threads;
   }
 

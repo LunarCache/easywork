@@ -19,6 +19,7 @@ interface ThreadItem {
   id: string;
   title: string;
   updatedAt: string;
+  projectId?: string;
 }
 
 // 左下角 EasyWork 块的弹出菜单项（不含「聊天」——聊天经「新对话」/会话列表进入）
@@ -62,7 +63,8 @@ export function App() {
 
   const refreshThreads = useCallback(async () => {
     try {
-      setThreads(await getClient().listThreads());
+      // 侧栏「对话」仅列纯聊天会话；工作区会话（带 projectId）在各自工作区内管理。
+      setThreads((await getClient().listThreads()).filter((t) => !t.projectId));
     } catch {
       /* ignore */
     }
