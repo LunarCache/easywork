@@ -27,6 +27,7 @@ import {
   permissionExtensionFactory,
   type RunRuntime,
 } from "./ew-extensions.js";
+import { ExtractionScheduler } from "../memory/extraction-scheduler.js";
 
 /** 宿主依赖（从 daemon 注入）。 */
 export interface SessionHostDeps {
@@ -80,6 +81,7 @@ interface HostedSession {
   dispose: () => void;
 }
 
+
 /**
  * 进程内会话宿主：每个 (threadId) 复用一个 pi `AgentSession`（保留上下文/compaction）。
  * modelId 或 cwd 变化则重建。R5 接 pi `SessionManager` 落盘做跨重启真相源。
@@ -93,6 +95,10 @@ export class SessionHost {
   private readonly registeredProviders = new Set<string>();
   // H1：按 threadId 串行化 run（pi 会话 + 全局 subscribe 不可并发复用）。
   private readonly runChain = new Map<string, Promise<void>>();
+  // 被动记忆抽取调度（宿主拥有：关闭时能在停模型前 flush、删会话时丢弃不抽、压缩不触发并发）。
+  private readonly extraction = new ExtractionScheduler(async (input) => {
+    if (this.deps.memory) await this.deps.memory.observe(input);
+  });
 
   constructor(private readonly deps: SessionHostDeps) {
     this.agentDir = deps.agentDir ?? path.join(os.homedir(), ".easywork", "pi-agent");
@@ -268,6 +274,8 @@ export class SessionHost {
       return existing;
     }
     if (existing) {
+      // 会话重建（换模型/作用域）：先用旧模型把已积累的对话抽取掉，再丢弃旧会话。
+      await this.extraction.flush(threadId);
       existing.dispose();
       this.sessions.delete(threadId);
     }
@@ -278,7 +286,12 @@ export class SessionHost {
     const factories: ExtensionFactory[] = [];
     if (this.deps.memory) {
       factories.push(
-        memoryExtensionFactory({ threadId, modelId, scope: memoryScope, memory: this.deps.memory, runtime }),
+        memoryExtensionFactory({
+          memory: this.deps.memory,
+          scope: memoryScope,
+          runtime,
+          onTurn: (conv) => this.extraction.note(threadId, memoryScope, modelId, conv),
+        }),
       );
     }
     // 权限/路径限定扩展：始终装载——escapesCwd 硬隔离让 read/edit/write 都不能逃出 cwd（工作区）；
@@ -448,8 +461,14 @@ export class SessionHost {
     }
   }
 
+  /** flush 全部会话的待抽取缓冲（daemon 关停时在停模型前调用，避免丢尾部）。 */
+  async flushAllExtraction(): Promise<void> {
+    await this.extraction.flushAll();
+  }
+
   /** 释放某 thread 的会话。 */
   dispose(threadId: string): void {
+    this.extraction.discard(threadId); // 删会话：丢弃待抽取缓冲，不把将删的对话抽进记忆
     const s = this.sessions.get(threadId);
     if (!s) return;
     // 彻底删除：先取 pi 会话落盘文件，dispose 后删掉，避免残留可恢复的对话上下文。
@@ -478,8 +497,9 @@ export class SessionHost {
     this.disposeAll();
   }
 
-  /** 释放全部（daemon 关停）。 */
+  /** 释放全部（daemon 关停）。注意：关停前应先 await flushAllExtraction()（停模型前抽完）。 */
   disposeAll(): void {
+    for (const id of [...this.sessions.keys()]) this.extraction.discard(id);
     for (const s of this.sessions.values()) s.dispose();
     this.sessions.clear();
   }

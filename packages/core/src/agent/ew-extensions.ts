@@ -37,11 +37,6 @@ import { makeRecallMemoryTool } from "../memory/recall-memory-tool.js";
 import { makeSessionSearchTool } from "../memory/session-search-tool.js";
 import { makeSearchKnowledgeBaseTool } from "../rag/tool.js";
 
-/** 被动抽取的空闲去抖时长：一轮结束后停顿这么久没有新输入，才批量抽取一次。 */
-const EXTRACT_IDLE_MS = 90_000;
-/** 累积到这么多条「未抽取」的新消息就立即批量抽一次（防止长突发里缓冲无限增长/早期轮次漏抽）。 */
-const EXTRACT_MAX_TURNS = 24;
-
 /** (scope,layer) → 清单里的人类标签。prefixGlobal=true 时给全局层标「全局·」（用于工作区会话里区分共享身份）。 */
 function manifestLabel(scope: string, layer: MemoryLayer, prefixGlobal: boolean): string {
   const GLOBAL: Record<string, string> = {
@@ -151,39 +146,60 @@ export async function buildEwCustomTools(opts: {
   return tools.map((t) => toPiTool(t, base));
 }
 
+/** 一轮对话（user/assistant 文本 + 关键工具调用摘要）压成 {role,content}[]，供抽取器使用。 */
+export function turnsForExtraction(messages: AgentEndEvent["messages"]): { role: string; content: string }[] {
+  const out: { role: string; content: string }[] = [];
+  for (const m of messages) {
+    if (m.role === "user") {
+      const t = contentText(m.content as string | ContentPart[]);
+      if (t.trim()) out.push({ role: "user", content: t });
+    } else if (m.role === "assistant") {
+      const parts: string[] = [];
+      const t = contentText(m.content as string | ContentPart[]);
+      if (t.trim()) parts.push(t);
+      // L5：把关键工具调用（写文件/改文件/执行命令）摘要进抽取输入，让工作区「变动/坑」有料可抽。
+      const content = (m as { content?: unknown }).content;
+      if (Array.isArray(content)) {
+        for (const c of content) {
+          const tc = c as { type?: string; name?: string; arguments?: Record<string, unknown> };
+          if (tc?.type !== "toolCall") continue;
+          const s = summarizeToolCall(tc.name ?? "", tc.arguments ?? {});
+          if (s) parts.push(s);
+        }
+      }
+      if (parts.length) out.push({ role: "assistant", content: parts.join("\n") });
+    }
+  }
+  return out;
+}
+
+/** 把一个工具调用压成一行摘要；非关键工具返回 ""（不灌噪声）。 */
+function summarizeToolCall(name: string, args: Record<string, unknown>): string {
+  const p = (k: string): string => (typeof args[k] === "string" ? (args[k] as string) : "");
+  const path = p("path") || p("file_path");
+  if (name === "fs_write" || name === "write") return path ? `[写文件 ${path}]` : "";
+  if (name === "fs_edit" || name === "edit") return path ? `[改文件 ${path}]` : "";
+  if (name === "run_command" || name === "bash") {
+    const cmd = p("command");
+    return cmd ? `[执行命令 ${cmd.length > 120 ? `${cmd.slice(0, 119)}…` : cmd}]` : "";
+  }
+  return "";
+}
+
 /**
- * 记忆扩展工厂（渐进式披露 + 批量抽取）：
- * - `before_agent_start`：把「记忆清单」注入系统提示词（常驻、只列要点，全文经 recall_memory 取）。
- * - 抽取：不再每轮。一轮结束挂去抖定时器（~90s）；停顿/上下文压缩/会话关闭时批量抽一次本作用域记忆。
+ * 记忆扩展工厂（渐进式披露）：`before_agent_start` 把「记忆清单」注入系统提示词（常驻、只列要点，
+ * 全文经 recall_memory 取）；`agent_end` 把本轮对话（含工具摘要）转发给宿主的抽取调度器（onTurn）。
+ * 缓冲/去抖/flush 由 SessionHost 拥有——这样关闭时能在停模型前 flush、删会话时丢弃不抽。
  * 作用域：global（对话池）或 ws:<id>（工作区私有池）；工作区清单额外含全局 user-profile（只读）。
  */
 export function memoryExtensionFactory(opts: {
-  threadId: string;
-  modelId: string;
-  scope: string;
   memory: MemoryProvider;
+  scope: string;
   runtime: RunRuntime;
+  /** 转发本轮对话给宿主抽取调度器（仅在未取消时调用）。 */
+  onTurn: (conv: { role: string; content: string }[]) => void;
 }): ExtensionFactory {
   const views = visibleScopes(opts.scope);
-  // 增量缓冲：累积「自上次抽取以来的新轮次」（不是每次截整段对话的尾部 → 长突发也不漏早期轮次）。
-  let buffer: { role: string; content: string }[] = [];
-  let seenLen = 0; // 已纳入缓冲的「过滤后对话」长度（survives compaction：列表变短即重新基线）
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const extractNow = (): void => {
-    if (timer) {
-      clearTimeout(timer);
-      timer = undefined;
-    }
-    if (buffer.length === 0) return;
-    const batch = buffer;
-    buffer = [];
-    // 后台抽取（不 await）：写入本作用域；isDuplicateFact 兜住任何重叠。
-    void opts.memory
-      .observe({ messages: batch, sessionId: opts.threadId, scope: opts.scope, model: opts.modelId })
-      .catch(() => {});
-  };
-
   return (pi: ExtensionAPI) => {
     pi.on("before_agent_start", async (event: BeforeAgentStartEvent) => {
       const manifest = await buildMemoryManifest(opts.memory, views).catch(() => "");
@@ -193,26 +209,8 @@ export function memoryExtensionFactory(opts: {
     pi.on("agent_end", (event: AgentEndEvent) => {
       // 用户取消的这一轮「不计入上下文」：不纳入抽取（上下文回滚由宿主处理）。
       if (opts.runtime.aborted) return;
-      const conv = event.messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ role: m.role, content: contentText(m.content as string | ContentPart[]) }))
-        .filter((m) => m.content.trim().length > 0);
-      // 只把「新增轮次」入缓冲；列表变短（压缩发生）→ 重新基线，整段入缓冲（事实去重兜重叠）。
-      buffer.push(...(conv.length >= seenLen ? conv.slice(seenLen) : conv));
-      seenLen = conv.length;
-      if (buffer.length === 0) return;
-      // 缓冲到阈值就立即分块抽取（防长突发缓冲膨胀/早期轮次漏抽）；否则空闲去抖。
-      if (buffer.length >= EXTRACT_MAX_TURNS) {
-        extractNow();
-      } else {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(extractNow, EXTRACT_IDLE_MS);
-        timer.unref?.();
-      }
+      opts.onTurn(turnsForExtraction(event.messages));
     });
-    // 上下文压缩前 / 会话关闭前：把缓冲立即抽取（避免被淘汰或丢尾部）。
-    pi.on("session_before_compact", () => extractNow());
-    pi.on("session_shutdown", () => extractNow());
   };
 }
 

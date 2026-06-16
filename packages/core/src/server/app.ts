@@ -765,9 +765,18 @@ version: "0.1.0"
   }));
   app.delete("/threads/:id", async (req) => {
     const id = (req.params as { id: string }).id;
+    const projectId = repo.getThread(id)?.projectId;
     repo.deleteThread(id); // 删 SQLite 会话 + 消息 + FTS
-    sessionHost.dispose(id); // 彻底删除：丢弃进程内 pi 会话上下文 + 落盘 session 文件，防同名线程复活旧上下文
+    sessionHost.dispose(id); // 彻底删除：丢弃进程内 pi 会话上下文 + 落盘 session 文件 + 待抽取缓冲
     const facts = await memory.deleteBySession(id).catch(() => 0); // 一并清除该对话抽取出的记忆事实
+    // 对话会话（无项目）：删掉其每会话工件目录（软件 scratch；工作区会话用项目目录，不动）。
+    if (!projectId) {
+      try {
+        fs.rmSync(chatWorkspaceDir(id), { recursive: true, force: true });
+      } catch {
+        /* 删工件目录失败不致命 */
+      }
+    }
     return { ok: true, factsRemoved: facts };
   });
 
@@ -1065,6 +1074,8 @@ version: "0.1.0"
     async stop() {
       await app.close();
       stopMemWatch();
+      // 停模型前先 flush 待抽取的记忆（抽取要用模型；停了就抽不成）。
+      await sessionHost.flushAllExtraction().catch(() => {});
       try {
         sessionHost.disposeAll();
       } catch {
