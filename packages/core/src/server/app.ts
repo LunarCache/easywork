@@ -456,6 +456,12 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     const isWorkspace = !!project?.workspaceDir;
     // 对话模式 cwd = 默认工作区（~/.easywork/workspace），不是数据目录根；fs 工具读写均限定在此目录内。
     const runWorkspaceDir = project?.workspaceDir ?? defaultWorkspaceDir();
+    // 工作区目录「真正聊天时」才落盘创建（新建工作区时不预建空目录）。
+    try {
+      fs.mkdirSync(runWorkspaceDir, { recursive: true });
+    } catch {
+      /* 目录创建失败由后续 fs 工具报错 */
+    }
 
     // 持久化（应用内会话历史）：确保 thread 存在。本轮消息延迟到成功结束才落库——
     // 用户取消时整轮（用户消息 + 部分助手输出 + 工具往返）一律不计入历史/上下文。
@@ -504,11 +510,11 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         modelId: parsed.data.model,
         text: userText,
         cwd: runWorkspaceDir,
-        // 工作区模式：有项目工作目录 → 启用 bash/edit/write + 按项目审批档位。
-        // 对话模式：排除 bash，读/写经 full-auto 放行但被 escapesCwd 限定在工作区目录内。
+        // 工作区模式：按项目审批档位。对话模式：auto-edits —— 写在工作区内放行（escapesCwd 限定），
+        // bash 经审批（可产出网页/构建等 artifacts，但每条命令需用户确认）。
         workspace: isWorkspace,
         approval: runApproval,
-        approvalMode: isWorkspace ? (project?.approvalMode ?? "approve-each") : "full-auto",
+        approvalMode: isWorkspace ? (project?.approvalMode ?? "approve-each") : "auto-edits",
         signal: ac.signal,
         ...(parsed.data.sampling ? { sampling: parsed.data.sampling } : {}),
         ...(parsed.data.think !== undefined ? { think: parsed.data.think } : {}),
@@ -764,8 +770,8 @@ version: "0.1.0"
     if (parsed.data.workspaceDir && !isExistingDir(parsed.data.workspaceDir)) {
       return reply.code(400).send({ error: "invalid_dir", message: "workspaceDir 不是有效目录" });
     }
-    // 未指定目录 → 在默认工作区下自动新建 NewProject{N} 子目录（每个工作区一个独立目录）。
-    const workspaceDir = parsed.data.workspaceDir?.trim() || nextNewProjectDir();
+    // 未指定目录 → 解析默认工作区下的 NewProject{N} 路径（不预建目录，真正聊天时才落盘）。
+    const workspaceDir = parsed.data.workspaceDir?.trim() || nextNewProjectDir(repo);
     const name = parsed.data.name?.trim() || fsPath.basename(workspaceDir);
     return repo.createProject({ ...parsed.data, name, workspaceDir });
   });
@@ -796,7 +802,10 @@ version: "0.1.0"
     const { id } = req.params as { id: string };
     const q = req.query as { path?: string; depth?: string };
     try {
-      return { entries: listDir(projectRoot(id), q.path ?? ".", q.depth ? Number(q.depth) : 1) };
+      const root = projectRoot(id);
+      // 工作区目录尚未落盘创建（首次聊天前）→ 视为空，不报错。
+      if (!isExistingDir(root)) return { entries: [] };
+      return { entries: listDir(root, q.path ?? ".", q.depth ? Number(q.depth) : 1) };
     } catch (e) {
       return reply.code(400).send({ error: "fs_error", message: e instanceof Error ? e.message : String(e) });
     }
@@ -1019,14 +1028,28 @@ version: "0.1.0"
 }
 
 /** 目录是否存在且为目录。 */
-/** 默认工作区下下一个可用的 NewProject{N} 目录（自动创建并返回绝对路径）。 */
-function nextNewProjectDir(): string {
+/**
+ * 默认工作区下下一个可用的 NewProject{N} 路径（仅计算，不创建目录——真正聊天时才落盘）。
+ * 避重需同时看已有项目记录与磁盘目录：未聊天的项目目录尚不存在，仅靠 fs 会重号。
+ */
+function nextNewProjectDir(repo: SqliteConversationRepo): string {
   const root = defaultWorkspaceDir();
+  const used = new Set<number>();
+  for (const p of repo.listProjects()) {
+    const m = p.workspaceDir ? /(?:^|[\\/])NewProject(\d+)$/.exec(p.workspaceDir) : null;
+    if (m) used.add(Number(m[1]));
+  }
+  try {
+    for (const e of fs.readdirSync(root)) {
+      const m = /^NewProject(\d+)$/.exec(e);
+      if (m) used.add(Number(m[1]));
+    }
+  } catch {
+    /* root 可能尚不存在 */
+  }
   let n = 1;
-  while (isExistingDir(fsPath.join(root, `NewProject${n}`))) n++;
-  const dir = fsPath.join(root, `NewProject${n}`);
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  while (used.has(n)) n++;
+  return fsPath.join(root, `NewProject${n}`);
 }
 
 function isExistingDir(p: string): boolean {

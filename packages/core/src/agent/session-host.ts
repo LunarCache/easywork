@@ -27,9 +27,6 @@ import {
   type RunRuntime,
 } from "./ew-extensions.js";
 
-/** 聊天模式收窄：仅排除 bash（任意 shell 无法做路径沙箱）。读/写经 escapesCwd 限定在工作区内。 */
-const CHAT_EXCLUDED_TOOLS = ["bash"];
-
 /** 宿主依赖（从 daemon 注入）。 */
 export interface SessionHostDeps {
   local: LocalServerManager;
@@ -266,8 +263,9 @@ export class SessionHost {
     if (this.deps.memory) {
       factories.push(memoryExtensionFactory({ threadId, modelId, memory: this.deps.memory, runtime }));
     }
-    // 权限/路径限定扩展：始终装载——escapesCwd 硬隔离让 read/edit/write 都不能逃出 cwd（工作区）。
-    // 工作区模式按项目审批档位；对话模式由调用方传 full-auto（写在工作区内放行，越界仍被 escapesCwd 拒）。
+    // 权限/路径限定扩展：始终装载——escapesCwd 硬隔离让 read/edit/write 都不能逃出 cwd（工作区）；
+    // bash 是任意 shell 无法按路径沙箱，经审批把守。工作区模式按项目档位；对话模式由调用方传 auto-edits
+    //（工作区内写放行、bash 需审批）。
     factories.push(permissionExtensionFactory(runtime, cwd));
     const resourceLoader = new DefaultResourceLoader({
       cwd,
@@ -292,8 +290,8 @@ export class SessionHost {
       cwd,
       agentDir: this.agentDir,
       resourceLoader,
-      // R4：聊天模式收窄——排除 bash/edit/write（仅留读类 + EasyWork customTools）。
-      ...(workspace ? {} : { excludeTools: CHAT_EXCLUDED_TOOLS }),
+      // 聊天/工作区均提供完整 pi 编码工具（read/bash/edit/write/grep/ls/find）+ EasyWork customTools；
+      // 安全由权限扩展统一把守：escapesCwd 限定 fs 路径，bash 经审批（对话模式 auto-edits）。
       ...(customTools.length ? { customTools } : {}),
     });
     // 采样参数注入：pi 不在 createAgentSession 暴露采样，包装 agent.streamFn 读取 runtime.sampling
