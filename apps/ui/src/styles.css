@@ -452,7 +452,8 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 /* ================================================================
    聊天
    ================================================================ */
-.chat { display: flex; flex-direction: column; height: 100%; }
+.chat-wrap { flex: 1; position: relative; display: flex; min-height: 0; min-width: 0; overflow: hidden; }
+.chat { flex: 1; display: flex; flex-direction: column; height: 100%; min-width: 0; }
 .bar { padding: 13px 24px; display: flex; align-items: center; gap: 9px; }
 .mdot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .mdot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15); }
@@ -899,6 +900,29 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
 .rev-commit button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .fv-btn { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: transparent; color: var(--muted); }
 .fv-btn:hover { background: var(--surface-3); color: var(--accent); }
+
+/* 对话模式右侧「工件」面板（复用 .ws-review 的滑入观感） */
+.chat-files { position: absolute; top: 0; right: 0; height: 100%; width: min(46%, 560px); border-left: 1px solid var(--border-strong); background: var(--surface-2); display: flex; flex-direction: column; min-height: 0; transform: translateX(100%); transition: transform var(--ease) 0.22s; box-shadow: -10px 0 28px rgba(0,0,0,0.18); z-index: 20; }
+.chat-files.open { transform: none; }
+.af-file { border-top: 1px solid var(--border); }
+.af-file:first-child { border-top: 0; }
+.af-file-head { display: flex; align-items: center; gap: 7px; padding: 7px 12px; cursor: pointer; font-size: 13px; }
+.af-file-head:hover { background: var(--surface-3); }
+.af-file-head.open { background: var(--surface-3); }
+.af-file-head .chev { color: var(--muted); transition: transform var(--ease) 0.15s; flex: none; }
+.af-file-head .chev.open { transform: rotate(90deg); }
+.af-file-head > svg { color: var(--muted); flex: none; }
+.af-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; }
+.af-size { font-family: var(--font-mono); font-size: 11px; color: var(--muted); flex: none; }
+.af-body { border-top: 1px solid var(--border); background: var(--surface); }
+.af-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.af-seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+.af-seg button { font-size: 11px; padding: 3px 11px; background: var(--surface); color: var(--muted); border: 0; }
+.af-seg button.on { background: var(--accent-soft); color: var(--accent); }
+.af-code { margin: 0; max-height: 420px; overflow: auto; padding: 10px 12px; font-family: var(--font-mono); font-size: 12px; line-height: 1.55; white-space: pre; color: var(--text); }
+.af-frame { width: 100%; height: 420px; border: 0; background: #fff; display: block; }
+.af-loading, .af-bin, .af-trunc { padding: 12px; font-size: 12px; color: var(--muted); }
+.af-trunc { border-top: 1px solid var(--border); }
 
 /* exec 卡 */
 .execcard { margin: 6px 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }

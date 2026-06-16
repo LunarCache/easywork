@@ -305,6 +305,26 @@ export class EasyWorkClient {
     return this.getJSON(`/workspace/${encodeURIComponent(projectId)}/fs/read?${q}`);
   }
 
+  /** 列出对话会话产出的工件文件（每会话目录 <workspace>/chats/<threadId>）。 */
+  async chatFiles(threadId: string, path = ".", depth = 4): Promise<WsEntry[]> {
+    const q = new URLSearchParams({ path, depth: String(depth) });
+    return (
+      await this.getJSON<{ entries: WsEntry[] }>(`/chat/${encodeURIComponent(threadId)}/files?${q}`)
+    ).entries;
+  }
+
+  /** 读取对话会话工件文件（只读预览）。 */
+  async chatFile(
+    threadId: string,
+    path: string,
+    range?: { start?: number; end?: number },
+  ): Promise<{ content?: string; binary?: boolean; truncated?: boolean; size: number }> {
+    const q = new URLSearchParams({ path });
+    if (range?.start) q.set("start", String(range.start));
+    if (range?.end) q.set("end", String(range.end));
+    return this.getJSON(`/chat/${encodeURIComponent(threadId)}/file?${q}`);
+  }
+
   // ---- 工作区 git ----
   private wsGit(projectId: string): string {
     return `/workspace/${encodeURIComponent(projectId)}/git`;

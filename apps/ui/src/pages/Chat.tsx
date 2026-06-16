@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { ChatMessage } from "@ew/shared";
+import type { WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import {
   applyAgentEvent,
@@ -32,14 +33,35 @@ import {
   ChevronIcon,
   CodeIcon,
   CopyIcon,
+  FileCodeIcon,
+  FileIcon,
   GlobeIcon,
   MicIcon,
   PlusBtnIcon,
+  RefreshIcon,
   SlidersIcon,
   StopIcon,
   ThinkIcon,
   WrenchIcon,
 } from "../icons.js";
+
+interface FilePreview {
+  content?: string;
+  binary?: boolean;
+  truncated?: boolean;
+  size: number;
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|json|css|scss|html?|md|py|rs|go|java|c|h|cpp|sh|yml|yaml|toml|xml|sql)$/i;
+function fileIconFor(p: string) {
+  return CODE_EXT.test(p) ? <FileCodeIcon size={14} /> : <FileIcon size={14} />;
+}
 
 function fmtK(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
@@ -191,6 +213,10 @@ export function Chat({
   );
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [images, setImages] = useState<UiImage[]>([]);
+  // 右侧「工件」面板：本会话目录下产出的文件（fs 工具写入 / 命令生成的网页/构建物）。
+  const [files, setFiles] = useState<WsEntry[]>([]);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const autoOpenedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -198,6 +224,31 @@ export function Chat({
 
   // 卸载（切换会话会因 key 重挂载）时中断在途的 agent 流。
   useEffect(() => () => abortRef.current?.abort(), []);
+
+  const refreshFiles = useCallback(async () => {
+    if (DEMO) return;
+    try {
+      setFiles((await getClient().chatFiles(threadId)).filter((e) => e.type === "file"));
+    } catch {
+      setFiles([]);
+    }
+  }, [threadId]);
+
+  // 切换会话：重置面板，拉取该会话已有工件。
+  useEffect(() => {
+    autoOpenedRef.current = false;
+    setFilesOpen(false);
+    setFiles([]);
+    void refreshFiles();
+  }, [refreshFiles]);
+
+  // 本会话首次出现工件时，自动展开面板一次（之后由用户手动开关）。
+  useEffect(() => {
+    if (files.length > 0 && !autoOpenedRef.current) {
+      autoOpenedRef.current = true;
+      setFilesOpen(true);
+    }
+  }, [files]);
 
   const onPickImages = async (files: FileList | null) => {
     if (!files) return;
@@ -333,6 +384,7 @@ export function Chat({
     const agentPrefs = loadAgentPrefs();
     const ac = new AbortController();
     abortRef.current = ac;
+    const FS_TOOLS = new Set(["fs_write", "fs_edit", "run_command"]);
     try {
       for await (const ev of getClient().runAgent(
         {
@@ -353,9 +405,13 @@ export function Chat({
           setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });
         else if (ev.type === "final") apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
         else if (ev.type === "error") apply((m) => ({ ...m, raw: `${m.raw}\n\n[错误] ${ev.message}` }));
-        else apply((m) => applyAgentEvent(m, ev));
+        else if (ev.type === "tool-end") {
+          apply((m) => applyAgentEvent(m, ev));
+          if (FS_TOOLS.has(ev.call.name)) void refreshFiles(); // 文件类工具完成即刷新工件面板
+        } else apply((m) => applyAgentEvent(m, ev));
       }
       onSaved();
+      void refreshFiles();
     } catch (e) {
       if (!ac.signal.aborted)
         apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
@@ -388,7 +444,8 @@ export function Chat({
   };
 
   return (
-    <div className="chat">
+    <div className="chat-wrap">
+      <div className="chat">
       <header className="bar">
         <span className={`mdot ${model ? "on" : ""}`} />
         <select className="model-select" value={model} onChange={(e) => setModel(e.target.value)}>
@@ -469,6 +526,14 @@ export function Chat({
               ↑{usage.promptTokens} ↓{usage.completionTokens}
             </span>
           ))}
+        <button
+          className={`ws-review-toggle ${filesOpen ? "on" : ""}`}
+          onClick={() => setFilesOpen((v) => !v)}
+          title="本会话产出的文件 / 工件"
+        >
+          <FileCodeIcon size={14} /> 工件
+          {files.length > 0 && <span className="rev-count">{files.length}</span>}
+        </button>
       </header>
       <div className="messages" ref={scrollRef}>
         {msgs.length === 0 && (
@@ -674,6 +739,140 @@ export function Chat({
         </div>
         <div className="composer-note">本地 AI 也可能出错，请自行核实重要信息。</div>
       </footer>
+      </div>
+      <ArtifactsPanel
+        threadId={threadId}
+        files={files}
+        open={filesOpen}
+        onClose={() => setFilesOpen(false)}
+        onRefresh={refreshFiles}
+      />
+    </div>
+  );
+}
+
+/** 右侧「工件」面板：列出本会话目录下产出的文件，点击预览（文本/代码内联，HTML 可切换网页预览）。 */
+function ArtifactsPanel({
+  threadId,
+  files,
+  open,
+  onClose,
+  onRefresh,
+}: {
+  threadId: string;
+  files: WsEntry[];
+  open: boolean;
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+}) {
+  const [sel, setSel] = useState<string | null>(null);
+  const [data, setData] = useState<FilePreview | null>(null);
+  const [mode, setMode] = useState<"code" | "preview">("code");
+
+  // 选中的文件在刷新后消失（被删/改名）→ 收起预览。
+  useEffect(() => {
+    if (sel && !files.some((f) => f.path === sel)) {
+      setSel(null);
+      setData(null);
+    }
+  }, [files, sel]);
+
+  const openFile = async (p: string) => {
+    if (sel === p) {
+      setSel(null);
+      setData(null);
+      return;
+    }
+    setSel(p);
+    setData(null);
+    setMode(/\.html?$/i.test(p) ? "preview" : "code");
+    try {
+      setData(await getClient().chatFile(threadId, p));
+    } catch {
+      setData({ size: 0 });
+    }
+  };
+
+  return (
+    <aside className={`chat-files ${open ? "open" : ""}`}>
+      <div className="rev-head">
+        <FileCodeIcon size={15} />
+        <span>工件</span>
+        {files.length > 0 && <span className="rev-count">{files.length}</span>}
+        <span className="bar-spacer" />
+        <button className="fv-btn" title="刷新" onClick={() => void onRefresh()}>
+          <RefreshIcon size={13} />
+        </button>
+        <button className="fv-btn" title="关闭" onClick={onClose}>
+          ✕
+        </button>
+      </div>
+      <div className="rev-scroll">
+        {files.length === 0 && (
+          <div className="rev-empty">
+            本会话还没有产出文件。让 AI 写文件、或运行命令生成网页 / 构建物后，会在这里展示并可预览。
+          </div>
+        )}
+        {files.map((f) => {
+          const isOpen = sel === f.path;
+          return (
+            <div key={f.path} className="af-file">
+              <div className={`af-file-head ${isOpen ? "open" : ""}`} onClick={() => void openFile(f.path)}>
+                <ChevronIcon size={13} className={`chev ${isOpen ? "open" : ""}`} />
+                {fileIconFor(f.path)}
+                <span className="af-path" title={f.path}>
+                  {f.path}
+                </span>
+                <span className="af-size">{fmtBytes(f.size ?? 0)}</span>
+              </div>
+              {isOpen && <FilePreviewView path={f.path} data={data} mode={mode} setMode={setMode} />}
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
+function FilePreviewView({
+  path,
+  data,
+  mode,
+  setMode,
+}: {
+  path: string;
+  data: FilePreview | null;
+  mode: "code" | "preview";
+  setMode: (m: "code" | "preview") => void;
+}) {
+  if (!data) return <div className="af-loading">加载中…</div>;
+  if (data.binary) return <div className="af-bin">二进制文件，无法预览 · {fmtBytes(data.size)}</div>;
+  const content = data.content ?? "";
+  const isHtml = /\.html?$/i.test(path);
+  return (
+    <div className="af-body">
+      <div className="af-toolbar">
+        {isHtml && (
+          <div className="af-seg">
+            <button className={mode === "preview" ? "on" : ""} onClick={() => setMode("preview")}>
+              预览
+            </button>
+            <button className={mode === "code" ? "on" : ""} onClick={() => setMode("code")}>
+              源码
+            </button>
+          </div>
+        )}
+        <span className="bar-spacer" />
+        <CopyButton text={content} />
+      </div>
+      {isHtml && mode === "preview" ? (
+        <iframe className="af-frame" sandbox="allow-scripts" title={path} srcDoc={content} />
+      ) : (
+        <pre className="af-code">
+          <code>{content || "（空文件）"}</code>
+        </pre>
+      )}
+      {data.truncated && <div className="af-trunc">内容较大，已截断显示。</div>}
     </div>
   );
 }

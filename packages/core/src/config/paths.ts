@@ -31,6 +31,16 @@ export function defaultWorkspaceDir(): string {
   return dir;
 }
 
+/**
+ * 对话模式的「每会话」工件目录：<workspace>/chats/<threadId>。
+ * 让每条聊天会话的产出（文件/网页/构建物）相互隔离，便于右侧工件面板按会话展示。
+ * 仅计算路径、不创建目录（首次写入时由 /agent/run 懒建）；threadId 经清洗防路径穿越。
+ */
+export function chatWorkspaceDir(threadId: string): string {
+  const safe = threadId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80) || "default";
+  return path.join(defaultWorkspaceDir(), "chats", safe);
+}
+
 export function dbPath(): string {
   return path.join(dataDir(), "easywork.db");
 }

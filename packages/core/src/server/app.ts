@@ -44,6 +44,7 @@ import {
   memoryDir as defaultMemoryDir,
   modelsDir as defaultModelsDir,
   defaultWorkspaceDir,
+  chatWorkspaceDir,
 } from "../config/paths.js";
 
 export interface CoreServer {
@@ -454,8 +455,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     const projectId = parsed.data.projectId ?? repo.getThread(threadId)?.projectId ?? undefined;
     const project = projectId ? repo.getProject(projectId) : null;
     const isWorkspace = !!project?.workspaceDir;
-    // 对话模式 cwd = 默认工作区（~/.easywork/workspace），不是数据目录根；fs 工具读写均限定在此目录内。
-    const runWorkspaceDir = project?.workspaceDir ?? defaultWorkspaceDir();
+    // 对话模式 cwd = 每会话工件目录（~/.easywork/workspace/chats/<threadId>），与其他会话隔离；
+    // fs 工具读写均限定在此目录内，右侧「工件」面板按此目录展示本会话产出。
+    const runWorkspaceDir = project?.workspaceDir ?? chatWorkspaceDir(threadId);
     // 工作区目录「真正聊天时」才落盘创建（新建工作区时不预建空目录）。
     try {
       fs.mkdirSync(runWorkspaceDir, { recursive: true });
@@ -827,6 +829,32 @@ version: "0.1.0"
     if (!q.path) return reply.code(400).send({ error: "path_required" });
     try {
       return readFileSafe(projectRoot(id), q.path, {
+        ...(q.start ? { start: Number(q.start) } : {}),
+        ...(q.end ? { end: Number(q.end) } : {}),
+      });
+    } catch (e) {
+      return reply.code(400).send({ error: "fs_error", message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // 对话模式工件浏览（只读）：每会话目录 <workspace>/chats/<threadId>，供右侧「工件」面板按会话展示产出。
+  app.get("/chat/:threadId/files", async (req, reply) => {
+    const { threadId } = req.params as { threadId: string };
+    const q = req.query as { path?: string; depth?: string };
+    try {
+      const root = chatWorkspaceDir(threadId);
+      if (!isExistingDir(root)) return { entries: [] }; // 尚未产出任何文件 → 空
+      return { entries: listDir(root, q.path ?? ".", q.depth ? Number(q.depth) : 4) };
+    } catch (e) {
+      return reply.code(400).send({ error: "fs_error", message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+  app.get("/chat/:threadId/file", async (req, reply) => {
+    const { threadId } = req.params as { threadId: string };
+    const q = req.query as { path?: string; start?: string; end?: string };
+    if (!q.path) return reply.code(400).send({ error: "path_required" });
+    try {
+      return readFileSafe(chatWorkspaceDir(threadId), q.path, {
         ...(q.start ? { start: Number(q.start) } : {}),
         ...(q.end ? { end: Number(q.end) } : {}),
       });
