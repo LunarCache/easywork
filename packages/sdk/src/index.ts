@@ -451,6 +451,15 @@ export class EasyWorkClient {
     });
   }
 
+  /** 清空某作用域的全部记忆（如某工作区私有池）。返回删除条数。 */
+  async clearMemoryScope(scope: string): Promise<{ removed: number }> {
+    const res = await this.fetchImpl(`${this.baseUrl}/memory/scope/${encodeURIComponent(scope)}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    return (await res.json()) as { removed: number };
+  }
+
   /** 列出记忆条目（可按作用域/层过滤）。 */
   async listMemory(
     opts: { scope?: string; layer?: string } = {},

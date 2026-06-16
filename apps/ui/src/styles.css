@@ -810,6 +810,8 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
 .mcp-del:hover { background: var(--color-danger-soft); color: var(--err); }
 
 /* 记忆页 */
+.mem-clear { margin-left: auto; background: var(--surface) !important; color: var(--err) !important; border: 1px solid var(--border-strong) !important; box-shadow: none !important; }
+.mem-clear:hover:not(:disabled) { background: var(--color-danger-soft) !important; border-color: var(--err) !important; }
 .mem-scopes { display: flex; flex-wrap: wrap; gap: 8px; }
 .mem-scope { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 10px; font-size: 13px; background: var(--surface); border: 1px solid var(--border-strong); color: var(--text-2); }
 .mem-scope:hover { border-color: var(--color-border-focus); }

@@ -991,6 +991,12 @@ version: "0.1.0"
     await memory.delete((req.params as { id: string }).id);
     return { ok: true };
   });
+  // 清空某作用域整池（如某工作区的私有记忆）。scope 经 encodeURIComponent 传入（含 ws: 前缀的冒号）。
+  app.delete("/memory/scope/:scope", async (req, reply) => {
+    const scope = (req.params as { scope: string }).scope;
+    if (!scope) return reply.code(400).send({ error: "scope_required" });
+    return { removed: await memory.deleteByScope(scope) };
+  });
 
   // 召回（调试/检视；带相关度分数）。
   app.get("/memory/recall", async (req, reply) => {

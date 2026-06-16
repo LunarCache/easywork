@@ -118,6 +118,25 @@ export function Memory() {
     await refresh();
   };
 
+  const clearScope = async () => {
+    if (!isWorkspace) return;
+    if (
+      !confirm(
+        `清空工作区「${scopeName}」的全部记忆？\n\n` +
+          `此操作不可撤销，仅清空该工程的私有记忆池（约定/变动/坑），` +
+          `不影响全局记忆与其他工作区，也不会删除工作区目录中的任何文件。`,
+      )
+    )
+      return;
+    try {
+      const { removed } = await getClient().clearMemoryScope(scope);
+      setNote(`已清空「${scopeName}」记忆池：删除 ${removed} 条。`);
+      await refresh();
+    } catch (e) {
+      setNote(`清空失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   const scopeName = isWorkspace ? (projects.find((p) => `ws:${p.id}` === scope)?.name ?? "工作区") : "全局/对话";
 
   return (
@@ -232,6 +251,11 @@ export function Memory() {
                 : "全局 markdown 文件可直接编辑，daemon 监听后自动回灌。"}
             </p>
           </div>
+          {isWorkspace && (
+            <button className="btn-sm mem-clear" onClick={() => void clearScope()} title="清空本工作区的私有记忆池">
+              <TrashIcon size={13} /> 清空本工作区记忆
+            </button>
+          )}
         </div>
         <div className="mem-layers">
           {layerDefs.map((l) => (
