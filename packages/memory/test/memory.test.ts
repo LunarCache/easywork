@@ -2,12 +2,22 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import {
   LocalMemoryProvider,
   type Embedder,
   type ExtractedFact,
   type FactExtractor,
 } from "../src/index.js";
+
+/** 解析 sqlite-vec 扩展路径（未安装/平台无二进制 → undefined，相关用例跳过）。 */
+function vecPath(): string | undefined {
+  try {
+    return (createRequire(import.meta.url)("sqlite-vec") as { getLoadablePath(): string }).getLoadablePath();
+  } catch {
+    return undefined;
+  }
+}
 
 let dir: string | undefined;
 function freshDir(): string {
@@ -180,6 +190,46 @@ describe("LocalMemoryProvider", () => {
 
     // 4) 无变化 → 幂等 false
     expect(await m.syncFromMarkdown("user-profile")).toBe(false);
+    m.close();
+  });
+
+  it("deleteBySession：删除某会话抽取的事实，保留全局/手工事实", async () => {
+    const extract: FactExtractor = async () => [
+      { layer: "user-profile", text: "用户在做记忆系统" },
+      { layer: "agent-memory", text: "部署在 fly.io" },
+    ];
+    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:", extract });
+    // 手工 / 模型主动写入（无 sessionId）—— 不应被会话删除影响。
+    await m.write({ layer: "user-profile", text: "用户偏好中文" });
+    // 被动抽取（带来源 sessionId=s1）。
+    await m.observe({ messages: [{ role: "user", content: "我在做记忆系统，跑在 fly.io" }], sessionId: "s1", model: "x" });
+
+    expect(await m.list()).toHaveLength(3);
+    const fromS1 = (await m.list({ sessionId: "s1" })).map((i) => i.text);
+    expect(fromS1).toHaveLength(2);
+    expect(new Set(fromS1)).toEqual(new Set(["部署在 fly.io", "用户在做记忆系统"]));
+
+    const removed = await m.deleteBySession("s1");
+    expect(removed).toBe(2);
+    expect((await m.list()).map((i) => i.text)).toEqual(["用户偏好中文"]);
+    // markdown 镜像同步：被删层文件不再含抽取的事实。
+    expect(await m.deleteBySession("s1")).toBe(0); // 幂等
+    m.close();
+  });
+
+  it("sqlite-vec 向量索引：语义召回 + 删除同步（扩展可用时）", async () => {
+    const vp = vecPath();
+    if (!vp) return; // 扩展不可用 → 跳过（回退 brute-force 已由上面用例覆盖）
+    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:", embed, vecExtensionPath: vp });
+    const cat = await m.write({ layer: "user-profile", text: "I have a cat named Mimi" });
+    await m.write({ layer: "user-profile", text: "Today's weather is sunny" });
+    const hits = await m.recall({ query: "tell me about my cat", topK: 1, minScore: 0.1 });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.text).toContain("cat");
+    // 删除后 vec 索引同步：再召回不应返回已删条目。
+    await m.delete(cat.id);
+    const after = await m.recall({ query: "tell me about my cat", topK: 1, minScore: 0.1 });
+    expect(after.find((h) => h.text.includes("cat"))).toBeUndefined();
     m.close();
   });
 });

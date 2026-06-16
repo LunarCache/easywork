@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import fsPath from "node:path";
 import os from "node:os";
+import { createRequire } from "node:module";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   ChatMessageSchema,
@@ -14,8 +15,6 @@ import {
   type AgentEvent,
   type DownloadEvent,
   type McpServerConfig,
-  type MemoryLayer,
-  type MemoryProvider,
 } from "@ew/shared";
 import { LlamaServerEngine } from "@ew/providers";
 import { builtinTools } from "@ew/tools";
@@ -131,12 +130,15 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       });
     },
   });
+  const vecExtensionPath = resolveVecExtensionPath();
   const memory = new LocalMemoryProvider({
     dir: opts.memoryDir ?? defaultMemoryDir(),
     dbPath: opts.memoryDbPath ?? `${defaultDataDir()}/memory.db`,
     embed: (texts) => embeddings.embed(texts),
     // 轮后用当轮对话模型抽取持久事实写入全局层（复用已加载模型）。
     extract: buildFactExtractor({ resolveEngine: (m) => registry.resolve(m) }),
+    // sqlite-vec 可加载扩展（可选）：加速向量召回；缺失/平台不支持则自动回退 brute-force。
+    ...(vecExtensionPath ? { vecExtensionPath } : {}),
   });
   // markdown 为真相源：监听用户手工编辑并回灌索引（内存库/测试不监听）。
   const stopMemWatch =
@@ -758,7 +760,8 @@ version: "0.1.0"
     const id = (req.params as { id: string }).id;
     repo.deleteThread(id); // 删 SQLite 会话 + 消息 + FTS
     sessionHost.dispose(id); // 彻底删除：丢弃进程内 pi 会话上下文 + 落盘 session 文件，防同名线程复活旧上下文
-    return { ok: true };
+    const facts = await memory.deleteBySession(id).catch(() => 0); // 一并清除该对话抽取出的记忆事实
+    return { ok: true, factsRemoved: facts };
   });
 
   // ---- 工作区项目（Project = 本地目录 + 审批策略） ----
@@ -796,10 +799,11 @@ version: "0.1.0"
   });
   app.delete("/projects/:id", async (req) => {
     const id = (req.params as { id: string }).id;
-    // 删除工作区时，连同其下会话一并彻底删除（消息 + pi 会话上下文/落盘文件），不留孤儿会话。
+    // 删除工作区时，连同其下会话一并彻底删除（消息 + pi 会话上下文/落盘文件 + 抽取的记忆事实），不留孤儿会话。
     for (const t of repo.listThreads({ projectId: id })) {
       repo.deleteThread(t.id);
       sessionHost.dispose(t.id);
+      await memory.deleteBySession(t.id).catch(() => 0);
     }
     repo.deleteProject(id);
     return { ok: true };
@@ -1091,6 +1095,18 @@ function nextNewProjectDir(repo: SqliteConversationRepo): string {
   return fsPath.join(root, `NewProject${n}`);
 }
 
+/** 解析 sqlite-vec 可加载扩展路径（可选依赖）。未安装/平台无预编译二进制时返回 undefined → 召回回退 brute-force。 */
+function resolveVecExtensionPath(): string | undefined {
+  if (process.env.EW_DISABLE_SQLITE_VEC === "1") return undefined;
+  try {
+    const req = createRequire(import.meta.url);
+    const sv = req("sqlite-vec") as { getLoadablePath?: () => string };
+    return sv.getLoadablePath?.();
+  } catch {
+    return undefined;
+  }
+}
+
 function isExistingDir(p: string): boolean {
   try {
     return fs.statSync(p).isDirectory();
@@ -1109,19 +1125,5 @@ function lanIPv4(): string | undefined {
   return undefined;
 }
 
-/** 构造全局记忆的冻结快照系统块（参考 Hermes）：会话期固定，置顶注入。全空则返回 ""。 */
-export async function buildMemorySnapshot(memory: MemoryProvider): Promise<string> {
-  const layers: { layer: MemoryLayer; title: string }[] = [
-    { layer: "user-profile", title: "用户画像" },
-    { layer: "agent-memory", title: "长期记忆" },
-    { layer: "skills", title: "技能/流程" },
-  ];
-  const blocks: string[] = [];
-  for (const { layer, title } of layers) {
-    const items = await memory.list({ layer });
-    if (items.length === 0) continue;
-    blocks.push(`## ${title}\n${items.map((i) => `- ${i.text}`).join("\n")}`);
-  }
-  if (blocks.length === 0) return "";
-  return `以下是你的持久记忆（本次会话期间固定；需变更请用 manage_memory 工具）：\n\n${blocks.join("\n\n")}`;
-}
+// 冻结快照构造已下沉到 agent/ew-extensions.ts（运行时在记忆扩展里注入）。此处再导出供测试/外部复用。
+export { buildMemorySnapshot } from "../agent/ew-extensions.js";

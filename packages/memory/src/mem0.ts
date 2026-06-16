@@ -68,6 +68,11 @@ export class Mem0MemoryProvider implements MemoryProvider {
     /* 略 */
   }
 
+  async deleteBySession(): Promise<number> {
+    /* Mem0 以 user_id 分区；按会话清除待接入真实账号时补全。 */
+    return 0;
+  }
+
   async observe(input: { messages: unknown[]; sessionId: string }): Promise<void> {
     await this.fetchImpl(`${this.baseUrl}/v1/memories/`, {
       method: "POST",

@@ -42,6 +42,12 @@ export interface MemoryProvider {
   list(filter?: { layer?: MemoryLayer; sessionId?: string }): Promise<MemoryItem[]>;
   delete(id: string): Promise<void>;
   /**
+   * 删除某会话抽取出的记忆事实（被动抽取写入时带 sessionId）。返回删除条数。
+   * 删除对话时调用——抽取的事实随来源对话一并清除；模型主动 manage_memory / 手工添加的
+   * 全局事实（无 sessionId）不受影响。
+   */
+  deleteBySession(sessionId: string): Promise<number>;
+  /**
    * 轮后抽取钩子：摘要 + 抽取持久事实，写入对应分层。
    * model 为当轮对话所用模型 id（已加载），实现可复用它做 LLM 事实抽取。
    */

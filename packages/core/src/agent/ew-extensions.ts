@@ -22,6 +22,7 @@ import type {
   SamplingParams,
   MemoryProvider,
   MemoryItem,
+  MemoryLayer,
   ContentPart,
   ConversationRepo,
 } from "@ew/shared";
@@ -33,6 +34,28 @@ import { makeSearchKnowledgeBaseTool } from "../rag/tool.js";
 
 /** 注入记忆块的前缀标记（用于在 context 钩子里识别并跳过本扩展自己注入的消息）。 */
 const RECALL_MARKER = "【相关记忆】";
+/** 冻结快照前缀标记（会话期固定的全量持久记忆，置顶注入）。 */
+const SNAPSHOT_MARKER = "【持久记忆】";
+
+/**
+ * 构造冻结记忆快照（参考 Hermes）：会话开始时把全量持久记忆（user-profile/agent-memory/skills）
+ * 拍平为一段文本，会话期固定置顶注入；与「动态召回」（每轮按相关度检索）互补。空则返回 ""。
+ */
+export async function buildMemorySnapshot(memory: MemoryProvider): Promise<string> {
+  const layers: { layer: MemoryLayer; title: string }[] = [
+    { layer: "user-profile", title: "用户画像" },
+    { layer: "agent-memory", title: "长期记忆" },
+    { layer: "skills", title: "技能/流程" },
+  ];
+  const blocks: string[] = [];
+  for (const { layer, title } of layers) {
+    const items = await memory.list({ layer });
+    if (items.length === 0) continue;
+    blocks.push(`## ${title}\n${items.map((i) => `- ${i.text}`).join("\n")}`);
+  }
+  if (blocks.length === 0) return "";
+  return `${SNAPSHOT_MARKER}（本次会话期间固定；需变更请用 manage_memory 工具）：\n\n${blocks.join("\n\n")}`;
+}
 
 /** 桥接工具默认自动批准：MCP/KB/记忆无需 EW 审批；pi 自带工具的审批由 pi 自身负责。 */
 const autoApprove: ApprovalGate = { request: async () => "approve" };
@@ -91,7 +114,7 @@ export async function buildEwCustomTools(opts: {
   return tools.map((t) => toPiTool(t, base));
 }
 
-/** 记忆扩展工厂：context 注入召回（每轮请求前）+ agent_end 被动事实抽取。 */
+/** 记忆扩展工厂：context 注入冻结快照（会话期固定）+ 动态召回（每轮）+ agent_end 被动事实抽取。 */
 export function memoryExtensionFactory(opts: {
   threadId: string;
   modelId: string;
@@ -99,19 +122,27 @@ export function memoryExtensionFactory(opts: {
   /** 召回缓存挂在 run 运行时上，由宿主每轮重置（避免同 query 跨轮复用陈旧召回）。 */
   runtime: RunRuntime;
 }): ExtensionFactory {
-  return (pi: ExtensionAPI) => {
+    // 冻结快照：会话内计算一次并缓存（首个 context 事件触发）；之后每轮置顶注入同一段文本。
+    // 与 RunRuntime.recall（每轮按相关度动态检索）不同，快照在会话期固定。
+    let snapshot: string | null = null;
+    return (pi: ExtensionAPI) => {
     pi.on("context", async (event: ContextEvent) => {
-      const query = lastUserText(event.messages);
-      if (!query) return;
       const rt = opts.runtime;
-      // 工具循环里同一 query 复用本轮召回，避免反复 embedding；run() 开始已清空。
-      if (!rt.recall || rt.recall.key !== query) {
+      if (snapshot === null) {
+        snapshot = await buildMemorySnapshot(opts.memory).catch(() => "");
+      }
+      const query = lastUserText(event.messages);
+      // 动态召回：有用户输入才查；同 query 在工具循环里复用本轮缓存（run() 开始已清空）。
+      if (query && (!rt.recall || rt.recall.key !== query)) {
         const items = await opts.memory.recall({ query, topK: 6, minScore: 0.3 }).catch(() => [] as MemoryItem[]);
         rt.recall = { key: query, block: items.length ? formatRecall(items) : "" };
       }
-      if (!rt.recall.block) return;
-      const injected = { role: "user" as const, content: rt.recall.block, timestamp: Date.now() };
-      return { messages: [injected, ...event.messages] };
+      const recallBlock = query ? rt.recall?.block : "";
+      const inject: { role: "user"; content: string; timestamp: number }[] = [];
+      if (snapshot) inject.push({ role: "user", content: snapshot, timestamp: Date.now() });
+      if (recallBlock) inject.push({ role: "user", content: recallBlock, timestamp: Date.now() });
+      if (inject.length === 0) return;
+      return { messages: [...inject, ...event.messages] };
     });
     pi.on("agent_end", (event: AgentEndEvent) => {
       // 用户取消的这一轮「不计入上下文」：也不据此抽取记忆事实。
@@ -119,7 +150,7 @@ export function memoryExtensionFactory(opts: {
       const messages = event.messages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role, content: contentText(m.content as string | ContentPart[]) }))
-        .filter((m) => !m.content.startsWith(RECALL_MARKER));
+        .filter((m) => !m.content.startsWith(RECALL_MARKER) && !m.content.startsWith(SNAPSHOT_MARKER));
       // 后台抽取事实：不 await——否则 pi 会等它跑完才让 run 收尾，SSE 迟迟不关。
       // 抽取是 best-effort，放到后台跑。
       void opts.memory
@@ -241,7 +272,7 @@ function lastUserText(messages: ContextEvent["messages"]): string {
     const m = messages[i];
     if (m?.role !== "user") continue;
     const t = contentText(m.content as string | ContentPart[]);
-    if (t.startsWith(RECALL_MARKER)) continue;
+    if (t.startsWith(RECALL_MARKER) || t.startsWith(SNAPSHOT_MARKER)) continue;
     if (t.trim()) return t;
   }
   return "";

@@ -138,7 +138,7 @@ export function Workspace({
   };
   const deleteConversation = async () => {
     const title = threads.find((t) => t.id === threadId)?.title || "当前对话";
-    if (!confirm(`删除对话「${title}」？此操作不可撤销（仅删会话记录，不动工作区文件）。`)) return;
+    if (!confirm(`删除对话「${title}」？此操作不可撤销（删会话记录及其抽取的记忆事实，不动工作区文件）。`)) return;
     abortRef.current?.abort();
     setApproval(null);
     try {

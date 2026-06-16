@@ -33,6 +33,9 @@
     "typebox": "1.1.38",
     "zod": "^3.24.1"
   },
+  "optionalDependencies": {
+    "sqlite-vec": "^0.1.9"
+  },
   "devDependencies": {
     "@ew/sdk": "*",
     "tsup": "^8.3.5",

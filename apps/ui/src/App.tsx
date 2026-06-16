@@ -102,7 +102,7 @@ export function App() {
     const name = p?.name ?? "该工作区";
     const ok = confirm(
       `删除工作区「${name}」？\n\n` +
-        `仅删除本软件内的会话历史（含其下全部对话），不会删除工作区目录中的任何文件：\n` +
+        `仅删除本软件内的会话历史（含其下全部对话及由其抽取的记忆事实），不会删除工作区目录中的任何文件：\n` +
         `${p?.workspaceDir ?? ""}`,
     );
     if (!ok) return;
@@ -153,7 +153,7 @@ export function App() {
   const delThread = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const t = threads.find((x) => x.id === id);
-    if (!confirm(`删除对话「${t?.title || "新会话"}」？此操作不可撤销（仅删除会话记录）。`)) return;
+    if (!confirm(`删除对话「${t?.title || "新会话"}」？此操作不可撤销（删除会话记录及由其抽取的记忆事实）。`)) return;
     await getClient().deleteThread(id);
     if (id === threadId) newChat();
     void refreshThreads();

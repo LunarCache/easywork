@@ -50,6 +50,12 @@ export interface LocalMemoryOptions {
   embed?: Embedder;
   /** 可选 LLM 事实抽取器；提供则 observe 额外抽取持久事实写入全局层。 */
   extract?: FactExtractor;
+  /**
+   * 可选 sqlite-vec 可加载扩展（.dylib/.so/.dll）路径。提供且加载成功时，语义召回走
+   * sqlite-vec 的向量索引（cosine KNN）；缺失/加载失败/平台不支持则静默回退到 JS 余弦
+   * brute-force（embedding blob 仍是真相源，行为不变）。
+   */
+  vecExtensionPath?: string;
 }
 
 const LAYER_FILE: Record<MemoryLayer, string> = {
@@ -59,6 +65,7 @@ const LAYER_FILE: Record<MemoryLayer, string> = {
 };
 
 interface Row {
+  rowid?: number | bigint;
   id: string;
   layer: MemoryLayer;
   session_id: string | null;
@@ -78,6 +85,10 @@ export class LocalMemoryProvider implements MemoryProvider {
   private readonly dir: string;
   private readonly embed?: Embedder;
   private readonly extract?: FactExtractor;
+  /** sqlite-vec 扩展是否已加载（加速向量召回）。 */
+  private vecReady = false;
+  /** 当前 vec0 表的维度（0 = 尚未建表）。embedding 模型维度变化时重建。 */
+  private vecDim = 0;
 
   constructor(opts: LocalMemoryOptions) {
     this.dir = opts.dir;
@@ -85,7 +96,9 @@ export class LocalMemoryProvider implements MemoryProvider {
     if (opts.extract) this.extract = opts.extract;
     fs.mkdirSync(opts.dir, { recursive: true });
     if (opts.dbPath !== ":memory:") fs.mkdirSync(path.dirname(opts.dbPath), { recursive: true });
-    this.db = new DatabaseSync(opts.dbPath);
+    this.db = opts.vecExtensionPath
+      ? new DatabaseSync(opts.dbPath, { allowExtension: true })
+      : new DatabaseSync(opts.dbPath);
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS memory_items (
@@ -99,7 +112,97 @@ export class LocalMemoryProvider implements MemoryProvider {
       );
       CREATE INDEX IF NOT EXISTS idx_mem_layer ON memory_items(layer);
       CREATE INDEX IF NOT EXISTS idx_mem_session ON memory_items(session_id);
+      CREATE TABLE IF NOT EXISTS memory_meta (key TEXT PRIMARY KEY, value TEXT);
     `);
+    if (opts.vecExtensionPath) this.loadVec(opts.vecExtensionPath);
+  }
+
+  /** 加载 sqlite-vec 扩展；失败则保持 vecReady=false（回退 brute-force）。 */
+  private loadVec(extPath: string): void {
+    try {
+      this.db.enableLoadExtension(true);
+      this.db.loadExtension(extPath);
+      this.vecReady = true;
+      const row = this.db.prepare(`SELECT value FROM memory_meta WHERE key='vec_dim'`).get() as
+        | { value?: string }
+        | undefined;
+      if (row?.value) this.vecDim = Number(row.value) || 0;
+    } catch {
+      this.vecReady = false;
+    } finally {
+      try {
+        this.db.enableLoadExtension(false);
+      } catch {
+        /* 关闭扩展加载失败无害 */
+      }
+    }
+  }
+
+  private tableExists(name: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM sqlite_master WHERE name = ?`).get(name);
+  }
+
+  /** 按维度（重）建 vec0 表并从 embedding blob 回填。维度不变且已存在则直接复用。 */
+  private ensureVecTable(dim: number): boolean {
+    if (!this.vecReady || dim <= 0) return false;
+    if (this.vecDim === dim && this.tableExists("vec_items")) return true;
+    try {
+      this.db.exec(`DROP TABLE IF EXISTS vec_items;`);
+      this.db.exec(`CREATE VIRTUAL TABLE vec_items USING vec0(embedding float[${dim}] distance_metric=cosine);`);
+      this.vecDim = dim;
+      this.db
+        .prepare(`INSERT INTO memory_meta(key,value) VALUES('vec_dim',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
+        .run(String(dim));
+      const rows = this.db
+        .prepare(`SELECT rowid, embedding FROM memory_items WHERE embedding IS NOT NULL`)
+        .all() as unknown as { rowid: number | bigint; embedding: Buffer }[];
+      const ins = this.db.prepare(`INSERT INTO vec_items(rowid, embedding) VALUES(?, ?)`);
+      for (const r of rows) {
+        if (r.embedding.byteLength / 4 === dim) ins.run(BigInt(r.rowid), r.embedding);
+      }
+      return true;
+    } catch {
+      this.vecReady = false; // 建表/回填失败 → 彻底退回 brute-force
+      return false;
+    }
+  }
+
+  /** 同步一条记忆的向量到 vec0 索引（buf=null 表示删除）。失败不影响主流程。 */
+  private vecSet(rowid: number | bigint | undefined, buf: Buffer | null): void {
+    if (!this.vecReady || rowid == null) return;
+    const id = BigInt(rowid);
+    try {
+      if (!buf) {
+        if (this.tableExists("vec_items")) this.db.prepare(`DELETE FROM vec_items WHERE rowid = ?`).run(id);
+        return;
+      }
+      const dim = buf.byteLength / 4;
+      if (!this.ensureVecTable(dim) || dim !== this.vecDim) return;
+      this.db.prepare(`DELETE FROM vec_items WHERE rowid = ?`).run(id);
+      this.db.prepare(`INSERT INTO vec_items(rowid, embedding) VALUES(?, ?)`).run(id, buf);
+    } catch {
+      /* 加速器写入失败：blob 仍是真相，召回回退 brute-force */
+    }
+  }
+
+  /**
+   * 用 sqlite-vec 取候选的 cosine 相似度（rowid → 相似度）。不可用/维度不符/失败时返回 null，
+   * 调用方据此回退到 JS 余弦 brute-force。
+   */
+  private vecSemScores(queryEmb: Float32Array | null, candidateCount: number): Map<string, number> | null {
+    if (!queryEmb || !this.vecReady || this.vecDim !== queryEmb.length || !this.tableExists("vec_items")) {
+      return null;
+    }
+    try {
+      const k = Math.min(Math.max(candidateCount, 1), 4096);
+      const hits = this.db
+        .prepare(`SELECT rowid, distance FROM vec_items WHERE embedding MATCH ? AND k = ${k}`)
+        .all(Buffer.from(queryEmb.buffer)) as unknown as { rowid: number | bigint; distance: number }[];
+      // distance_metric=cosine → distance = 1 - cosine 相似度
+      return new Map(hits.map((h) => [String(h.rowid), 1 - Number(h.distance)]));
+    } catch {
+      return null;
+    }
   }
 
   private toItem(r: Row): MemoryItem {
@@ -127,7 +230,8 @@ export class LocalMemoryProvider implements MemoryProvider {
     const id = randomUUID();
     const updatedAt = new Date().toISOString();
     const emb = await this.embedOne(item.text);
-    this.db
+    const buf = emb ? Buffer.from(emb.buffer) : null;
+    const info = this.db
       .prepare(
         `INSERT INTO memory_items (id, layer, session_id, text, embedding, updated_at, meta)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -137,26 +241,29 @@ export class LocalMemoryProvider implements MemoryProvider {
         item.layer,
         item.sessionId ?? null,
         item.text,
-        emb ? Buffer.from(emb.buffer) : null,
+        buf,
         updatedAt,
         item.meta ? JSON.stringify(item.meta) : null,
       );
+    if (buf) this.vecSet(info.lastInsertRowid, buf);
     this.regenerateMarkdown(item.layer);
     return { id, updatedAt, ...item };
   }
 
   async edit(id: string, patch: Partial<Pick<MemoryItem, "text" | "meta">>): Promise<MemoryItem> {
-    const row = this.db.prepare(`SELECT * FROM memory_items WHERE id = ?`).get(id) as unknown as
+    const row = this.db.prepare(`SELECT rowid, * FROM memory_items WHERE id = ?`).get(id) as unknown as
       | Row
       | undefined;
     if (!row) throw new Error(`memory item not found: ${id}`);
     const text = patch.text ?? row.text;
     const updatedAt = new Date().toISOString();
     const emb = patch.text ? await this.embedOne(text) : row.embedding;
+    const buf = emb instanceof Float32Array ? Buffer.from(emb.buffer) : emb;
     const meta = patch.meta !== undefined ? JSON.stringify(patch.meta) : row.meta;
     this.db
       .prepare(`UPDATE memory_items SET text = ?, embedding = ?, updated_at = ?, meta = ? WHERE id = ?`)
-      .run(text, emb instanceof Float32Array ? Buffer.from(emb.buffer) : emb, updatedAt, meta, id);
+      .run(text, buf, updatedAt, meta, id);
+    if (patch.text) this.vecSet(row.rowid, buf); // 文本变了才会重嵌 → 同步向量
     this.regenerateMarkdown(row.layer);
     return this.toItem({ ...row, text, updated_at: updatedAt, meta });
   }
@@ -180,11 +287,26 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   async delete(id: string): Promise<void> {
-    const row = this.db.prepare(`SELECT layer, session_id FROM memory_items WHERE id = ?`).get(id) as unknown as
-      | { layer: MemoryLayer; session_id: string | null }
+    const row = this.db.prepare(`SELECT rowid, layer FROM memory_items WHERE id = ?`).get(id) as unknown as
+      | { rowid: number | bigint; layer: MemoryLayer }
       | undefined;
     this.db.prepare(`DELETE FROM memory_items WHERE id = ?`).run(id);
-    if (row) this.regenerateMarkdown(row.layer);
+    if (row) {
+      this.vecSet(row.rowid, null);
+      this.regenerateMarkdown(row.layer);
+    }
+  }
+
+  /** 删除某会话被动抽取写入的记忆事实（带 session_id 的条目）。返回删除条数。 */
+  async deleteBySession(sessionId: string): Promise<number> {
+    const rows = this.db
+      .prepare(`SELECT rowid, layer FROM memory_items WHERE session_id = ?`)
+      .all(sessionId) as unknown as { rowid: number | bigint; layer: MemoryLayer }[];
+    if (rows.length === 0) return 0;
+    this.db.prepare(`DELETE FROM memory_items WHERE session_id = ?`).run(sessionId);
+    for (const r of rows) this.vecSet(r.rowid, null);
+    for (const layer of new Set(rows.map((r) => r.layer))) this.regenerateMarkdown(layer);
+    return rows.length;
   }
 
   async recall(q: RecallQuery): Promise<MemoryItem[]> {
@@ -195,27 +317,34 @@ export class LocalMemoryProvider implements MemoryProvider {
     if (q.layers?.length) {
       const placeholders = q.layers.map(() => "?").join(",");
       rows = this.db
-        .prepare(`SELECT * FROM memory_items WHERE layer IN (${placeholders})`)
+        .prepare(`SELECT rowid, * FROM memory_items WHERE layer IN (${placeholders})`)
         .all(...q.layers) as unknown as Row[];
     } else {
       rows = this.db
-        .prepare(`SELECT * FROM memory_items WHERE layer IN ('user-profile','agent-memory','skills')`)
+        .prepare(`SELECT rowid, * FROM memory_items WHERE layer IN ('user-profile','agent-memory','skills')`)
         .all() as unknown as Row[];
     }
 
     const queryEmb = await this.embedOne(q.query);
+    // 语义分来源优先 sqlite-vec（cosine KNN，距离=1-相似度）；k 取候选总数（小规模即精确，
+    // 与 brute-force 一致），超大库（>4096）退为近似 top-k。失败/不可用则用 JS 余弦兜底。
+    const semByRowid = this.vecSemScores(queryEmb, rows.length);
+
     // 混合召回（参考 Hermes：语义 + 词法融合）：两者皆可用时加权，否则退化为词法。
     const scored = rows.map((r) => {
       const lex = lexicalScore(q.query, r.text);
       let score: number;
-      if (queryEmb && r.embedding) {
+      const semFromVec = semByRowid?.get(String(r.rowid));
+      if (semFromVec != null) {
+        score = 0.75 * semFromVec + 0.25 * lex;
+      } else if (!semByRowid && queryEmb && r.embedding) {
         const sem = cosine(
           queryEmb,
           new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4),
         );
         score = 0.75 * sem + 0.25 * lex;
       } else {
-        score = lex;
+        score = lex; // 无 embedding（或不在近似 top-k）→ 仅词法
       }
       return { item: { ...this.toItem(r), score }, score };
     });
@@ -233,7 +362,8 @@ export class LocalMemoryProvider implements MemoryProvider {
   async reindex(opts: { force?: boolean; batch?: number } = {}): Promise<number> {
     if (!this.embed) return 0;
     const where = opts.force ? "" : "WHERE embedding IS NULL";
-    const rows = this.db.prepare(`SELECT id, text FROM memory_items ${where}`).all() as unknown as {
+    const rows = this.db.prepare(`SELECT rowid, id, text FROM memory_items ${where}`).all() as unknown as {
+      rowid: number | bigint;
       id: string;
       text: string;
     }[];
@@ -251,7 +381,9 @@ export class LocalMemoryProvider implements MemoryProvider {
       slice.forEach((r, j) => {
         const v = vectors[j];
         if (v) {
-          update.run(Buffer.from(Float32Array.from(v).buffer), r.id);
+          const buf = Buffer.from(Float32Array.from(v).buffer);
+          update.run(buf, r.id);
+          this.vecSet(r.rowid, buf);
           done++;
         }
       });
@@ -266,12 +398,13 @@ export class LocalMemoryProvider implements MemoryProvider {
   async observe(input: { messages: unknown[]; sessionId: string; model?: string }): Promise<void> {
     if (!this.extract) return;
     const msgs = input.messages as { role: string; content: unknown }[];
-    await this.extractFacts(msgs, input.model);
+    await this.extractFacts(msgs, input.sessionId, input.model);
   }
 
-  /** LLM 抽取持久事实并去重写入全局层（失败不影响主流程）。 */
+  /** LLM 抽取持久事实并去重写入全局层（带来源 sessionId，便于删除对话时一并清除；失败不影响主流程）。 */
   private async extractFacts(
     messages: { role: string; content: unknown }[],
+    sessionId: string,
     model?: string,
   ): Promise<void> {
     if (!this.extract) return;
@@ -286,7 +419,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         const text = f.text.trim();
         if (!text || !GLOBAL_FACT_LAYERS.includes(f.layer)) continue;
         if (this.isDuplicateFact(f.layer, text, existing)) continue;
-        await this.write({ layer: f.layer, text });
+        await this.write({ layer: f.layer, text, sessionId }); // 带来源会话 → 删对话时可一并清除
         existing.push({ layer: f.layer, text }); // 同批内也去重
       }
     } catch {
@@ -345,7 +478,7 @@ export class LocalMemoryProvider implements MemoryProvider {
     }
     const entries = parseLayerMarkdown(content);
     const rows = this.db
-      .prepare(`SELECT * FROM memory_items WHERE layer = ? ORDER BY updated_at`)
+      .prepare(`SELECT rowid, * FROM memory_items WHERE layer = ? ORDER BY updated_at`)
       .all(layer) as unknown as Row[];
     const byId = new Map(rows.map((r) => [r.id, r]));
     const seenIds = new Set<string>();
@@ -358,20 +491,24 @@ export class LocalMemoryProvider implements MemoryProvider {
         const row = byId.get(e.id)!;
         if (row.text !== e.text) {
           const emb = await this.embedOne(e.text);
+          const buf = emb ? Buffer.from(emb.buffer) : null;
           this.db
             .prepare(`UPDATE memory_items SET text = ?, embedding = ?, updated_at = ? WHERE id = ?`)
-            .run(e.text, emb ? Buffer.from(emb.buffer) : null, now, e.id);
+            .run(e.text, buf, now, e.id);
+          this.vecSet(row.rowid, buf);
           changed = true;
         }
       } else if (e.text.trim()) {
         // 新行（用户手工添加，无 id）
         const id = randomUUID();
         const emb = await this.embedOne(e.text);
-        this.db
+        const buf = emb ? Buffer.from(emb.buffer) : null;
+        const info = this.db
           .prepare(
             `INSERT INTO memory_items (id, layer, session_id, text, embedding, updated_at, meta) VALUES (?, ?, ?, ?, ?, ?, NULL)`,
           )
-          .run(id, layer, null, e.text, emb ? Buffer.from(emb.buffer) : null, now);
+          .run(id, layer, null, e.text, buf, now);
+        if (buf) this.vecSet(info.lastInsertRowid, buf);
         changed = true;
       }
     }
@@ -379,6 +516,7 @@ export class LocalMemoryProvider implements MemoryProvider {
     for (const r of rows) {
       if (!seenIds.has(r.id)) {
         this.db.prepare(`DELETE FROM memory_items WHERE id = ?`).run(r.id);
+        this.vecSet(r.rowid, null);
         changed = true;
       }
     }
