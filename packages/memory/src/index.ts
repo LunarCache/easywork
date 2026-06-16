@@ -8,3 +8,4 @@ export {
 } from "./local.js";
 export { Mem0MemoryProvider, type Mem0Options } from "./mem0.js";
 export { cosine, lexicalScore } from "./cosine.js";
+export { SqliteVecIndex, type VecRepopulate } from "./vec-index.js";

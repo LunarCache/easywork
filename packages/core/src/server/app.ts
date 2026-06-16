@@ -144,10 +144,11 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   const stopMemWatch =
     (opts.memoryDbPath ?? "") === ":memory:" ? () => {} : memory.startWatching();
 
-  // 文档知识库 RAG：分块 + 嵌入 + 混合检索；非空时暴露 search_knowledge_base 工具。
+  // 文档知识库 RAG：分块 + 嵌入 + 混合检索（语义走 sqlite-vec，与记忆一致）；非空时暴露 search_knowledge_base 工具。
   const kb = new KnowledgeBaseStore({
     dbPath: opts.kbDbPath ?? `${defaultDataDir()}/kb.db`,
     embed: (texts) => embeddings.embed(texts),
+    ...(vecExtensionPath ? { vecExtensionPath } : {}),
   });
   // search_knowledge_base 工具按请求所选集合注入（见 /agent/run），不再全局常驻。
 

@@ -11,6 +11,7 @@ import type {
   RecallQuery,
 } from "@ew/shared";
 import { lexicalScore } from "./cosine.js";
+import { SqliteVecIndex } from "./vec-index.js";
 
 // node:sqlite 通过 createRequire 运行时加载（避免打包器静态解析这个较新的内置模块）。
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof NodeSqlite;
@@ -85,10 +86,8 @@ export class LocalMemoryProvider implements MemoryProvider {
   private readonly dir: string;
   private readonly embed?: Embedder;
   private readonly extract?: FactExtractor;
-  /** sqlite-vec 扩展是否已加载（加速向量召回）。 */
-  private vecReady = false;
-  /** 当前 vec0 表的维度（0 = 尚未建表）。embedding 模型维度变化时重建。 */
-  private vecDim = 0;
+  /** sqlite-vec 向量索引（语义召回唯一引擎）；未提供扩展路径时为 undefined → 纯词法。 */
+  private readonly vec?: SqliteVecIndex;
 
   constructor(opts: LocalMemoryOptions) {
     this.dir = opts.dir;
@@ -112,97 +111,23 @@ export class LocalMemoryProvider implements MemoryProvider {
       );
       CREATE INDEX IF NOT EXISTS idx_mem_layer ON memory_items(layer);
       CREATE INDEX IF NOT EXISTS idx_mem_session ON memory_items(session_id);
-      CREATE TABLE IF NOT EXISTS memory_meta (key TEXT PRIMARY KEY, value TEXT);
     `);
-    if (opts.vecExtensionPath) this.loadVec(opts.vecExtensionPath);
-  }
-
-  /** 加载 sqlite-vec 扩展；失败则保持 vecReady=false（回退 brute-force）。 */
-  private loadVec(extPath: string): void {
-    try {
-      this.db.enableLoadExtension(true);
-      this.db.loadExtension(extPath);
-      this.vecReady = true;
-      const row = this.db.prepare(`SELECT value FROM memory_meta WHERE key='vec_dim'`).get() as
-        | { value?: string }
-        | undefined;
-      if (row?.value) this.vecDim = Number(row.value) || 0;
-    } catch {
-      this.vecReady = false;
-    } finally {
-      try {
-        this.db.enableLoadExtension(false);
-      } catch {
-        /* 关闭扩展加载失败无害 */
-      }
+    if (opts.vecExtensionPath) {
+      this.vec = new SqliteVecIndex(this.db, "vec_items");
+      this.vec.load(opts.vecExtensionPath); // 失败抛出：sqlite-vec 是必备依赖
     }
   }
 
-  private tableExists(name: string): boolean {
-    return !!this.db.prepare(`SELECT 1 FROM sqlite_master WHERE name = ?`).get(name);
-  }
+  /** 回填源：把 memory_items 里所有 embedding blob 喂回 vec 索引（维度变化重建时用）。 */
+  private repopulateVec = (add: (rowid: number | bigint, buf: Buffer) => void): void => {
+    const rows = this.db
+      .prepare(`SELECT rowid, embedding FROM memory_items WHERE embedding IS NOT NULL`)
+      .all() as unknown as { rowid: number | bigint; embedding: Buffer }[];
+    for (const r of rows) add(r.rowid, r.embedding);
+  };
 
-  /** 按维度（重）建 vec0 表并从 embedding blob 回填。维度不变且已存在则直接复用。 */
-  private ensureVecTable(dim: number): boolean {
-    if (!this.vecReady || dim <= 0) return false;
-    if (this.vecDim === dim && this.tableExists("vec_items")) return true;
-    try {
-      this.db.exec(`DROP TABLE IF EXISTS vec_items;`);
-      this.db.exec(`CREATE VIRTUAL TABLE vec_items USING vec0(embedding float[${dim}] distance_metric=cosine);`);
-      this.vecDim = dim;
-      this.db
-        .prepare(`INSERT INTO memory_meta(key,value) VALUES('vec_dim',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
-        .run(String(dim));
-      const rows = this.db
-        .prepare(`SELECT rowid, embedding FROM memory_items WHERE embedding IS NOT NULL`)
-        .all() as unknown as { rowid: number | bigint; embedding: Buffer }[];
-      const ins = this.db.prepare(`INSERT INTO vec_items(rowid, embedding) VALUES(?, ?)`);
-      for (const r of rows) {
-        if (r.embedding.byteLength / 4 === dim) ins.run(BigInt(r.rowid), r.embedding);
-      }
-      return true;
-    } catch {
-      this.vecReady = false; // 建表/回填失败 → 彻底退回 brute-force
-      return false;
-    }
-  }
-
-  /** 同步一条记忆的向量到 vec0 索引（buf=null 表示删除）。失败不影响主流程。 */
   private vecSet(rowid: number | bigint | undefined, buf: Buffer | null): void {
-    if (!this.vecReady || rowid == null) return;
-    const id = BigInt(rowid);
-    try {
-      if (!buf) {
-        if (this.tableExists("vec_items")) this.db.prepare(`DELETE FROM vec_items WHERE rowid = ?`).run(id);
-        return;
-      }
-      const dim = buf.byteLength / 4;
-      if (!this.ensureVecTable(dim) || dim !== this.vecDim) return;
-      this.db.prepare(`DELETE FROM vec_items WHERE rowid = ?`).run(id);
-      this.db.prepare(`INSERT INTO vec_items(rowid, embedding) VALUES(?, ?)`).run(id, buf);
-    } catch {
-      /* 加速器写入失败：blob 仍是真相，召回回退 brute-force */
-    }
-  }
-
-  /**
-   * 用 sqlite-vec 取候选的 cosine 相似度（rowid → 相似度）。不可用/维度不符/失败时返回 null，
-   * 调用方据此回退到 JS 余弦 brute-force。
-   */
-  private vecSemScores(queryEmb: Float32Array | null, candidateCount: number): Map<string, number> | null {
-    if (!queryEmb || !this.vecReady || this.vecDim !== queryEmb.length || !this.tableExists("vec_items")) {
-      return null;
-    }
-    try {
-      const k = Math.min(Math.max(candidateCount, 1), 4096);
-      const hits = this.db
-        .prepare(`SELECT rowid, distance FROM vec_items WHERE embedding MATCH ? AND k = ${k}`)
-        .all(Buffer.from(queryEmb.buffer)) as unknown as { rowid: number | bigint; distance: number }[];
-      // distance_metric=cosine → distance = 1 - cosine 相似度
-      return new Map(hits.map((h) => [String(h.rowid), 1 - Number(h.distance)]));
-    } catch {
-      return null;
-    }
+    this.vec?.set(rowid, buf, this.repopulateVec);
   }
 
   private toItem(r: Row): MemoryItem {
@@ -326,9 +251,9 @@ export class LocalMemoryProvider implements MemoryProvider {
     }
 
     const queryEmb = await this.embedOne(q.query);
-    // 语义分一律走 sqlite-vec（cosine KNN，距离=1-相似度）；k 取候选总数（小规模即精确），
-    // 超大库（>4096）退为近似 top-k。无 embedding 模型 / 扩展未就绪 → 纯词法（不再有 JS 余弦兜底）。
-    const semByRowid = this.vecSemScores(queryEmb, rows.length);
+    // 语义分一律走 sqlite-vec（cosine KNN，距离=1-相似度）。无 embedding 模型 → queryEmb 为 null
+    // → 纯词法（不再有 JS 余弦兜底）。
+    const semByRowid = queryEmb ? (this.vec?.knn(queryEmb) ?? null) : null;
 
     // 混合召回（参考 Hermes：语义 ⊕ 词法）：有语义分则加权融合，否则退化为纯词法。
     const scored = rows.map((r) => {

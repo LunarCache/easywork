@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import type * as NodeSqlite from "node:sqlite";
+import { SqliteVecIndex } from "@ew/memory";
 import { chunkText } from "./chunking.js";
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof NodeSqlite;
@@ -27,6 +28,7 @@ export interface RagHit {
 }
 
 interface ChunkRow {
+  rowid?: number | bigint;
   id: string;
   kb_id: string;
   doc_id: string;
@@ -34,19 +36,6 @@ interface ChunkRow {
   chunk_index: number;
   text: string;
   embedding: Buffer | null;
-}
-
-function cosine(a: Float32Array, b: Float32Array): number {
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i++) {
-    dot += a[i]! * b[i]!;
-    na += a[i]! * a[i]!;
-    nb += b[i]! * b[i]!;
-  }
-  return na && nb ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
 }
 
 function lexicalScore(query: string, text: string): number {
@@ -60,16 +49,19 @@ function lexicalScore(query: string, text: string): number {
 
 /**
  * 文档知识库：分块 + 嵌入 + 混合检索（RRF 倒数排名融合，参考 Unsloth rag/retrieval.py）。
- * embedding 缺省时降级为纯词法。向量用 JS 余弦 brute-force（与记忆一致；规模够用）。
+ * 语义分走 sqlite-vec（与记忆一致，已移除 JS 余弦 brute-force）；embedding 缺省/扩展无二进制时降级为纯词法。
  */
 export class KnowledgeBaseStore {
   private readonly db: SqliteDB;
   private readonly embed?: Embedder;
+  private readonly vec?: SqliteVecIndex;
 
-  constructor(opts: { dbPath: string; embed?: Embedder }) {
+  constructor(opts: { dbPath: string; embed?: Embedder; vecExtensionPath?: string }) {
     if (opts.dbPath !== ":memory:") fs.mkdirSync(path.dirname(opts.dbPath), { recursive: true });
     if (opts.embed) this.embed = opts.embed;
-    this.db = new DatabaseSync(opts.dbPath);
+    this.db = opts.vecExtensionPath
+      ? new DatabaseSync(opts.dbPath, { allowExtension: true })
+      : new DatabaseSync(opts.dbPath);
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS kb_docs (
@@ -87,7 +79,19 @@ export class KnowledgeBaseStore {
       CREATE INDEX IF NOT EXISTS idx_kbchunk_kb ON kb_chunks(kb_id);
       CREATE INDEX IF NOT EXISTS idx_kbchunk_doc ON kb_chunks(doc_id);
     `);
+    if (opts.vecExtensionPath) {
+      this.vec = new SqliteVecIndex(this.db, "kb_vec");
+      this.vec.load(opts.vecExtensionPath); // 失败抛出：sqlite-vec 是必备依赖
+    }
   }
+
+  /** 回填源：把 kb_chunks 里所有 embedding blob 喂回 vec 索引（维度变化重建时用）。 */
+  private repopulateVec = (add: (rowid: number | bigint, buf: Buffer) => void): void => {
+    const rows = this.db
+      .prepare(`SELECT rowid, embedding FROM kb_chunks WHERE embedding IS NOT NULL`)
+      .all() as unknown as { rowid: number | bigint; embedding: Buffer }[];
+    for (const r of rows) add(r.rowid, r.embedding);
+  };
 
   private async embedOne(text: string): Promise<Float32Array | null> {
     if (!this.embed) return null;
@@ -134,7 +138,8 @@ export class KnowledgeBaseStore {
     chunks.forEach((c, i) => {
       const v = vectors[i];
       const emb = v ? Buffer.from(Float32Array.from(v).buffer) : null;
-      insert.run(randomUUID(), kbId, docId, opts.source, c.index, c.text, emb);
+      const info = insert.run(randomUUID(), kbId, docId, opts.source, c.index, c.text, emb);
+      if (emb) this.vec?.set(info.lastInsertRowid, emb, this.repopulateVec);
     });
     this.db
       .prepare(`INSERT INTO kb_docs (id, kb_id, source, created_at) VALUES (?, ?, ?, ?)`)
@@ -169,6 +174,12 @@ export class KnowledgeBaseStore {
   }
 
   deleteDoc(docId: string): void {
+    if (this.vec) {
+      const rows = this.db
+        .prepare(`SELECT rowid FROM kb_chunks WHERE doc_id = ?`)
+        .all(docId) as unknown as { rowid: number | bigint }[];
+      for (const r of rows) this.vec.set(r.rowid, null);
+    }
     this.db.prepare(`DELETE FROM kb_chunks WHERE doc_id = ?`).run(docId);
     this.db.prepare(`DELETE FROM kb_docs WHERE id = ?`).run(docId);
   }
@@ -183,25 +194,25 @@ export class KnowledgeBaseStore {
     return r.n;
   }
 
-  /** 混合检索：dense（cosine）+ lexical，RRF 融合。kbId 省略=跨全部集合。无 embedding 时退化为纯词法。 */
+  /** 混合检索：dense（sqlite-vec cosine）+ lexical，RRF 融合。kbId 省略=跨全部集合。无 embedding 时退化为纯词法。 */
   async retrieve(query: string, opts: { kbId?: string; topK?: number; minScore?: number } = {}): Promise<RagHit[]> {
     const topK = opts.topK ?? 4;
     const rows = (
       opts.kbId
-        ? this.db.prepare(`SELECT * FROM kb_chunks WHERE kb_id = ?`).all(opts.kbId)
-        : this.db.prepare(`SELECT * FROM kb_chunks`).all()
+        ? this.db.prepare(`SELECT rowid, * FROM kb_chunks WHERE kb_id = ?`).all(opts.kbId)
+        : this.db.prepare(`SELECT rowid, * FROM kb_chunks`).all()
     ) as unknown as ChunkRow[];
     if (rows.length === 0) return [];
 
     const queryEmb = await this.embedOne(query);
+    // 语义分一律走 sqlite-vec（全库 KNN，再按本集合 rowid 取分）；无 embedding → 纯词法。
+    const semByRowid = queryEmb ? (this.vec?.knn(queryEmb) ?? null) : null;
     const dense: { i: number; s: number }[] = [];
     const lex: { i: number; s: number }[] = [];
     rows.forEach((r, i) => {
       lex.push({ i, s: lexicalScore(query, r.text) });
-      if (queryEmb && r.embedding) {
-        const v = new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4);
-        dense.push({ i, s: cosine(queryEmb, v) });
-      }
+      const sem = semByRowid?.get(String(r.rowid));
+      if (sem != null) dense.push({ i, s: sem });
     });
 
     // RRF 融合：score = Σ 1/(k + rank)。k=60（常用）。

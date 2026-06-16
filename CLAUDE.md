@@ -61,7 +61,7 @@ resources/        图标、默认 skills、模型 catalog
 - **HTTP**：Fastify（schema-first、原生 SSE）
 - **契约/校验**：zod + zod-to-json-schema（一份 schema → TS 类型 + 函数调用 JSON Schema）
 - **本地 DB**：`node:sqlite`（Node 内置 DatabaseSync，**零原生编译**，Node 26 可用；规避 better-sqlite3 在新 ABI 上编译失败的 #1 打包风险）
-- **记忆向量召回**：本地 CPU embedding（参考 Hermes，默认 **nomic-embed-text** 768 维，经 `llama-server --embedding` 运行）+ **混合召回**（语义 cosine ⊕ 词法，0.75/0.25 加权）。语义分**一律走 sqlite-vec**（`vec0` 虚拟表，`distance_metric=cosine`，经 `node:sqlite` `loadExtension`；rowid 须传 `BigInt`）——**JS 余弦 brute-force 已移除**。`embedding` blob 仍存于 `memory_items`（durable 重建源），`vec_items` 是查询索引、随写/改/删/reindex 同步。未启用 embedding（或扩展无二进制）时降级为纯词法。**注入分两路**：会话期**冻结快照**（`buildMemorySnapshot`，全量持久记忆，记忆扩展闭包内缓存、每轮置顶注入）+ 每轮**动态召回**（按相关度 top-K）。被动抽取的事实带来源 `sessionId`，删除对话时经 `deleteBySession` 一并清除（模型 `manage_memory`/手工写入的无 sessionId 全局事实不受影响）。
+- **记忆向量召回**：本地 CPU embedding（参考 Hermes，默认 **nomic-embed-text** 768 维，经 `llama-server --embedding` 运行）+ **混合召回**（语义 cosine ⊕ 词法，0.75/0.25 加权）。语义分**一律走 sqlite-vec**（`vec0` 虚拟表，`distance_metric=cosine`，经 `node:sqlite` `loadExtension`；rowid 须传 `BigInt`）——**JS 余弦 brute-force 已移除**。记忆与**知识库 RAG 共用** `@ew/memory` 的 `SqliteVecIndex`（KB 用 `kb_vec` 表，dense 分走它、再与词法 RRF 融合）。`embedding` blob 仍存于源表（`memory_items` / `kb_chunks`，durable 重建源），vec 表是查询索引、随写/改/删/reindex 同步。未启用 embedding（或扩展无二进制）时降级为纯词法。**注入分两路**：会话期**冻结快照**（`buildMemorySnapshot`，全量持久记忆，记忆扩展闭包内缓存、每轮置顶注入）+ 每轮**动态召回**（按相关度 top-K）。被动抽取的事实带来源 `sessionId`，删除对话时经 `deleteBySession` 一并清除（模型 `manage_memory`/手工写入的无 sessionId 全局事实不受影响）。
 - **UI**：React 19 + Vite + @assistant-ui/react + @tanstack/react-router + Zustand + TanStack Query
 - **桌面**：Tauri 2（Rust 外壳 + TS 前端；sidecar 启动 Node daemon）
 - **库构建**：tsup（esbuild）

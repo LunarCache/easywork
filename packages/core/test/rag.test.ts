@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { createRequire } from "node:module";
 import { chunkText } from "../src/rag/chunking.js";
 import { KnowledgeBaseStore } from "../src/rag/store.js";
 import { ragAutoInject, formatHits } from "../src/rag/tool.js";
@@ -7,6 +8,15 @@ import { parseFile } from "../src/rag/parse.js";
 // 关键词向量：[cat, dog, weather]
 const embed = async (texts: string[]) =>
   texts.map((t) => [/cat/i.test(t) ? 1 : 0, /dog/i.test(t) ? 1 : 0, /weather/i.test(t) ? 1 : 0]);
+
+/** sqlite-vec 扩展路径（无预编译二进制 → undefined，相关用例跳过）。 */
+function vecPath(): string | undefined {
+  try {
+    return (createRequire(import.meta.url)("sqlite-vec") as { getLoadablePath(): string }).getLoadablePath();
+  } catch {
+    return undefined;
+  }
+}
 
 describe("RAG chunking", () => {
   it("按标题/段落切分并带重叠", () => {
@@ -32,12 +42,18 @@ describe("KnowledgeBaseStore", () => {
     kb.close();
   });
 
-  it("混合检索（注入 embedder）按语义召回", async () => {
-    const kb = new KnowledgeBaseStore({ dbPath: ":memory:", embed });
-    await kb.ingest({ source: "pets.md", text: "I have a cat named Mimi." });
+  it("混合检索（sqlite-vec dense + 词法 RRF）按语义召回 + 删除同步", async () => {
+    const vp = vecPath();
+    if (!vp) return; // 无预编译二进制 → 跳过（dense 语义唯一引擎）
+    const kb = new KnowledgeBaseStore({ dbPath: ":memory:", embed, vecExtensionPath: vp });
+    const pets = await kb.ingest({ source: "pets.md", text: "I have a cat named Mimi." });
     await kb.ingest({ source: "weather.md", text: "The weather is sunny today." });
-    const hits = await kb.retrieve("tell me about my cat", { topK: 1 });
+    const hits = await kb.retrieve("tell me about my cat", { topK: 1, minScore: 0.1 });
     expect(hits[0]!.source).toBe("pets.md");
+    // 删除文档后 vec 索引同步：不再命中。
+    kb.deleteDoc(pets.id);
+    const after = await kb.retrieve("tell me about my cat", { topK: 1, minScore: 0.1 });
+    expect(after.find((h) => h.source === "pets.md")).toBeUndefined();
     kb.close();
   });
 
