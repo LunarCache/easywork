@@ -257,7 +257,7 @@ export class EasyWorkClient {
   }
 
   async createProject(p: {
-    name: string;
+    name?: string;
     workspaceDir?: string;
     approvalMode?: ApprovalMode;
     instructions?: string;

@@ -80,11 +80,12 @@ export function App() {
 
   const newWorkspace = async () => {
     const dir = await pickWorkspaceDir();
-    // 未选目录 → 询问是否用默认工作区（后端在 ~/.easywork/workspace 下创建）。
-    if (!dir && !confirm("未选择目录。使用默认工作区（~/.easywork/workspace）？")) return;
-    const name = dir ? dir.split(/[/\\]/).filter(Boolean).pop() || "工作区" : "默认工作区";
+    // 未选目录 → 后端在 ~/.easywork/workspace 下自动新建 NewProject{N}（名称/目录均由后端生成）。
+    if (!dir && !confirm("未选择目录。在默认工作区下新建 NewProject？")) return;
     try {
-      const p = await getClient().createProject({ name, ...(dir ? { workspaceDir: dir } : {}) });
+      const p = dir
+        ? await getClient().createProject({ name: dir.split(/[/\\]/).filter(Boolean).pop() || "工作区", workspaceDir: dir })
+        : await getClient().createProject({});
       await refreshProjects();
       setProjectId(p.id);
       setTab("workspace");

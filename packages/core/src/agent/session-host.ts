@@ -27,8 +27,8 @@ import {
   type RunRuntime,
 } from "./ew-extensions.js";
 
-/** 聊天模式收窄：排除会改文件/执行命令的 pi 自带工具。 */
-const CHAT_EXCLUDED_TOOLS = ["bash", "edit", "write"];
+/** 聊天模式收窄：仅排除 bash（任意 shell 无法做路径沙箱）。读/写经 escapesCwd 限定在工作区内。 */
+const CHAT_EXCLUDED_TOOLS = ["bash"];
 
 /** 宿主依赖（从 daemon 注入）。 */
 export interface SessionHostDeps {
@@ -266,7 +266,9 @@ export class SessionHost {
     if (this.deps.memory) {
       factories.push(memoryExtensionFactory({ threadId, modelId, memory: this.deps.memory, runtime }));
     }
-    if (workspace) factories.push(permissionExtensionFactory(runtime, cwd));
+    // 权限/路径限定扩展：始终装载——escapesCwd 硬隔离让 read/edit/write 都不能逃出 cwd（工作区）。
+    // 工作区模式按项目审批档位；对话模式由调用方传 full-auto（写在工作区内放行，越界仍被 escapesCwd 拒）。
+    factories.push(permissionExtensionFactory(runtime, cwd));
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: this.agentDir,

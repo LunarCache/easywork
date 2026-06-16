@@ -111,7 +111,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
 
   // Agent 运行时：内置工具（时间/计算器/HTTP/web_search）由宿主桥成 pi customTools；
   // Skills 由 pi 自身发现（resourceLoader）；MCP 由宿主桥成 customTools。
-  const workspaceDir = opts.workspaceDir ?? defaultDataDir();
   const skillsDirs = opts.skillsDirs ?? [fsPath.join(defaultDataDir(), "skills")];
   const skills = new SkillManager(skillsDirs);
   const mcp = new McpClientManager();
@@ -454,7 +453,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     const threadId = parsed.data.threadId;
     const projectId = parsed.data.projectId ?? repo.getThread(threadId)?.projectId ?? undefined;
     const project = projectId ? repo.getProject(projectId) : null;
-    const runWorkspaceDir = project?.workspaceDir ?? workspaceDir;
+    const isWorkspace = !!project?.workspaceDir;
+    // 对话模式 cwd = 默认工作区（~/.easywork/workspace），不是数据目录根；fs 工具读写均限定在此目录内。
+    const runWorkspaceDir = project?.workspaceDir ?? defaultWorkspaceDir();
 
     // 持久化（应用内会话历史）：确保 thread 存在。本轮消息延迟到成功结束才落库——
     // 用户取消时整轮（用户消息 + 部分助手输出 + 工具往返）一律不计入历史/上下文。
@@ -503,10 +504,11 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         modelId: parsed.data.model,
         text: userText,
         cwd: runWorkspaceDir,
-        // 工作区模式：有项目工作目录 → 启用 bash/edit/write + 审批；否则聊天模式收窄。
-        workspace: !!project?.workspaceDir,
+        // 工作区模式：有项目工作目录 → 启用 bash/edit/write + 按项目审批档位。
+        // 对话模式：排除 bash，读/写经 full-auto 放行但被 escapesCwd 限定在工作区目录内。
+        workspace: isWorkspace,
         approval: runApproval,
-        approvalMode: project?.approvalMode ?? "approve-each",
+        approvalMode: isWorkspace ? (project?.approvalMode ?? "approve-each") : "full-auto",
         signal: ac.signal,
         ...(parsed.data.sampling ? { sampling: parsed.data.sampling } : {}),
         ...(parsed.data.think !== undefined ? { think: parsed.data.think } : {}),
@@ -748,7 +750,7 @@ version: "0.1.0"
 
   // ---- 工作区项目（Project = 本地目录 + 审批策略） ----
   const ProjectCreateSchema = z.object({
-    name: z.string().min(1),
+    name: z.string().min(1).optional(),
     workspaceDir: z.string().optional(),
     approvalMode: ApprovalModeSchema.optional(),
     instructions: z.string().optional(),
@@ -759,12 +761,13 @@ version: "0.1.0"
   app.post("/projects", async (req, reply) => {
     const parsed = ProjectCreateSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_project", detail: parsed.error.format() });
-    // 未指定目录 → 在数据目录下用专门的默认工作区目录（自动创建）。
-    const workspaceDir = parsed.data.workspaceDir?.trim() || defaultWorkspaceDir();
     if (parsed.data.workspaceDir && !isExistingDir(parsed.data.workspaceDir)) {
       return reply.code(400).send({ error: "invalid_dir", message: "workspaceDir 不是有效目录" });
     }
-    return repo.createProject({ ...parsed.data, workspaceDir });
+    // 未指定目录 → 在默认工作区下自动新建 NewProject{N} 子目录（每个工作区一个独立目录）。
+    const workspaceDir = parsed.data.workspaceDir?.trim() || nextNewProjectDir();
+    const name = parsed.data.name?.trim() || fsPath.basename(workspaceDir);
+    return repo.createProject({ ...parsed.data, name, workspaceDir });
   });
   app.patch("/projects/:id", async (req, reply) => {
     const parsed = ProjectPatchSchema.safeParse(req.body);
@@ -1016,6 +1019,16 @@ version: "0.1.0"
 }
 
 /** 目录是否存在且为目录。 */
+/** 默认工作区下下一个可用的 NewProject{N} 目录（自动创建并返回绝对路径）。 */
+function nextNewProjectDir(): string {
+  const root = defaultWorkspaceDir();
+  let n = 1;
+  while (isExistingDir(fsPath.join(root, `NewProject${n}`))) n++;
+  const dir = fsPath.join(root, `NewProject${n}`);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 function isExistingDir(p: string): boolean {
   try {
     return fs.statSync(p).isDirectory();
