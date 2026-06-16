@@ -98,6 +98,14 @@ export function App() {
 
   const delProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    const p = projects.find((x) => x.id === id);
+    const name = p?.name ?? "该工作区";
+    const ok = confirm(
+      `删除工作区「${name}」？\n\n` +
+        `仅删除本软件内的会话历史（含其下全部对话），不会删除工作区目录中的任何文件：\n` +
+        `${p?.workspaceDir ?? ""}`,
+    );
+    if (!ok) return;
     await getClient().deleteProject(id);
     setProjectId((cur) => (cur === id ? null : cur));
     void refreshProjects();
