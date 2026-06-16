@@ -152,6 +152,8 @@ export function App() {
   };
   const delThread = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    const t = threads.find((x) => x.id === id);
+    if (!confirm(`删除对话「${t?.title || "新会话"}」？此操作不可撤销（仅删除会话记录）。`)) return;
     await getClient().deleteThread(id);
     if (id === threadId) newChat();
     void refreshThreads();
