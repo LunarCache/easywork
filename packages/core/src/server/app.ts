@@ -753,7 +753,9 @@ version: "0.1.0"
     messages: repo.history((req.params as { id: string }).id),
   }));
   app.delete("/threads/:id", async (req) => {
-    repo.deleteThread((req.params as { id: string }).id);
+    const id = (req.params as { id: string }).id;
+    repo.deleteThread(id); // 删 SQLite 会话 + 消息 + FTS
+    sessionHost.dispose(id); // 彻底删除：丢弃进程内 pi 会话上下文 + 落盘 session 文件，防同名线程复活旧上下文
     return { ok: true };
   });
 

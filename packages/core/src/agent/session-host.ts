@@ -424,9 +424,22 @@ export class SessionHost {
   /** 释放某 thread 的会话。 */
   dispose(threadId: string): void {
     const s = this.sessions.get(threadId);
-    if (s) {
-      s.dispose();
-      this.sessions.delete(threadId);
+    if (!s) return;
+    // 彻底删除：先取 pi 会话落盘文件，dispose 后删掉，避免残留可恢复的对话上下文。
+    let file: string | undefined;
+    try {
+      file = s.session.sessionFile;
+    } catch {
+      /* ignore */
+    }
+    s.dispose();
+    this.sessions.delete(threadId);
+    if (file) {
+      try {
+        fs.rmSync(file, { force: true });
+      } catch {
+        /* 删除会话文件失败不致命 */
+      }
     }
   }
 
