@@ -2,6 +2,26 @@
 
 > 每完成一个里程碑更新此文件。最新在上。
 
+## 2026-06-17 — UI 重设计（Claude 设计语言）+ 思考过程持久化 + 模型页本地/云端分页
+
+### UI 重设计：Tailwind v4 token 切到 Claude 桌面端观感
+- 设计语言从 TOKENICODE 黑灰切到 **Claude 暖米白 + 黏土珊瑚**（`@theme` + `.dark`），保留明暗双主题、**移除三色主题切换**（单 accent）；空态改**衬线问候**（系统衬线栈）+ 起手式 pill；用户气泡改暖中性块（新增 `--color-text-user-msg`）。
+- 侧栏重构：顶部**分段控件「对话 | 工作区」** + 上下文动作行（新对话 / 新建工作区）+ 按模式切换的 Recents（仿 Claude 桌面端），次级页仍在 profile 弹菜单。
+- 图标统一：全站 lucide 笔画细化到 `1.75`（CSS 覆盖 SVG 属性）贴合柔和主题；`✕`/`×`/`⚠️` 文本符号统一换成 lucide `X` / `TriangleAlert`。
+- 对话：**思考 / 联网默认开启**。
+
+### 模型页：本地 / 云端 API 分页
+- 顶部分段「本地模型 | 云端 API」。本地 = 原 HF 搜索/下载 + 加载网格；**云端 = 从设置页迁入的 provider 管理并升级**：常见端点预设快填（OpenAI/OpenRouter/DeepSeek/硅基流动）+ 卡片列表 + 删除（接上一直未用的 `removeProvider`）；仅在云端 tab 按需拉取 `/providers`。
+- 设置页随之精简：去掉云端 Provider 段与三色主题，保留 外观 / Agent 循环 / 本地网络。
+
+### 思考过程（reasoning）持久化与回放
+- 之前 reasoning 只在流式时展示、不落库，切换/重载会话即消失。现以新增的 **`reasoning` ContentPart** 完整保真持久化：`ToolTurnRecorder` 按序把 reasoning 交织进每轮 parts 并经 `trailingReasoning()` 暴露收尾轮思考；`app.ts` final 消息带 reasoning part（优先 reasoning 事件，兜底剥离内联 `<think>`）；`storedToUiMsgs` 按 parts 顺序重建思考/文本块。`messageText` 仍只取 text → reasoning **不进历史回喂/会话搜索/模型上下文**；各模型侧转换器显式剔除（openai-messages 转换前 filter、pi-adapt/ew-extensions if/else 不收录）。
+- 真机 e2e（Qwen3-4B 隔离数据目录）验证：开思考问答后回读会话，reasoning part 正确持久化（逐轮 + 收尾两条路径）。
+
+### code-review 修复
+- #1：`toOpenAIContent` 转换前过滤 reasoning（杜绝 latent 的 `[reasoning]` 占位发给模型）+ 修正 `message.ts` 注释。#2：app.ts reasoning 兜底先各自 trim 再 `||`。#3：recorder 过滤对 reasoning 也 trim，不存空白思考块。#4：模型页 `/providers` 改按 tab 懒加载。
+- 结果：**199 测试全绿**（新增 reasoning 交织/trailing、openai-messages 剔除 reasoning 回归），typecheck 19/19，UI build 通过，改动文件 eslint 0；多轮 Playwright（明暗 / 分段 / 模型双 tab / 设置）+ 桌面壳实跑验证。
+
 ## 2026-06-16 — 对话工件面板 + 记忆机制重构（作用域 / 渐进式披露 / 批量抽取 / sqlite-vec）
 
 ### 对话模式右侧「工件」面板

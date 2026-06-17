@@ -10,7 +10,7 @@
 
 - **本地 / 云端模型**
   - 本地：从 HuggingFace 搜索、下载（断点续传）GGUF，经 `llama-server` 子进程运行（文本 / 视觉 / embedding）。每模型一进程，带 LRU 淘汰。
-  - 云端：单一通用 **OpenAI-兼容** provider，接 OpenAI / OpenRouter / vLLM 等。
+  - 云端：通用 **OpenAI-兼容** provider，接 OpenAI / OpenRouter / DeepSeek / vLLM 等（在「模型 → 云端 API」页管理，带常见端点预设）。
 - **Agent 内核 = pi-coding-agent（托管）**
   - 内核为托管 [`@earendil-works/pi`](https://github.com/earendil-works/pi) 的 `AgentSession`（无头嵌入）：自带编码工具（read/bash/edit/write/grep/ls/find）、自动上下文 compaction、会话管理。EasyWork 是它的宿主/集成层。
   - **真实工具审批流（4 档）**：`read-only` / `approve-each` / `auto-edits` / `full-auto`，经 pi `tool_call` 钩子映射；危险工具经 SSE 挂起，UI 弹窗「允许 / 总是允许 / 拒绝」。
@@ -25,8 +25,8 @@
 - **采样参数**：`temperature / top_p / top_k / min_p / repeat_penalty / frequency_penalty / presence_penalty / reasoning_effort`，全链路透传，**按模型**保存（聊天内快捷浮层）。
 - **多协议端点（网关）**：`/v1/chat/completions`（+stream）、`/v1/embeddings`、`/v1/models`（OpenAI 兼容）、`/v1/messages`（Anthropic 兼容）。本地模型**透传**到其 llama-server 原生端点（OpenAI + 原生 Anthropic）；云端**流式经 pi-ai**（统一鉴权，含 OAuth）。可让 Claude Code 等外部客户端直接指向。
 - **本地端口暴露**：llama-server 默认仅绑 `127.0.0.1`；可在「设置 → 本地网络」切到 `0.0.0.0` 让局域网其他服务直连（**强制设置 api-key**，未鉴权拒绝）。
-- **思维链**：`<think>` 与 gpt-oss harmony 多通道（analysis → 思考 / final → 正文）解析。
-- **桌面 UI**：聊天（流式 / 思维链 / 工具卡 / 引用 / HTML 工件 / 图片多模态 / 审批弹窗 / 右侧「工件」面板）、模型、知识库、Skills、MCP、记忆（按作用域）、设置 —— 各为独立页面。
+- **思维链**：`<think>` 与 gpt-oss harmony 多通道（analysis → 思考 / final → 正文）解析；**思考过程持久化**（作为 reasoning 片段落库），切换 / 重载会话仍可展开回放（不回喂模型）。
+- **桌面 UI**：Claude 桌面端设计语言（暖米白 + 黏土珊瑚 · 明暗双主题 · 衬线问候空态）。侧栏顶部分段「对话 / 工作区」+ 按需 Recents。聊天（流式 / 思维链 / 工具卡 / 引用 / HTML 工件 / 图片多模态 / 审批弹窗 / 右侧「工件」面板）、模型（本地 / 云端 API 分页）、知识库、Skills、MCP、记忆（按作用域）、设置 —— 各为独立页面。
 
 ---
 
@@ -105,7 +105,7 @@ apps/
 ```bash
 npm install            # 安装全部 workspace 依赖
 npm run build          # turbo 构建全部包
-npm test               # vitest（196 测试）
+npm test               # vitest（199 测试）
 npm run typecheck      # 全量类型检查
 npm run lint           # eslint
 ```
