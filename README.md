@@ -162,11 +162,30 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 
 ---
 
-## 📍 路线 / 未完成
+## 📍 开发进度
 
-- IM 连接器：Telegram 已实现；Discord / 企业微信 / 飞书规划中。
-- 命令执行：工作区模式经 pi 的 `bash` 工具执行，由审批 4 档把守（非 `full-auto` 需确认）；无独立 OS 级沙箱。
-- 持久化以 `ConversationRepo` 为真相源（未切 pi `SessionManager`）。
+### ✅ 已完成
+
+- **核心守护进程**（`@ew/core`）：Fastify HTTP + SSE，托管 pi-coding-agent 内核（`SessionHost`，按 threadId 串行化），无头可运行（`easywork serve`）。
+- **本地推理**：`llama-server` 子进程管理（文本 / 视觉 / embedding），每模型一进程 + LRU 淘汰；HF 搜索 / 断点续传下载 / GGUF 头解析。
+- **云端推理**：OpenAI 兼容 provider（OpenAI / OpenRouter / DeepSeek / vLLM …），云端流式经 pi-ai（含 OAuth）。
+- **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi。
+- **Agent 工具**：内置工具（time/calculator/http_get+SSRF/web_search）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
+- **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录 + 右侧「工件」面板。
+- **记忆（作用域化）**：全局池 + 每工作区私有池；渐进式披露注入 + 批量事实抽取；sqlite-vec ⊕ 词法混合召回；markdown 可手改回灌。
+- **知识库 RAG**：上传 → 解析 → 分块 → 嵌入 → RRF 混合检索 + 引用来源。
+- **思考过程持久化**：reasoning 落库并跨会话回放（不回喂模型）。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（Claude 暖色设计语言 · 明暗双主题）；聊天 / 模型（本地+云端 API）/ 知识库 / Skills / MCP / 记忆 / 设置 各独立页。
+- **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP 持久化）。
+
+### 🚧 待做
+
+- **IM 连接器**：Telegram 已实现；**Discord / 企业微信 / 飞书待补**（需实盘凭证联调）。
+- **桌面打包分发**：Tauri 三平台安装包 + 随附 `llama-server` / `sqlite-vec` 二进制冒烟（目前仅 `cargo check` + dev 实跑验证）。
+- **代码执行沙箱**：python / terminal 的独立 OS 级隔离（当前经 pi `bash` 工具 + 审批 4 档把守，无独立沙箱）。
+- **密钥存储**：provider / MCP key 现存 SQLite `settings`，待迁 OS keychain（keytar / Tauri stronghold）。
+- **工作区 v2**：多会话回放、接受 / 拒绝单改动、push/pull、提交历史、内嵌可编辑编辑器。
+- **持久化真相源**：仍以 `ConversationRepo` 为准（未切 pi `SessionManager`）。
 - 个人微信无官方机器人 API → 仅做企业微信。
 
 进展详见 [`docs/PROGRESS.md`](docs/PROGRESS.md)，约定与架构详见 [`CLAUDE.md`](CLAUDE.md)。
