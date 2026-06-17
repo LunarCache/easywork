@@ -2,7 +2,8 @@ import { normalizeContent, type ChatMessage, type ContentPart, type ToolDefiniti
 
 /** ContentPart[] → OpenAI content（string 或 多模态数组）。 */
 function toOpenAIContent(content: ChatMessage["content"]): unknown {
-  const parts = normalizeContent(content);
+  // reasoning 仅用于持久化与回放展示，绝不发给模型 —— 在最前过滤掉。
+  const parts = normalizeContent(content).filter((p) => p.type !== "reasoning");
   // 全是文本则用简单字符串。
   if (parts.every((p) => p.type === "text")) {
     return parts.map((p) => (p as Extract<ContentPart, { type: "text" }>).text).join("");

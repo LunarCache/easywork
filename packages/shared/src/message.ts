@@ -7,6 +7,13 @@ export type Role = z.infer<typeof RoleSchema>;
 /** 多模态内容片段。string 是 [{type:"text"}] 的语法糖。 */
 export const ContentPartSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
+  /**
+   * 思考过程（reasoning）。仅用于**持久化与回放展示**，绝不发给模型：
+   * messageText 只取 text part，故 reasoning 不会进历史回喂/会话搜索/上下文；
+   * 模型侧内容转换器均显式剔除它（pi-adapt/ew-extensions 的 if/else 不收录；
+   * openai-messages 的 toOpenAIContent 在转换前 filter 掉）。新增模型侧转换器须同样处理。
+   */
+  z.object({ type: z.literal("reasoning"), text: z.string() }),
   z.object({
     type: z.literal("image"),
     mimeType: z.string(),

@@ -155,9 +155,15 @@ export function storedToUiMsgs(list: StoredMsg[]): UiMsg[] {
     }
     if (m.role === "assistant") {
       if (!bubble) bubble = { role: "assistant", raw: "", reasoning: "", tools: [], blocks: [] };
-      if (text) {
-        bubble.raw = bubble.raw ? `${bubble.raw}\n${text}` : text;
-        bubble.blocks!.push({ kind: "text", text });
+      // 按存档顺序重建时间线块：思考(reasoning) / 文本(text) 交织。
+      for (const p of m.parts) {
+        if (p.type === "reasoning" && p.text) {
+          bubble.reasoning = bubble.reasoning ? `${bubble.reasoning}\n${p.text}` : p.text;
+          bubble.blocks!.push({ kind: "reasoning", text: p.text, start: 0 });
+        } else if (p.type === "text" && p.text) {
+          bubble.raw = bubble.raw ? `${bubble.raw}\n${p.text}` : p.text;
+          bubble.blocks!.push({ kind: "text", text: p.text });
+        }
       }
       for (const c of m.toolCalls ?? []) {
         const t: UiTool = { id: c.id, name: c.name, args: c.arguments, status: "done" };

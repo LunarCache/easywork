@@ -1,6 +1,23 @@
 import { describe, it, expect } from "vitest";
 import type { ChatStreamEvent } from "@ew/shared";
-import { OpenAICompatibleEngine } from "../src/index.js";
+import { OpenAICompatibleEngine, toOpenAIMessages } from "../src/index.js";
+
+describe("toOpenAIMessages — reasoning 不发给模型", () => {
+  it("reasoning part 被剔除，answer text 保留（不变成 [reasoning] 占位）", () => {
+    const out = toOpenAIMessages([
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "内部思考不该外发" },
+          { type: "text", text: "最终答案" },
+        ],
+      },
+    ]) as { role: string; content: unknown }[];
+    expect(out[0]!.content).toBe("最终答案");
+    expect(JSON.stringify(out)).not.toContain("[reasoning]");
+    expect(JSON.stringify(out)).not.toContain("内部思考");
+  });
+});
 
 const enc = new TextEncoder();
 

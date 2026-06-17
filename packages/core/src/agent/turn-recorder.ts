@@ -17,7 +17,8 @@ export interface RecordedMessage {
  * 用法：每个事件调 push()，返回此刻应追加的消息（多数事件返回 []）。
  */
 export class ToolTurnRecorder {
-  private curText = "";
+  // 本轮累计的内容片段，按发生顺序保留 reasoning/text 交织（思考→文本→工具）。
+  private curParts: ContentPart[] = [];
   private turnCalls: ToolCall[] = [];
   private turnResults: ToolResult[] = [];
   private inToolPhase = false;
@@ -28,10 +29,19 @@ export class ToolTurnRecorder {
         // 工具阶段后再出现文本 → 进入下一轮，先结算上一带工具轮。
         if (this.inToolPhase) {
           const flushed = this.flush();
-          this.curText += ev.text;
+          this.appendText(ev.text);
           return flushed;
         }
-        this.curText += ev.text;
+        this.appendText(ev.text);
+        return [];
+      case "reasoning":
+        // 与 text 同样处理阶段切换：工具后再思考 = 下一轮。
+        if (this.inToolPhase) {
+          const flushed = this.flush();
+          this.appendReasoning(ev.text);
+          return flushed;
+        }
+        this.appendReasoning(ev.text);
         return [];
       case "tool-start":
         this.inToolPhase = true;
@@ -41,22 +51,49 @@ export class ToolTurnRecorder {
         this.turnResults.push(ev.result);
         return [];
       case "final":
-        return this.flush();
+        // 收尾的无工具轮不在此重建（其文本由 final 单独持久化）；只结算带工具轮。
+        return this.turnCalls.length > 0 ? this.flush() : [];
       default:
         return [];
     }
   }
 
+  /** 收尾无工具轮残留的思考文本（reasoning part 拼接）—— 供调用方拼到 final 消息。 */
+  trailingReasoning(): string {
+    return this.curParts
+      .filter((p): p is Extract<ContentPart, { type: "reasoning" }> => p.type === "reasoning")
+      .map((p) => p.text)
+      .join("");
+  }
+
+  private appendText(text: string): void {
+    const last = this.curParts[this.curParts.length - 1];
+    if (last && last.type === "text") last.text += text;
+    else this.curParts.push({ type: "text", text });
+  }
+
+  private appendReasoning(text: string): void {
+    const last = this.curParts[this.curParts.length - 1];
+    if (last && last.type === "reasoning") last.text += text;
+    else this.curParts.push({ type: "reasoning", text });
+  }
+
   private flush(): RecordedMessage[] {
     if (this.turnCalls.length === 0) {
-      this.curText = "";
+      this.curParts = [];
       this.inToolPhase = false;
       return [];
     }
+    // 保留非空 reasoning/text（按序），丢弃纯空白文本。curParts 只含 text/reasoning。
+    const parts = this.curParts.filter((p) => {
+      if (p.type === "text") return p.text.trim().length > 0;
+      if (p.type === "reasoning") return p.text.trim().length > 0;
+      return true;
+    });
     const out: RecordedMessage[] = [
       {
         role: "assistant",
-        parts: this.curText.trim() ? [{ type: "text", text: this.curText }] : [],
+        parts,
         toolCalls: this.turnCalls.slice(),
       },
       ...this.turnResults.map(
@@ -67,7 +104,7 @@ export class ToolTurnRecorder {
         }),
       ),
     ];
-    this.curText = "";
+    this.curParts = [];
     this.turnCalls = [];
     this.turnResults = [];
     this.inToolPhase = false;

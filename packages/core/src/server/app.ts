@@ -17,6 +17,7 @@ import {
   workspaceScope,
   isWorkspaceScope,
   type AgentEvent,
+  type ContentPart,
   type DownloadEvent,
   type McpServerConfig,
 } from "@ew/shared";
@@ -558,13 +559,30 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
             createdAt: new Date().toISOString(),
           });
         }
-        if (finalContent) {
+        // 收尾 assistant 消息：思考过程（reasoning）+ 答案。
+        // 思考优先取 reasoning 事件（recorder 累计的收尾轮残留）；兜底剥离内联 <think>。
+        let answer = finalContent;
+        let inlineThink = "";
+        if (answer.includes("<think>")) {
+          answer = answer.replace(/<think>([\s\S]*?)<\/think>/g, (_m, t: string) => {
+            inlineThink += t;
+            return "";
+          });
+        }
+        answer = answer.trim();
+        // 先各自 trim 再取舍：避免"全空白的事件型 reasoning"短路掉真正有内容的内联 think。
+        const reasoningText = recorder.trailingReasoning().trim() || inlineThink.trim();
+        const finalParts: ContentPart[] = [
+          ...(reasoningText ? [{ type: "reasoning" as const, text: reasoningText }] : []),
+          ...(answer ? [{ type: "text" as const, text: answer }] : []),
+        ];
+        if (finalParts.length > 0) {
           repo.appendMessage({
             id: crypto.randomUUID(),
             threadId,
             role: "assistant",
             seq: repo.nextSeq(threadId),
-            parts: [{ type: "text", text: finalContent }],
+            parts: finalParts,
             createdAt: new Date().toISOString(),
           });
         }
