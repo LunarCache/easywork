@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import type { GGUFVariant, HFModelSummary, LocalModel } from "@ew/shared";
+import type { ProviderInfo } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
-import { BoxIcon, CheckIcon, ChevronIcon, DownloadIcon, SearchIcon } from "../icons.js";
+import { BoxIcon, CheckIcon, ChevronIcon, DownloadIcon, GlobeIcon, SearchIcon, TrashIcon } from "../icons.js";
 
-const SOURCE_LABEL: Record<string, string> = {
-  downloaded: "已下载",
-  scanned: "已扫描",
-  imported: "导入",
-};
+type ModelsTab = "local" | "cloud";
+
+// 常见 OpenAI 兼容云端预设（点一下自动填 id + baseUrl）。
+const PROVIDER_PRESETS: { id: string; label: string; baseUrl: string }[] = [
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1" },
+  { id: "siliconflow", label: "硅基流动", baseUrl: "https://api.siliconflow.cn/v1" },
+];
 
 function fmtSize(bytes: number): string {
   const mb = bytes / 1e6;
@@ -58,6 +63,19 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [pct, setPct] = useState<number | null>(null);
   const [searching, setSearching] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  // 子页切换 + 云端 provider 状态
+  const [tab, setTab] = useState<ModelsTab>("local");
+  const [prov, setProv] = useState({ id: "", baseUrl: "", apiKey: "", models: "" });
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [provNote, setProvNote] = useState("");
+
+  const refreshProviders = useCallback(async () => {
+    try {
+      setProviders(await getClient().listProviders());
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const refreshLocal = useCallback(async () => {
     try {
@@ -72,6 +90,44 @@ export function Models({ onChange }: { onChange: () => void }) {
   useEffect(() => {
     void refreshLocal();
   }, [refreshLocal]);
+
+  // 云端 provider 仅在进入「云端 API」tab 时按需拉取（默认本地 tab 不浪费请求）。
+  useEffect(() => {
+    if (tab === "cloud") void refreshProviders();
+  }, [tab, refreshProviders]);
+
+  const addProvider = async () => {
+    if (!prov.id.trim() || !prov.baseUrl.trim()) {
+      setProvNote("请填写 id 与 baseUrl");
+      return;
+    }
+    try {
+      await getClient().addProvider({
+        id: prov.id.trim(),
+        baseUrl: prov.baseUrl.trim(),
+        ...(prov.apiKey ? { apiKey: prov.apiKey } : {}),
+        models: prov.models.split(",").map((s) => s.trim()).filter(Boolean),
+      });
+      setProvNote(`已添加 provider「${prov.id.trim()}」`);
+      setProv({ id: "", baseUrl: "", apiKey: "", models: "" });
+      await refreshProviders();
+      onChange();
+    } catch (e) {
+      setProvNote(`添加失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const removeProvider = async (id: string) => {
+    if (!confirm(`删除云端 provider「${id}」？其下的模型将不再可用。`)) return;
+    try {
+      await getClient().removeProvider(id);
+      setProvNote(`已删除 provider「${id}」`);
+      await refreshProviders();
+      onChange();
+    } catch (e) {
+      setProvNote(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
 
   const search = async () => {
     if (!query.trim()) return;
@@ -157,10 +213,89 @@ export function Models({ onChange }: { onChange: () => void }) {
         </span>
         <div>
           <h2>模型</h2>
-          <p className="lead">从 HuggingFace 搜索并下载 GGUF 到本地，或加载已下载的模型（经 llama-server 运行）。</p>
+          <p className="lead">
+            {tab === "local"
+              ? "从 HuggingFace 搜索并下载 GGUF 到本地，或加载已下载的模型（经 llama-server 运行）。"
+              : "接入 OpenAI / OpenRouter / DeepSeek 等 OpenAI 兼容云端端点，与本地模型一同在聊天中选用。"}
+          </p>
         </div>
       </div>
 
+      <div className="seg models-tabs">
+        <button className={tab === "local" ? "on" : ""} onClick={() => setTab("local")}>
+          <BoxIcon size={14} /> 本地模型
+        </button>
+        <button className={tab === "cloud" ? "on" : ""} onClick={() => setTab("cloud")}>
+          <GlobeIcon size={14} /> 云端 API
+        </button>
+      </div>
+
+      {tab === "cloud" ? (
+        <CloudProviders
+          prov={prov}
+          setProv={setProv}
+          providers={providers}
+          note={provNote}
+          onAdd={() => void addProvider()}
+          onRemove={(id) => void removeProvider(id)}
+        />
+      ) : (
+        <LocalModels
+          query={query}
+          setQuery={setQuery}
+          search={() => void search()}
+          searching={searching}
+          progress={progress}
+          pct={pct}
+          searched={searched}
+          results={results}
+          expanded={expanded}
+          variants={variants}
+          toggleVariants={(id) => void toggleVariants(id)}
+          download={(v) => void download(v)}
+          closeSearch={() => {
+            setSearched(false);
+            setResults([]);
+            setExpanded(null);
+          }}
+          local={local}
+          loaded={loaded}
+          busy={busy}
+          load={(m) => void load(m)}
+          unload={(m) => void unload(m)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** 本地模型子页：HF 搜索/下载 + 已下载模型网格（加载/卸载）。 */
+function LocalModels(props: {
+  query: string;
+  setQuery: (v: string) => void;
+  search: () => void;
+  searching: boolean;
+  progress: string;
+  pct: number | null;
+  searched: boolean;
+  results: HFModelSummary[];
+  expanded: string | null;
+  variants: Record<string, GGUFVariant[]>;
+  toggleVariants: (repoId: string) => void;
+  download: (v: GGUFVariant) => void;
+  closeSearch: () => void;
+  local: LocalModel[];
+  loaded: string[];
+  busy: string | null;
+  load: (m: LocalModel) => void;
+  unload: (m: LocalModel) => void;
+}) {
+  const {
+    query, setQuery, search, searching, progress, pct, searched, results, expanded,
+    variants, toggleVariants, download, closeSearch, local, loaded, busy, load, unload,
+  } = props;
+  return (
+    <>
       <div className="row search-row">
         <div className="field">
           <SearchIcon size={16} />
@@ -191,14 +326,7 @@ export function Models({ onChange }: { onChange: () => void }) {
         <section className="search-panel">
           <div className="sp-head">
             <span>搜索结果 · {results.length}</span>
-            <button
-              className="sp-close"
-              onClick={() => {
-                setSearched(false);
-                setResults([]);
-                setExpanded(null);
-              }}
-            >
+            <button className="sp-close" onClick={closeSearch}>
               收起
             </button>
           </div>
@@ -298,6 +426,86 @@ export function Models({ onChange }: { onChange: () => void }) {
           </div>
         )}
       </section>
-    </div>
+    </>
+  );
+}
+
+/** 云端 API 子页：OpenAI 兼容 provider 的添加 / 列表 / 删除。 */
+function CloudProviders(props: {
+  prov: { id: string; baseUrl: string; apiKey: string; models: string };
+  setProv: (v: { id: string; baseUrl: string; apiKey: string; models: string }) => void;
+  providers: ProviderInfo[];
+  note: string;
+  onAdd: () => void;
+  onRemove: (id: string) => void;
+}) {
+  const { prov, setProv, providers, note, onAdd, onRemove } = props;
+  return (
+    <>
+      {note && <div className="note">{note}</div>}
+
+      <section>
+        <div className="sec-head">
+          <span className="ico blue">
+            <GlobeIcon size={18} />
+          </span>
+          <div>
+            <h3>添加云端 Provider</h3>
+            <p className="hint">任意 OpenAI 兼容端点（/v1）。Key 持久化在本机 daemon。</p>
+          </div>
+        </div>
+        <div className="prov-presets">
+          {PROVIDER_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              className="prov-preset"
+              title={p.baseUrl}
+              onClick={() => setProv({ ...prov, id: prov.id || p.id, baseUrl: p.baseUrl })}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="form">
+          <input placeholder="id（如 openrouter）" value={prov.id} onChange={(e) => setProv({ ...prov, id: e.target.value })} />
+          <input placeholder="baseUrl（.../v1）" value={prov.baseUrl} onChange={(e) => setProv({ ...prov, baseUrl: e.target.value })} />
+          <input placeholder="API Key" type="password" value={prov.apiKey} onChange={(e) => setProv({ ...prov, apiKey: e.target.value })} />
+          <input placeholder="模型（逗号分隔）" value={prov.models} onChange={(e) => setProv({ ...prov, models: e.target.value })} />
+          <button onClick={onAdd}>添加</button>
+        </div>
+      </section>
+
+      <section className="local-section">
+        <div className="ls-head">
+          <h3>已配置 Provider</h3>
+          <span className="ls-count">{providers.length}</span>
+        </div>
+        {providers.length === 0 ? (
+          <div className="empty-models">
+            <GlobeIcon size={26} />
+            <p>还没有云端 Provider</p>
+            <span>用上方表单接入一个 OpenAI 兼容端点即可在聊天中选用。</span>
+          </div>
+        ) : (
+          providers.map((p) => (
+            <div key={p.id} className="mcp-row">
+              <span className="mc-glyph k-text">
+                <GlobeIcon size={17} />
+              </span>
+              <div className="mcp-info">
+                <div className="mcp-name">{p.id}</div>
+                <div className="mcp-detail">{p.baseUrl}</div>
+                {p.models.length > 0 && (
+                  <div className="mcp-detail">{p.models.join("、")}</div>
+                )}
+              </div>
+              <button className="mcp-del" title="删除" onClick={() => onRemove(p.id)}>
+                <TrashIcon size={15} />
+              </button>
+            </div>
+          ))
+        )}
+      </section>
+    </>
   );
 }

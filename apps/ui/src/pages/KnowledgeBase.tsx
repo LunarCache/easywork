@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getClient } from "../lib/client.js";
-import { KbIcon, FileIcon, SearchIcon, TrashIcon, UploadIcon, LoaderIcon, CheckIcon } from "../icons.js";
+import { KbIcon, FileIcon, SearchIcon, TrashIcon, UploadIcon, LoaderIcon, CheckIcon, XIcon } from "../icons.js";
 
 interface KbJob {
   id: string;
@@ -195,7 +195,7 @@ export function KnowledgeBase() {
                       {j.status === "done" ? (
                         <CheckIcon size={14} />
                       ) : j.status === "error" ? (
-                        <span className="kb-job-x">×</span>
+                        <XIcon size={14} className="kb-job-x" />
                       ) : (
                         <LoaderIcon size={14} className="spin" />
                       )}

@@ -31,6 +31,7 @@ import {
   TrashIcon,
   UndoIcon,
   WrenchIcon,
+  XIcon,
 } from "../icons.js";
 
 const APPROVAL_LABELS: Record<ApprovalMode, string> = {
@@ -530,7 +531,7 @@ function ReviewPanel({
             <RefreshIcon size={13} />
           </button>
           <button className="fv-btn" title="关闭" onClick={onClose}>
-            ✕
+            <XIcon size={14} />
           </button>
         </div>
         <div className="rev-empty">该目录不是 git 仓库。运行 <code>git init</code> 后即可在此审阅改动。</div>
@@ -547,7 +548,7 @@ function ReviewPanel({
           <RefreshIcon size={13} />
         </button>
         <button className="fv-btn" title="关闭" onClick={onClose}>
-          ✕
+          <XIcon size={14} />
         </button>
       </div>
 

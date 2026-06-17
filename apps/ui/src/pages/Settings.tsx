@@ -6,39 +6,27 @@ import {
   saveAgentPrefs,
   type AgentPrefs,
   type Appearance,
-  type ColorTheme,
   type ThemePrefs,
 } from "../lib/prefs.js";
-import { SlidersIcon, BoxIcon, BrainIcon, GlobeIcon, SunIcon, MoonIcon, MonitorIcon, PaletteIcon } from "../icons.js";
+import { SlidersIcon, BrainIcon, GlobeIcon, SunIcon, MoonIcon, MonitorIcon, PaletteIcon, AlertIcon } from "../icons.js";
 
 const APPEARANCES: { id: Appearance; label: string; Icon: typeof SunIcon }[] = [
   { id: "light", label: "浅色", Icon: SunIcon },
   { id: "dark", label: "深色", Icon: MoonIcon },
   { id: "system", label: "跟随系统", Icon: MonitorIcon },
 ];
-const COLOR_THEMES: { id: ColorTheme; label: string; color: string }[] = [
-  { id: "black", label: "黑", color: "#333333" },
-  { id: "blue", label: "蓝", color: "#4E80F7" },
-  { id: "purple", label: "紫", color: "#9169BF" },
-  { id: "green", label: "绿", color: "#57A64B" },
-];
-
 /** 生成一个随机 api-key（暴露 0.0.0.0 时用）。 */
 function genApiKey(): string {
   return "ew-" + crypto.randomUUID().replace(/-/g, "");
 }
 
 export function Settings({
-  onChange,
   theme,
   onThemeChange,
 }: {
-  onChange: () => void;
   theme: ThemePrefs;
   onThemeChange: (next: ThemePrefs) => void;
 }) {
-  const [prov, setProv] = useState({ id: "", baseUrl: "", apiKey: "", models: "" });
-  const [providers, setProviders] = useState<{ id: string; baseUrl: string; models: string[] }[]>([]);
   const [note, setNote] = useState("");
   const [agentPrefs, setAgentPrefs] = useState<AgentPrefs>(() => loadAgentPrefs());
   const [net, setNet] = useState<LocalNetInfo | null>(null);
@@ -54,11 +42,6 @@ export function Settings({
   };
 
   const refresh = useCallback(async () => {
-    try {
-      setProviders(await getClient().listProviders());
-    } catch {
-      /* ignore */
-    }
     try {
       setNet(await getClient().getLocalNet());
     } catch {
@@ -97,20 +80,6 @@ export function Settings({
     void refresh();
   }, [refresh]);
 
-  const addProvider = async () => {
-    if (!prov.id || !prov.baseUrl) return;
-    await getClient().addProvider({
-      id: prov.id,
-      baseUrl: prov.baseUrl,
-      ...(prov.apiKey ? { apiKey: prov.apiKey } : {}),
-      models: prov.models.split(",").map((s) => s.trim()).filter(Boolean),
-    });
-    setNote(`已添加 provider ${prov.id}`);
-    setProv({ id: "", baseUrl: "", apiKey: "", models: "" });
-    await refresh();
-    onChange();
-  };
-
   return (
     <div className="page">
       <div className="page-head">
@@ -119,7 +88,7 @@ export function Settings({
         </span>
         <div>
           <h2>设置</h2>
-          <p className="lead">云端 Provider 与 Agent 循环。模型 / 知识库 / Skills / MCP / 记忆 已各成独立页面。</p>
+          <p className="lead">外观、Agent 循环与本地网络。云端 API 已移到「模型」页；知识库 / Skills / MCP / 记忆 各成独立页面。</p>
         </div>
       </div>
       {note && <div className="note">{note}</div>}
@@ -131,7 +100,7 @@ export function Settings({
           </span>
           <div>
             <h3>外观</h3>
-            <p className="hint">明暗模式与主题色（仅影响本机界面，立即生效）</p>
+            <p className="hint">明暗模式（仅影响本机界面，立即生效）</p>
           </div>
         </div>
         <div className="appearance-row">
@@ -147,21 +116,6 @@ export function Settings({
                   <Icon size={14} style={{ marginRight: 5, verticalAlign: "-2px" }} />
                   {label}
                 </button>
-              ))}
-            </div>
-          </div>
-          <div className="appearance-block">
-            <span>主题色</span>
-            <div className="swatches">
-              {COLOR_THEMES.map(({ id, label, color }) => (
-                <button
-                  key={id}
-                  className={`swatch ${theme.colorTheme === id ? "on" : ""}`}
-                  style={{ background: color }}
-                  title={label}
-                  aria-label={label}
-                  onClick={() => onThemeChange({ ...theme, colorTheme: id })}
-                />
               ))}
             </div>
           </div>
@@ -184,30 +138,6 @@ export function Settings({
             <input type="number" step="1" min="1" max="100" placeholder="默认 25" value={agentPrefs.maxIterations ?? ""} onChange={(e) => setAgentPref("maxIterations", e.target.value)} />
           </label>
         </div>
-      </section>
-
-      <section>
-        <div className="sec-head">
-          <span className="ico blue">
-            <BoxIcon size={18} />
-          </span>
-          <div>
-            <h3>云端 Provider（OpenAI 兼容）</h3>
-            <p className="hint">接 OpenAI / OpenRouter / vLLM 等兼容端点</p>
-          </div>
-        </div>
-        <div className="form">
-          <input placeholder="id (如 openrouter)" value={prov.id} onChange={(e) => setProv({ ...prov, id: e.target.value })} />
-          <input placeholder="baseUrl (.../v1)" value={prov.baseUrl} onChange={(e) => setProv({ ...prov, baseUrl: e.target.value })} />
-          <input placeholder="API Key" type="password" value={prov.apiKey} onChange={(e) => setProv({ ...prov, apiKey: e.target.value })} />
-          <input placeholder="模型(逗号分隔)" value={prov.models} onChange={(e) => setProv({ ...prov, models: e.target.value })} />
-          <button onClick={() => void addProvider()}>添加</button>
-        </div>
-        {providers.map((p) => (
-          <div key={p.id} className="sub">
-            {p.id} → {p.baseUrl} [{p.models.join(", ")}]
-          </div>
-        ))}
       </section>
 
       <section>
@@ -249,7 +179,8 @@ export function Settings({
         </div>
         {net?.bindHost === "0.0.0.0" && (
           <div className="note">
-            ⚠️ 已绑定 0.0.0.0：局域网设备需带 <code>Authorization: Bearer {net.apiKey}</code> 才能访问。请仅在可信网络使用。
+            <AlertIcon size={14} style={{ verticalAlign: "-2px", marginRight: 5 }} />
+            已绑定 0.0.0.0：局域网设备需带 <code>Authorization: Bearer {net.apiKey}</code> 才能访问。请仅在可信网络使用。
           </div>
         )}
         {net && net.endpoints.length > 0 ? (

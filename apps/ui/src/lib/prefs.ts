@@ -61,27 +61,22 @@ export function saveAgentPrefs(p: AgentPrefs): void {
   }
 }
 
-// ---------- 外观（明暗 + 主题色），持久化到 localStorage，逻辑同 TOKENICODE ----------
+// ---------- 外观（明暗双主题），持久化到 localStorage ----------
 
 export type Appearance = "light" | "dark" | "system";
-export type ColorTheme = "black" | "blue" | "purple" | "green";
 export interface ThemePrefs {
   appearance: Appearance;
-  colorTheme: ColorTheme;
 }
 
 const THEME_KEY = "ew.theme";
-const THEME_DEFAULT: ThemePrefs = { appearance: "system", colorTheme: "black" };
+const THEME_DEFAULT: ThemePrefs = { appearance: "system" };
 
 export function loadThemePrefs(): ThemePrefs {
   try {
     const raw = localStorage.getItem(THEME_KEY);
     if (!raw) return { ...THEME_DEFAULT };
     const p = JSON.parse(raw) as Partial<ThemePrefs>;
-    return {
-      appearance: p.appearance ?? THEME_DEFAULT.appearance,
-      colorTheme: p.colorTheme ?? THEME_DEFAULT.colorTheme,
-    };
+    return { appearance: p.appearance ?? THEME_DEFAULT.appearance };
   } catch {
     return { ...THEME_DEFAULT };
   }
@@ -95,16 +90,13 @@ export function saveThemePrefs(p: ThemePrefs): void {
   }
 }
 
-/** 把外观偏好应用到 <html>：明暗经 .dark，主题色经 .theme-*。 */
+/** 把外观偏好应用到 <html>：明暗经 .dark。 */
 export function applyTheme(p: ThemePrefs): void {
   const root = document.documentElement;
   const prefersDark =
     typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
   const dark = p.appearance === "dark" || (p.appearance === "system" && prefersDark);
   root.classList.toggle("dark", dark);
-
-  for (const t of ["blue", "purple", "green"] as const) root.classList.remove(`theme-${t}`);
-  if (p.colorTheme !== "black") root.classList.add(`theme-${p.colorTheme}`);
 }
 
 /** 采样对象 → runAgent 的 sampling 字段（仅含已设置项）。 */

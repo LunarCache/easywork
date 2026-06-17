@@ -28,7 +28,6 @@ import {
   ArrowUpIcon,
   BoxIcon,
   BrainIcon,
-  ChatIcon,
   CheckIcon,
   ChevronIcon,
   CodeIcon,
@@ -40,10 +39,20 @@ import {
   PlusBtnIcon,
   RefreshIcon,
   SlidersIcon,
+  SparkIcon,
   StopIcon,
   ThinkIcon,
   WrenchIcon,
+  XIcon,
 } from "../icons.js";
+
+// 空态快捷起手式（点击预填输入框），仿 Claude 桌面端的 Code/Learn/Write/… pill。
+const STARTERS: { label: string; prompt: string; Icon: typeof CodeIcon }[] = [
+  { label: "写代码", prompt: "帮我写一个", Icon: CodeIcon },
+  { label: "解释概念", prompt: "用通俗的话解释一下：", Icon: BrainIcon },
+  { label: "总结文档", prompt: "帮我总结这段内容：\n\n", Icon: FileIcon },
+  { label: "头脑风暴", prompt: "我想做一个项目，帮我头脑风暴一些点子：", Icon: SparkIcon },
+];
 
 interface FilePreview {
   content?: string;
@@ -200,8 +209,8 @@ export function Chat({
   const [msgs, setMsgs] = useState<UiMsg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [think, setThink] = useState(false);
-  const [web, setWeb] = useState(false);
+  const [think, setThink] = useState(true);
+  const [web, setWeb] = useState(true);
   const [kb, setKb] = useState(false);
   const [kbId, setKbId] = useState<string | undefined>(undefined); // undefined = 全部集合
   const [kbList, setKbList] = useState<{ kbId: string; docs: number; chunks: number }[]>([]);
@@ -537,12 +546,37 @@ export function Chat({
       </header>
       <div className="messages" ref={scrollRef}>
         {msgs.length === 0 && (
-          <div className="empty">
-            <div className="ring">
-              <ChatIcon size={28} />
+          <div className="greeting">
+            <span className="greet-spark">
+              <SparkIcon size={30} />
+            </span>
+            <h1>有什么可以帮你？</h1>
+            <p className="greet-sub">
+              本地或云端模型、工具调用、Skills/MCP，带记忆。
+              {!model && "先到「模型」页加载模型或在「设置」配置 provider。"}
+            </p>
+            <div className="greet-pills">
+              {STARTERS.map(({ label, prompt, Icon }) => (
+                <button
+                  key={label}
+                  className="greet-pill"
+                  onClick={() => {
+                    setInput(prompt);
+                    requestAnimationFrame(() => {
+                      const ta = taRef.current;
+                      if (ta) {
+                        ta.focus();
+                        ta.setSelectionRange(prompt.length, prompt.length);
+                        autoGrow(ta);
+                      }
+                    });
+                  }}
+                >
+                  <Icon size={14} />
+                  {label}
+                </button>
+              ))}
             </div>
-            <h2>开始对话</h2>
-            <p>本地或云端模型、工具调用、Skills/MCP、带记忆。{!model && "先到「模型」页加载模型或在「设置」配置 provider。"}</p>
           </div>
         )}
         {msgs.map((m, i) => {
@@ -633,7 +667,9 @@ export function Chat({
               {images.map((im, j) => (
                 <div key={j} className="cimg">
                   <img src={`data:${im.mimeType};base64,${im.data}`} alt="" />
-                  <button onClick={() => setImages((cur) => cur.filter((_, k) => k !== j))}>×</button>
+                  <button onClick={() => setImages((cur) => cur.filter((_, k) => k !== j))}>
+                    <XIcon size={12} />
+                  </button>
                 </div>
               ))}
             </div>
@@ -804,7 +840,7 @@ function ArtifactsPanel({
           <RefreshIcon size={13} />
         </button>
         <button className="fv-btn" title="关闭" onClick={onClose}>
-          ✕
+          <XIcon size={14} />
         </button>
       </div>
       <div className="rev-scroll">

@@ -11,7 +11,7 @@ import { KnowledgeBase } from "./pages/KnowledgeBase.js";
 import { Skills } from "./pages/Skills.js";
 import { Mcp } from "./pages/Mcp.js";
 import { Memory } from "./pages/Memory.js";
-import { BoxIcon, BrainIcon, ChatIcon, FolderTreeIcon, FolderClosedIcon, GlobeIcon, KbIcon, NewChatIcon, PanelIcon, SlidersIcon, SparkIcon, TrashIcon, WrenchIcon } from "./icons.js";
+import { BoxIcon, BrainIcon, ChatIcon, FolderTreeIcon, FolderClosedIcon, GlobeIcon, KbIcon, NewChatIcon, PanelIcon, PlusIcon, SlidersIcon, SparkIcon, TrashIcon, WrenchIcon } from "./icons.js";
 
 type Tab = "chat" | "workspace" | "models" | "kb" | "skills" | "mcp" | "memory" | "settings";
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
@@ -177,59 +177,77 @@ export function App() {
           </button>
         </div>
 
-        <div className="side-actions">
-          <button className="newbtn" onClick={newChat} title="新建对话">
-            <NewChatIcon size={15} />
+        {/* 主模式分段控件（对话 / 工作区），仿 Claude 桌面端 */}
+        <div className="seg-tabs">
+          <button className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")} title="对话">
+            <ChatIcon size={15} />
             <span>对话</span>
           </button>
-          <button className="newbtn" onClick={() => void newWorkspace()} title="新建工作区（选择本地目录）">
+          <button className={tab === "workspace" ? "on" : ""} onClick={() => setTab("workspace")} title="工作区">
             <FolderTreeIcon size={15} />
             <span>工作区</span>
           </button>
         </div>
 
-        <div className="side-scroll">
-          <div className="side-threads">
-            <div className="side-label">工作区</div>
-            <div className="threads-list">
-              {projects.length === 0 && <div className="threads-empty">还没有工作区</div>}
-              {projects.map((p) => (
-                <div
-                  key={p.id}
-                  className={`thread-item ${tab === "workspace" && p.id === projectId ? "active" : ""}`}
-                  onClick={() => selectProject(p.id)}
-                  title={p.workspaceDir}
-                >
-                  <FolderClosedIcon size={14} />
-                  <span>{p.name}</span>
-                  <button className="thread-del" title="删除" onClick={(e) => void delProject(p.id, e)}>
-                    <TrashIcon size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
+        {/* 上下文动作行：工作区模式=新建工作区，否则=新对话 */}
+        <div className="side-nav">
+          {tab === "workspace" ? (
+            <button className="navrow" onClick={() => void newWorkspace()} title="新建工作区（选择本地目录）">
+              <PlusIcon size={16} />
+              <span>新建工作区</span>
+            </button>
+          ) : (
+            <button className="navrow" onClick={newChat} title="新建对话">
+              <NewChatIcon size={16} />
+              <span>新对话</span>
+            </button>
+          )}
+        </div>
 
-          <div className="side-threads">
-            <div className="side-label">对话</div>
-            <div className="threads-list">
-              {threads.length === 0 && <div className="threads-empty">还没有会话</div>}
-              {threads.map((t) => (
-                <div
-                  key={t.id}
-                  className={`thread-item ${tab === "chat" && t.id === threadId ? "active" : ""}`}
-                  onClick={() => selectThread(t.id)}
-                  title={t.title}
-                >
-                  <ChatIcon size={14} />
-                  <span>{t.title || "新会话"}</span>
-                  <button className="thread-del" title="删除" onClick={(e) => void delThread(t.id, e)}>
-                    <TrashIcon size={13} />
-                  </button>
-                </div>
-              ))}
+        <div className="side-scroll">
+          {tab === "workspace" ? (
+            <div className="side-threads">
+              <div className="side-label">工作区</div>
+              <div className="threads-list">
+                {projects.length === 0 && <div className="threads-empty">还没有工作区</div>}
+                {projects.map((p) => (
+                  <div
+                    key={p.id}
+                    className={`thread-item ${p.id === projectId ? "active" : ""}`}
+                    onClick={() => selectProject(p.id)}
+                    title={p.workspaceDir}
+                  >
+                    <FolderClosedIcon size={14} />
+                    <span>{p.name}</span>
+                    <button className="thread-del" title="删除" onClick={(e) => void delProject(p.id, e)}>
+                      <TrashIcon size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="side-threads">
+              <div className="side-label">最近</div>
+              <div className="threads-list">
+                {threads.length === 0 && <div className="threads-empty">还没有会话</div>}
+                {threads.map((t) => (
+                  <div
+                    key={t.id}
+                    className={`thread-item ${tab === "chat" && t.id === threadId ? "active" : ""}`}
+                    onClick={() => selectThread(t.id)}
+                    title={t.title}
+                  >
+                    <ChatIcon size={14} />
+                    <span>{t.title || "新会话"}</span>
+                    <button className="thread-del" title="删除" onClick={(e) => void delThread(t.id, e)}>
+                      <TrashIcon size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="side-foot">
@@ -296,7 +314,7 @@ export function App() {
         {tab === "skills" && <Skills />}
         {tab === "mcp" && <Mcp />}
         {tab === "memory" && <Memory />}
-        {tab === "settings" && <Settings onChange={check} theme={theme} onThemeChange={changeTheme} />}
+        {tab === "settings" && <Settings theme={theme} onThemeChange={changeTheme} />}
       </main>
     </div>
   );

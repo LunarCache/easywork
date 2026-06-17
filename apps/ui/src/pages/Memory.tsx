@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Project } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { SparkIcon, SearchIcon, EditIcon, TrashIcon, CheckIcon, FolderClosedIcon, ChatIcon } from "../icons.js";
+import { SparkIcon, SearchIcon, EditIcon, TrashIcon, CheckIcon, FolderClosedIcon, ChatIcon, XIcon } from "../icons.js";
 
 interface MemItem {
   id: string;
@@ -281,7 +281,7 @@ export function Memory() {
                   <CheckIcon size={14} />
                 </button>
                 <button className="mem-act" title="取消" onClick={() => setEditing(null)}>
-                  ×
+                  <XIcon size={14} />
                 </button>
               </>
             ) : (

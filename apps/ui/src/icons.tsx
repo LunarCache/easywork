@@ -44,4 +44,6 @@ export {
   Monitor as MonitorIcon,
   Palette as PaletteIcon,
   Square as StopIcon,
+  X as XIcon,
+  TriangleAlert as AlertIcon,
 } from "lucide-react";
