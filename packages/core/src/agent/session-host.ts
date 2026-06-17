@@ -9,6 +9,7 @@ import {
   AuthStorage,
   ModelRegistry,
   DefaultResourceLoader,
+  SessionManager,
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
@@ -84,11 +85,16 @@ interface HostedSession {
 
 /**
  * 进程内会话宿主：每个 (threadId) 复用一个 pi `AgentSession`（保留上下文/compaction）。
- * modelId 或 cwd 变化则重建。R5 接 pi `SessionManager` 落盘做跨重启真相源。
+ * modelId 或 cwd 变化则重建。pi `SessionManager` 按 threadId 落盘 + resume：daemon 重启 /
+ * 会话重建后模型仍带上重启前上下文。注意它只承载「给模型的上下文」，UI/检索/渠道映射的
+ * 真相源仍是 ConversationRepo（两者并存，非替换——后者提供 FTS5/渠道映射/项目元数据）。
  */
 export class SessionHost {
   private readonly sessions = new Map<string, HostedSession>();
   private readonly agentDir: string;
+  // pi 会话落盘目录：按 threadId 持久化，重启/重建时 resume → 模型跨重启恢复上下文。
+  // 注意：ConversationRepo 仍是 UI/检索/映射的真相源；这里只承载「给模型的上下文」。
+  private readonly sessionsDir: string;
   // R2：单一、落盘的共享 auth/registry（OAuth 与 key 跨重启持久；所有会话复用）。
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
@@ -103,6 +109,8 @@ export class SessionHost {
   constructor(private readonly deps: SessionHostDeps) {
     this.agentDir = deps.agentDir ?? path.join(os.homedir(), ".easywork", "pi-agent");
     fs.mkdirSync(this.agentDir, { recursive: true });
+    this.sessionsDir = path.join(this.agentDir, "sessions");
+    fs.mkdirSync(this.sessionsDir, { recursive: true });
     this.tunePiSettings();
     this.authStorage = AuthStorage.create(path.join(this.agentDir, "auth.json"));
     // llama-server 忽略 key，仅为通过 pi 的 provider key 校验。
@@ -255,6 +263,19 @@ export class SessionHost {
     };
   }
 
+  /**
+   * 按 threadId 取/建持久化 SessionManager：文件存在则 open() 续接（跨重启/重建恢复
+   * pi 上下文，含 compaction），否则 create() 后定向到该 threadId 文件（create 惰性写，
+   * setSessionFile 指向不存在的目标只是重设路径、不产生孤儿文件）。
+   */
+  private sessionManagerFor(threadId: string, cwd: string): SessionManager {
+    const file = path.join(this.sessionsDir, `${threadId}.jsonl`);
+    if (fs.existsSync(file)) return SessionManager.open(file, this.sessionsDir, cwd);
+    const sm = SessionManager.create(cwd, this.sessionsDir);
+    sm.setSessionFile(file);
+    return sm;
+  }
+
   /** 取/建该 thread 的会话。modelId/cwd/workspace/scope 变化则重建。 */
   private async getOrCreate(
     threadId: string,
@@ -321,6 +342,8 @@ export class SessionHost {
       modelRegistry: this.modelRegistry,
       cwd,
       agentDir: this.agentDir,
+      // 按 threadId 持久化 + resume：daemon 重启 / 换模型重建后，模型仍带上重启前上下文。
+      sessionManager: this.sessionManagerFor(threadId, cwd),
       resourceLoader,
       // 聊天/工作区均提供完整 pi 编码工具（read/bash/edit/write/grep/ls/find）+ EasyWork customTools；
       // 安全由权限扩展统一把守：escapesCwd 限定 fs 路径，bash 经审批（对话模式 auto-edits）。

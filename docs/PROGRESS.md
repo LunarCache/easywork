@@ -2,6 +2,15 @@
 
 > 每完成一个里程碑更新此文件。最新在上。
 
+## 2026-06-17（续）— pi SessionManager 跨重启上下文 resume
+
+把 pi 会话改为**按 threadId 落盘 + resume**：daemon 重启 / 会话重建后，模型仍带上重启前的上下文（含 compaction）。
+
+- 先做了方案评估：核实 pi `SessionManager` 是**文件式追加写树状日志**，无 FTS5 检索 / 渠道映射 / 项目元数据。结论——"把真相源切到 SessionManager"是**反效果**（会丢这些能力 + 大改 UI/SDK 且无净收益）；真实诉求（跨重启上下文）可单独拿到。
+- 实现（`SessionHost`）：`sessionsDir = <dataDir>/pi-agent/sessions`；`sessionManagerFor(threadId, cwd)` —— 文件存在则 `SessionManager.open()` 续接，否则 `create()` 后 `setSessionFile()` 定向到 `<threadId>.jsonl`（create 惰性写，不产生孤儿文件）；注入 `createAgentSession({ sessionManager })`。重建（换模型/作用域）走 open 同一文件 → 上下文也不丢。`dispose(threadId)` 删 thread 时一并删该 session 文件（已有逻辑天然适配）。
+- **ConversationRepo 零改动**，仍是 UI / 全文检索 / 渠道映射 / 项目元数据真相源（两者并存，非替换）。
+- 验证：typecheck 19/19、199 测试全绿；**跨重启真机 e2e**（隔离数据目录 + 真实 Qwen3-4B）：daemon#1 记代号 ALPHA-7 → SIGKILL 硬重启 → daemon#2 同目录续写（会话文件追加增长、旧轮次仍在）→ **模型答出 ALPHA-7**，证明上下文真正跨重启恢复。
+
 ## 2026-06-17 — UI 重设计（Claude 设计语言）+ 思考过程持久化 + 模型页本地/云端分页
 
 ### UI 重设计：Tailwind v4 token 切到 Claude 桌面端观感

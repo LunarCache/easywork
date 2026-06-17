@@ -185,8 +185,9 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 - **代码执行沙箱**：python / terminal 的独立 OS 级隔离（当前经 pi `bash` 工具 + 审批 4 档把守，无独立沙箱）。
 - **密钥存储**：provider / MCP key 现存 SQLite `settings`，待迁 OS keychain（keytar / Tauri stronghold）。
 - **工作区 v2**：多会话回放、接受 / 拒绝单改动、push/pull、提交历史、内嵌可编辑编辑器。
-- **持久化真相源**：仍以 `ConversationRepo` 为准（未切 pi `SessionManager`）。
 - 个人微信无官方机器人 API → 仅做企业微信。
+
+> **关于持久化**：pi `SessionManager` 已按 threadId 落盘 + resume，daemon 重启后模型仍带上重启前上下文；`ConversationRepo` 仍是 UI / 全文检索 / 渠道映射 / 项目元数据的真相源（两者并存，刻意不做"单一真相源"替换——会丢 FTS5 检索 / 渠道映射且大改 UI/SDK 而无净收益）。
 
 进展详见 [`docs/PROGRESS.md`](docs/PROGRESS.md)，约定与架构详见 [`CLAUDE.md`](CLAUDE.md)。
 
