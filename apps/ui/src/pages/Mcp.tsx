@@ -213,7 +213,13 @@ export function Mcp() {
             <h3>已配置（{servers.length}）</h3>
           </div>
         </div>
-        {servers.length === 0 && <div className="sub">（暂无 MCP 服务器）</div>}
+        {servers.length === 0 && (
+          <div className="empty-models">
+            <WrenchIcon size={26} />
+            <p>还没有 MCP 服务器</p>
+            <span>用上方表单添加 stdio / HTTP 服务器，或粘贴 mcpServers JSON 批量导入。</span>
+          </div>
+        )}
         {servers.map((s) => {
           const pr = probeResult[s.id];
           return (

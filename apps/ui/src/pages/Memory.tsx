@@ -264,7 +264,17 @@ export function Memory() {
             </button>
           ))}
         </div>
-        {items.length === 0 && <div className="sub">（暂无记忆）</div>}
+        {items.length === 0 && (
+          <div className="empty-models">
+            <SparkIcon size={26} />
+            <p>暂无记忆</p>
+            <span>
+              {isWorkspace
+                ? "在该工作区里对话后，约定 / 变动 / 坑会被自动抽取到这里。"
+                : "随对话自动抽取用户画像 / 偏好 / 技巧；也可在对话里让助手用 manage_memory 记。"}
+            </span>
+          </div>
+        )}
         {items.map((m) => (
           <div key={m.id} className="mem-item">
             <span className="mem-layer">{LAYER_LABEL[m.layer] ?? m.layer}</span>

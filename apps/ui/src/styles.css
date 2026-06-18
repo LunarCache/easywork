@@ -575,10 +575,12 @@ details.toolcard[open] > summary .chev { transform: rotate(90deg); }
 
 section { margin-bottom: 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 18px 20px; box-shadow: var(--shadow-1); max-width: 860px; }
 .sec-head { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
-.sec-head .ico { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none; }
-.sec-head .ico.blue { background: var(--accent-soft); color: var(--accent); }
-.sec-head .ico.green { background: var(--color-success-soft); color: var(--ok); }
-.sec-head .ico.violet { background: var(--color-embed-bg); color: var(--color-embed-text); }
+/* section 头部图标：统一中性瓷砖 + 珊瑚字（单 accent，不再蓝/绿/紫分区色）。
+   页头 .page-head .ico 仍是珊瑚瓷砖，形成「页=珊瑚 / 区块=中性」的层级。 */
+.sec-head .ico { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex: none; background: var(--surface-2); border: 1px solid var(--border); color: var(--accent); }
+.sec-head .ico.blue,
+.sec-head .ico.green,
+.sec-head .ico.violet { background: var(--surface-2); color: var(--accent); }
 .sec-head h3 { margin: 0; font-size: 15px; }
 .sec-head .hint { font-size: 12px; color: var(--muted); margin: 1px 0 0; }
 .form { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 10px; }
@@ -747,6 +749,20 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
 .mem-act:hover { background: var(--surface-2); color: var(--accent); }
 .mem-act.del:hover { background: var(--color-danger-soft); color: var(--err); }
 .mem-act.save { opacity: 1; color: var(--ok); }
+
+/* ================================================================
+   次级页（MCP / 知识库 / 记忆 / Skills）卡片与 pill 精修
+   —— 统一圆角 + 悬停反馈，贴合模型卡质感；pill 全圆角。
+   ================================================================ */
+.mcp-row, .kb-doc { border-radius: 12px; transition: border-color var(--ease) 0.15s, box-shadow var(--ease) 0.15s; }
+.mcp-row:hover, .kb-doc:hover { border-color: var(--border-strong); box-shadow: var(--shadow-2); }
+.skill-card { transition: border-color var(--ease) 0.15s, box-shadow var(--ease) 0.15s, transform var(--ease) 0.15s; }
+.skill-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-2); transform: translateY(-1px); }
+.mem-item, .mem-hit { border-radius: 12px; transition: border-color var(--ease) 0.15s; }
+.mem-item:hover { border-color: var(--border-strong); }
+.mem-scope, .kb-coll { border-radius: 999px; }
+/* MCP 行内「测试」按钮的探测结果在新行更易读 */
+.mcp-probe { margin-top: 6px; }
 
 /* ================================================================
    工作区
