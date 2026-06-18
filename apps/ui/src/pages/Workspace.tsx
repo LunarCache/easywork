@@ -3,7 +3,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { ApprovalMode, ChatMessage, Project } from "@ew/shared";
-import type { GitFile, GitStatus } from "@ew/sdk";
+import type { GitCommit, GitFile, GitRemoteInfo, GitStatus } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import {
   applyAgentEvent,
@@ -22,6 +22,7 @@ import {
   ChevronIcon,
   CommitIcon,
   DiffIcon,
+  DownloadIcon,
   EditIcon,
   FilePlusIcon,
   GitBranchIcon,
@@ -30,6 +31,7 @@ import {
   TerminalIcon,
   TrashIcon,
   UndoIcon,
+  UploadIcon,
   WrenchIcon,
   XIcon,
 } from "../icons.js";
@@ -61,6 +63,7 @@ export function Workspace({
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [git, setGit] = useState<GitStatus>({ repo: false, files: [] });
   const [branches, setBranches] = useState<{ current: string; all: string[] }>({ current: "", all: [] });
+  const [remote, setRemote] = useState<GitRemoteInfo>({ hasRemote: false, hasUpstream: false, ahead: 0, behind: 0 });
   const [reviewOpen, setReviewOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -69,12 +72,14 @@ export function Workspace({
 
   const refreshGit = async () => {
     try {
-      const [s, b] = await Promise.all([
+      const [s, b, rm] = await Promise.all([
         getClient().gitStatus(project.id),
         getClient().gitBranches(project.id),
+        getClient().gitRemote(project.id),
       ]);
       setGit(s);
       setBranches(b);
+      setRemote(rm);
     } catch {
       setGit({ repo: false, files: [] });
     }
@@ -397,6 +402,7 @@ export function Workspace({
       <ReviewPanel
         projectId={project.id}
         git={git}
+        remote={remote}
         onRefresh={refreshGit}
         open={reviewOpen}
         onClose={() => setReviewOpen(false)}
@@ -488,18 +494,24 @@ function ExecCard({ tool }: { tool: UiTool }) {
 function ReviewPanel({
   projectId,
   git,
+  remote,
   onRefresh,
   open,
   onClose,
 }: {
   projectId: string;
   git: GitStatus;
+  remote: GitRemoteInfo;
   onRefresh: () => Promise<void>;
   open: boolean;
   onClose: () => void;
 }) {
   const [commitMsg, setCommitMsg] = useState("");
   const [committing, setCommitting] = useState(false);
+  const [netBusy, setNetBusy] = useState(false);
+  const [netNote, setNetNote] = useState<{ ok: boolean; text: string } | null>(null);
+  // 提交/拉取后自增 → 触发提交历史重新加载（若已展开）。
+  const [historyNonce, setHistoryNonce] = useState(0);
   const staged = git.files.filter((f) => f.staged);
   const unstaged = git.files.filter((f) => f.unstaged);
 
@@ -513,11 +525,28 @@ function ReviewPanel({
     setCommitting(true);
     try {
       const r = await getClient().gitCommit(projectId, commitMsg.trim());
-      if (r.ok) setCommitMsg("");
-      else alert(`提交失败：${r.error ?? ""}`);
+      if (r.ok) {
+        setCommitMsg("");
+        setHistoryNonce((n) => n + 1);
+      } else alert(`提交失败：${r.error ?? ""}`);
       await onRefresh();
     } finally {
       setCommitting(false);
+    }
+  };
+
+  const net = async (kind: "push" | "pull") => {
+    setNetBusy(true);
+    setNetNote({ ok: true, text: kind === "push" ? "推送中…" : "拉取中…" });
+    try {
+      const r = kind === "push" ? await getClient().gitPush(projectId) : await getClient().gitPull(projectId);
+      setNetNote({ ok: r.ok, text: r.message || (r.ok ? "完成" : "失败") });
+      if (kind === "pull") setHistoryNonce((n) => n + 1);
+      await onRefresh();
+    } catch (e) {
+      setNetNote({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setNetBusy(false);
     }
   };
 
@@ -551,6 +580,28 @@ function ReviewPanel({
           <XIcon size={14} />
         </button>
       </div>
+
+      {remote.hasRemote && (
+        <div className="rev-remote">
+          <span className="rev-remote-info" title={remote.upstream}>
+            {remote.hasUpstream ? remote.upstream : "未设上游"}
+            {(remote.ahead > 0 || remote.behind > 0) && (
+              <span className="rev-counts">
+                {remote.ahead > 0 && <span className="add">↑{remote.ahead}</span>}
+                {remote.behind > 0 && <span className="del">↓{remote.behind}</span>}
+              </span>
+            )}
+          </span>
+          <span className="bar-spacer" />
+          <button className="rev-act" disabled={netBusy} onClick={() => void net("pull")} title="git pull --ff-only">
+            <DownloadIcon size={12} /> 拉取
+          </button>
+          <button className="rev-act" disabled={netBusy} onClick={() => void net("push")} title="git push">
+            <UploadIcon size={12} /> 推送
+          </button>
+        </div>
+      )}
+      {netNote && <div className={`rev-net-note ${netNote.ok ? "" : "err"}`}>{netNote.text}</div>}
 
       <div className="rev-scroll">
         {git.files.length === 0 && <div className="rev-empty">工作区干净，无改动。</div>}
@@ -591,6 +642,8 @@ function ReviewPanel({
             onAct={act}
           />
         )}
+
+        <CommitHistory projectId={projectId} nonce={historyNonce} />
       </div>
 
       {staged.length > 0 && (
@@ -607,6 +660,48 @@ function ReviewPanel({
         </div>
       )}
     </aside>
+  );
+}
+
+/** 提交历史：折叠区，展开时懒加载 git log；nonce 变化（提交/拉取后）若已展开则刷新。 */
+function CommitHistory({ projectId, nonce }: { projectId: string; nonce: number }) {
+  const [open, setOpen] = useState(false);
+  const [commits, setCommits] = useState<GitCommit[] | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setCommits(await getClient().gitLog(projectId, 30));
+    } catch {
+      setCommits([]);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (open) void load();
+  }, [open, nonce, load]);
+
+  return (
+    <div className="rev-group">
+      <div className="rev-group-head rev-history-head" onClick={() => setOpen((v) => !v)}>
+        <span className="rev-group-title">
+          <ChevronIcon size={13} className={`chev ${open ? "open" : ""}`} /> 提交历史
+        </span>
+      </div>
+      {open &&
+        (commits === null ? (
+          <div className="rev-empty">加载中…</div>
+        ) : commits.length === 0 ? (
+          <div className="rev-empty">还没有提交。</div>
+        ) : (
+          commits.map((c) => (
+            <div key={c.hash} className="rev-commit-row" title={`${c.hash}\n${c.author} · ${c.relDate}`}>
+              <code className="rev-chash">{c.shortHash}</code>
+              <span className="rev-csubject">{c.subject}</span>
+              <span className="rev-cmeta">{c.relDate}</span>
+            </div>
+          ))
+        ))}
+    </div>
   );
 }
 

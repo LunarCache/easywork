@@ -28,6 +28,25 @@ export interface BranchInfo {
   all: string[];
 }
 
+/** 一条提交记录（用于提交历史展示）。 */
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  author: string;
+  /** 相对时间（如「2 hours ago」）。 */
+  relDate: string;
+}
+
+/** 远程跟踪信息（驱动 push/pull 的可用性与 ↑↓ 角标）。 */
+export interface RemoteInfo {
+  hasRemote: boolean;
+  hasUpstream: boolean;
+  ahead: number;
+  behind: number;
+  upstream?: string;
+}
+
 interface RunResult {
   ok: boolean;
   stdout: string;
@@ -46,6 +65,30 @@ export class GitService {
         { cwd: this.root, maxBuffer: 16 * 1024 * 1024 },
         (err, stdout, stderr) => {
           resolve({ ok: !err, stdout: stdout ?? "", stderr: stderr ?? "" });
+        },
+      );
+    });
+  }
+
+  /** 网络型 git（push/pull）：禁止任何交互凭证提示（否则会挂起），并加超时。 */
+  private runNet(args: string[]): Promise<RunResult> {
+    return new Promise((resolve) => {
+      execFile(
+        "git",
+        args,
+        {
+          cwd: this.root,
+          maxBuffer: 16 * 1024 * 1024,
+          timeout: 60_000,
+          env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "ssh -oBatchMode=yes" },
+        },
+        (err, stdout, stderr) => {
+          const timedOut = (err as { killed?: boolean } | null)?.killed;
+          resolve({
+            ok: !err,
+            stdout: stdout ?? "",
+            stderr: timedOut ? "操作超时（可能在等待凭证或网络无响应）" : (stderr ?? ""),
+          });
         },
       );
     });
@@ -161,6 +204,71 @@ export class GitService {
 
   async switchBranch(name: string): Promise<RunResult> {
     return this.run(["checkout", name]);
+  }
+
+  /** 最近提交（默认 30，封顶 200）。用 \x1f/\x1e 分隔，避免主题里的特殊字符歧义。 */
+  async log(limit = 30): Promise<GitCommit[]> {
+    if (!(await this.isRepo())) return [];
+    const n = Math.max(1, Math.min(Math.floor(limit) || 30, 200));
+    const r = await this.run([
+      "log",
+      "-n",
+      String(n),
+      "--date=relative",
+      "--pretty=format:%H%x1f%h%x1f%s%x1f%an%x1f%ad%x1e",
+    ]);
+    if (!r.ok || !r.stdout.trim()) return []; // 无提交（新仓库）→ 空
+    return r.stdout
+      .split("\x1e")
+      .map((rec) => rec.trim())
+      .filter(Boolean)
+      .map((rec) => {
+        const [hash, shortHash, subject, author, relDate] = rec.split("\x1f");
+        return {
+          hash: hash ?? "",
+          shortHash: shortHash ?? "",
+          subject: subject ?? "",
+          author: author ?? "",
+          relDate: relDate ?? "",
+        };
+      });
+  }
+
+  /** 远程/上游与 ahead/behind 计数。 */
+  async remoteInfo(): Promise<RemoteInfo> {
+    if (!(await this.isRepo())) return { hasRemote: false, hasUpstream: false, ahead: 0, behind: 0 };
+    const hasRemote = (await this.run(["remote"])).stdout.trim().length > 0;
+    const up = await this.run(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
+    const hasUpstream = up.ok && up.stdout.trim().length > 0;
+    let ahead = 0;
+    let behind = 0;
+    if (hasUpstream) {
+      const c = await this.run(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]);
+      if (c.ok) {
+        const [b, a] = c.stdout.trim().split(/\s+/);
+        behind = Number(b) || 0;
+        ahead = Number(a) || 0;
+      }
+    }
+    return { hasRemote, hasUpstream, ahead, behind, ...(hasUpstream ? { upstream: up.stdout.trim() } : {}) };
+  }
+
+  /** 推送。无上游时回退 `push -u origin <branch>`（首次推送）；无 origin 则报错。 */
+  async push(): Promise<RunResult> {
+    const up = await this.run(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
+    if (up.ok && up.stdout.trim()) return this.runNet(["push"]);
+    const hasOrigin = (await this.run(["remote"])).stdout
+      .split("\n")
+      .map((s) => s.trim())
+      .includes("origin");
+    if (!hasOrigin) return { ok: false, stdout: "", stderr: "没有配置远程仓库（origin）" };
+    const branch = (await this.run(["rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim() || "HEAD";
+    return this.runNet(["push", "-u", "origin", branch]);
+  }
+
+  /** 拉取（仅 fast-forward，避免产生合并提交/冲突阻塞）。 */
+  async pull(): Promise<RunResult> {
+    return this.runNet(["pull", "--ff-only"]);
   }
 
   private async numstat(args: string[]): Promise<Map<string, { adds: number; dels: number }>> {

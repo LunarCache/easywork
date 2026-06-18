@@ -109,4 +109,35 @@ describe("GitService", () => {
     // revert 越界路径应抛错，绝不 rmSync 工作区外
     await expect(g.revert(["../../../../tmp/should-not-delete"])).rejects.toThrow(/越界/);
   });
+
+  it("log：返回最近提交（含 init），新增提交后置顶", async () => {
+    const g = new GitService(root);
+    let log = await g.log();
+    expect(log.length).toBe(1);
+    expect(log[0]!.subject).toBe("init");
+    expect(log[0]!.shortHash).toMatch(/^[0-9a-f]+$/);
+    fs.writeFileSync(path.join(root, "a.txt"), "x\n");
+    git("add", "-A");
+    git("commit", "-qm", "second");
+    log = await g.log();
+    expect(log.length).toBe(2);
+    expect(log[0]!.subject).toBe("second"); // 最新在前
+  });
+
+  it("remoteInfo / push：无远程时优雅报告（不挂起）", async () => {
+    const g = new GitService(root);
+    const rm = await g.remoteInfo();
+    expect(rm.hasRemote).toBe(false);
+    expect(rm.hasUpstream).toBe(false);
+    const r = await g.push();
+    expect(r.ok).toBe(false);
+    expect(r.stderr).toMatch(/没有配置远程仓库/);
+  });
+
+  it("remoteInfo：有 origin 但无上游 → hasRemote=true / hasUpstream=false", async () => {
+    git("remote", "add", "origin", "https://example.invalid/repo.git");
+    const rm = await new GitService(root).remoteInfo();
+    expect(rm.hasRemote).toBe(true);
+    expect(rm.hasUpstream).toBe(false);
+  });
 });

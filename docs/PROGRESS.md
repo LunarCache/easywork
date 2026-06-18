@@ -2,6 +2,21 @@
 
 > 每完成一个里程碑更新此文件。最新在上。
 
+## 2026-06-18 — 工作区 v2（提交历史 + push/pull）+ 次级页视觉精修
+
+### 工作区 v2：提交历史 + push/pull
+- 盘点发现「多会话回放」此前已实现（会话下拉/新建/切换/删除/按线程历史）。本次补两项：
+- **GitService** 新增 `log`（`git log` 用 `\x1f/\x1e` 分隔解析，封顶 200，新仓库空）、`remoteInfo`（远程/上游 + ahead/behind via `rev-list --left-right --count @{upstream}...HEAD`）、`push`/`pull`（新 `runNet`：`GIT_TERMINAL_PROMPT=0` + `ssh -oBatchMode=yes` + 60s 超时，杜绝凭证交互挂起；无上游 push 回退 `-u origin <branch>`，无 origin 优雅报错；pull 用 `--ff-only`）。
+- 端点 `GET /git/log|/git/remote` + `POST /git/push|/git/pull`；SDK `gitLog/gitRemote/gitPush/gitPull` + `GitCommit`/`GitRemoteInfo` 类型。
+- UI 审查面板：头部下方**远程条**（上游 + `↑ahead ↓behind` + 拉取/推送按钮，结果行内反馈）+ 底部**「提交历史」折叠区**（懒加载最近 30 条，提交/拉取后刷新）。
+- 验证：GitService 单测 +3、git 测试 12 全过、全量 **202 测试**绿；真机 API e2e（log 2 条 newest-first / 无远程 / push 文案）。
+- 剩余 v2：接受/拒绝单改动（per-hunk）、内嵌可编辑编辑器。
+
+### 次级页视觉精修（知识库 / Skills / MCP / 记忆 / 设置）
+- section 头部图标**去彩虹**：原 `.ico.blue/.green/.violet` 三色统一为中性瓷砖 + 珊瑚字（页头仍珊瑚瓷砖，形成层级），贴合单 accent 暖色主题。
+- 列表卡片（mcp-row/kb-doc/mem-item/skill-card）统一 12px 圆角 + 悬停反馈；pills（mem-scope/kb-coll）全圆角。
+- MCP / 记忆的纯文本空态换成图文空态（与模型/知识库一致）。
+
 ## 2026-06-17（续）— pi SessionManager 跨重启上下文 resume
 
 把 pi 会话改为**按 threadId 落盘 + resume**：daemon 重启 / 会话重建后，模型仍带上重启前的上下文（含 compaction）。

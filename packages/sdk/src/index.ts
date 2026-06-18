@@ -40,6 +40,20 @@ export interface GitStatus {
   branch?: string;
   files: GitFile[];
 }
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  author: string;
+  relDate: string;
+}
+export interface GitRemoteInfo {
+  hasRemote: boolean;
+  hasUpstream: boolean;
+  ahead: number;
+  behind: number;
+  upstream?: string;
+}
 
 export interface ClientOptions {
   baseUrl: string;
@@ -353,6 +367,18 @@ export class EasyWorkClient {
   }
   async gitSwitch(projectId: string, name: string): Promise<{ ok: boolean; error?: string }> {
     return this.postJSON(`${this.wsGit(projectId)}/switch`, { name });
+  }
+  async gitLog(projectId: string, limit = 30): Promise<GitCommit[]> {
+    return (await this.getJSON<{ commits: GitCommit[] }>(`${this.wsGit(projectId)}/log?limit=${limit}`)).commits;
+  }
+  async gitRemote(projectId: string): Promise<GitRemoteInfo> {
+    return this.getJSON(`${this.wsGit(projectId)}/remote`);
+  }
+  async gitPush(projectId: string): Promise<{ ok: boolean; message: string }> {
+    return this.postJSON(`${this.wsGit(projectId)}/push`, {});
+  }
+  async gitPull(projectId: string): Promise<{ ok: boolean; message: string }> {
+    return this.postJSON(`${this.wsGit(projectId)}/pull`, {});
   }
 
   /** 回应工具审批请求（approval-request 事件携带 id）。 */

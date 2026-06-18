@@ -838,6 +838,24 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
 .fv-btn { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: transparent; color: var(--muted); }
 .fv-btn:hover { background: var(--surface-3); color: var(--accent); }
 
+/* 工作区：远程 push/pull 条 + 提交历史 */
+.rev-remote { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.rev-remote-info { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rev-counts { display: inline-flex; gap: 6px; flex: none; }
+.rev-counts .add { color: var(--color-diff-add-text); }
+.rev-counts .del { color: var(--color-diff-del-text); }
+.rev-net-note { padding: 7px 12px; font-size: 12px; color: var(--text-2); background: var(--surface-2); border-bottom: 1px solid var(--border); white-space: pre-wrap; word-break: break-word; max-height: 96px; overflow: auto; }
+.rev-net-note.err { color: var(--err); background: var(--color-danger-soft); }
+.rev-history-head { cursor: pointer; }
+.rev-history-head:hover { background: var(--surface-3); }
+.rev-history-head .chev { transition: transform var(--ease) 0.15s; }
+.rev-history-head .chev.open { transform: rotate(90deg); }
+.rev-commit-row { display: flex; align-items: baseline; gap: 9px; padding: 6px 12px; border-top: 1px solid var(--border); font-size: 12.5px; }
+.rev-commit-row:hover { background: var(--surface-3); }
+.rev-chash { flex: none; font-family: var(--font-mono); font-size: 11.5px; color: var(--accent); background: var(--accent-soft); border-radius: 5px; padding: 1px 6px; }
+.rev-csubject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.rev-cmeta { flex: none; font-size: 11px; color: var(--muted); }
+
 /* 对话模式右侧「工件」面板（复用 .ws-review 的滑入观感） */
 .chat-files { position: absolute; top: 0; right: 0; height: 100%; width: min(46%, 560px); border-left: 1px solid var(--border-strong); background: var(--surface-2); display: flex; flex-direction: column; min-height: 0; transform: translateX(100%); transition: transform var(--ease) 0.22s; box-shadow: -10px 0 28px rgba(0,0,0,0.18); z-index: 20; }
 .chat-files.open { transform: none; }

@@ -978,6 +978,37 @@ version: "0.1.0"
       return reply.code(400).send({ error: "git_error" });
     }
   });
+  app.get("/workspace/:id/git/log", async (req, reply) => {
+    const q = req.query as { limit?: string };
+    try {
+      return { commits: await git((req.params as { id: string }).id).log(q.limit ? Number(q.limit) : 30) };
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+  app.get("/workspace/:id/git/remote", async (req, reply) => {
+    try {
+      return await git((req.params as { id: string }).id).remoteInfo();
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+  app.post("/workspace/:id/git/push", async (req, reply) => {
+    try {
+      const r = await git((req.params as { id: string }).id).push();
+      return { ok: r.ok, message: (r.stderr || r.stdout).trim() };
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
+  app.post("/workspace/:id/git/pull", async (req, reply) => {
+    try {
+      const r = await git((req.params as { id: string }).id).pull();
+      return { ok: r.ok, message: (r.stderr || r.stdout).trim() };
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
 
   // ---- 记忆 ----
   const MemoryWriteSchema = z.object({
