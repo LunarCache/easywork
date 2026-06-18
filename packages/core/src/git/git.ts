@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { resolveWorkspacePath } from "@ew/tools";
 
@@ -271,6 +272,42 @@ export class GitService {
     return this.runNet(["pull", "--ff-only"]);
   }
 
+  /**
+   * 单个改动块（hunk）的接受/拒绝（部分暂存）。从该文件当前 diff 取第 hunkIndex 个 hunk
+   * 构造最小补丁，再 `git apply` 落到 index/工作区：
+   * - stage：未暂存 diff → `apply --cached`（接受到暂存区）
+   * - unstage：已暂存 diff → `apply --cached --reverse`（从暂存区移出）
+   * - discard：未暂存 diff → `apply --reverse`（从工作区丢弃，destructive）
+   * hunkIndex 与前端按同一份 diff 的 @@ 顺序对齐。untracked 文件不支持（按整文件操作）。
+   */
+  async hunkOp(filePath: string, hunkIndex: number, op: "stage" | "unstage" | "discard"): Promise<RunResult> {
+    const abs = this.safe(filePath); // 越界抛错
+    const fileDiff =
+      op === "unstage"
+        ? (await this.run(["diff", "--cached", "--", abs])).stdout
+        : (await this.run(["diff", "--", abs])).stdout;
+    const patch = buildHunkPatch(fileDiff, hunkIndex);
+    if (!patch) return { ok: false, stdout: "", stderr: "找不到该改动块（可能已变化，请刷新）" };
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ew-hunk-"));
+    const file = path.join(dir, "hunk.patch");
+    try {
+      fs.writeFileSync(file, patch);
+      const flags =
+        op === "stage"
+          ? ["apply", "--cached", "--recount", file]
+          : op === "unstage"
+            ? ["apply", "--cached", "--reverse", "--recount", file]
+            : ["apply", "--reverse", "--recount", file];
+      return await this.run(flags);
+    } finally {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   private async numstat(args: string[]): Promise<Map<string, { adds: number; dels: number }>> {
     const out = (await this.run(args)).stdout;
     const map = new Map<string, { adds: number; dels: number }>();
@@ -297,6 +334,25 @@ export class GitService {
       return { adds: 0, dels: 0 };
     }
   }
+}
+
+/**
+ * 从单文件 unified diff 抽出第 index 个 hunk，拼成可独立 `git apply` 的最小补丁
+ * （文件头 `diff --git`/`---`/`+++` + 该 @@ 块）。索引/找不到则返回 null。
+ */
+function buildHunkPatch(fileDiff: string, index: number): string | null {
+  if (!fileDiff.trim()) return null;
+  const lines = fileDiff.split("\n");
+  const firstHunk = lines.findIndex((l) => l.startsWith("@@"));
+  if (firstHunk === -1) return null;
+  const header = lines.slice(0, firstHunk);
+  const starts: number[] = [];
+  for (let i = firstHunk; i < lines.length; i++) if (lines[i]!.startsWith("@@")) starts.push(i);
+  if (index < 0 || index >= starts.length) return null;
+  const start = starts[index]!;
+  const end = index + 1 < starts.length ? starts[index + 1]! : lines.length;
+  const body = lines.slice(start, end);
+  return [...header, ...body].join("\n").replace(/\n*$/, "\n");
 }
 
 /**

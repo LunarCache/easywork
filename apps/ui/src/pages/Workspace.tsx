@@ -802,7 +802,16 @@ function FileRow({
           )}
         </span>
       </div>
-      {open && diff != null && <DiffView text={diff} />}
+      {open && diff != null && (
+        <DiffView
+          text={diff}
+          projectId={projectId}
+          path={file.path}
+          staged={staged}
+          untracked={file.untracked}
+          onAct={onAct}
+        />
+      )}
     </div>
   );
 }
@@ -839,19 +848,63 @@ function parseUnifiedDiff(text: string): DiffRow[] {
   return rows;
 }
 
-function DiffView({ text }: { text: string }) {
+function DiffView({
+  text,
+  projectId,
+  path,
+  staged,
+  untracked,
+  onAct,
+}: {
+  text: string;
+  projectId: string;
+  path: string;
+  staged: boolean;
+  untracked: boolean;
+  onAct: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
   if (!text.trim()) return <div className="diff-empty">（无文本 diff）</div>;
   const rows = parseUnifiedDiff(text);
+  // 按 @@ 顺序给每个 hunk 编号；与后端 buildHunkPatch 的索引一致。
+  let hunk = -1;
+  const hunkOp = (hi: number, op: "stage" | "unstage" | "discard") =>
+    void onAct(() => getClient().gitHunk(projectId, path, hi, op));
   return (
     <div className="diffview">
-      {rows.map((r, i) => (
-        <div key={i} className={`dv-row ${r.type}`}>
-          <span className="dv-gutter">{r.type === "hunk" ? "" : (r.oldNo ?? "")}</span>
-          <span className="dv-gutter">{r.type === "hunk" ? "" : (r.newNo ?? "")}</span>
-          <span className="dv-sign">{r.type === "add" ? "+" : r.type === "del" ? "-" : r.type === "hunk" ? "" : " "}</span>
-          <span className="dv-code">{r.text || " "}</span>
-        </div>
-      ))}
+      {rows.map((r, i) => {
+        if (r.type === "hunk") {
+          hunk += 1;
+          const hi = hunk;
+          return (
+            <div key={i} className="dv-hunk">
+              <span className="dv-hunk-line">{r.text}</span>
+              {/* untracked 整文件操作（FileRow 已有 +/还原），不做 per-hunk。 */}
+              {!untracked && (
+                <span className="dv-hunk-acts">
+                  {staged ? (
+                    <button onClick={() => hunkOp(hi, "unstage")}>取消暂存块</button>
+                  ) : (
+                    <>
+                      <button onClick={() => hunkOp(hi, "stage")}>暂存块</button>
+                      <button className="danger" onClick={() => hunkOp(hi, "discard")} title="从工作区丢弃此块（不可撤销）">
+                        丢弃块
+                      </button>
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
+          );
+        }
+        return (
+          <div key={i} className={`dv-row ${r.type}`}>
+            <span className="dv-gutter">{r.oldNo ?? ""}</span>
+            <span className="dv-gutter">{r.newNo ?? ""}</span>
+            <span className="dv-sign">{r.type === "add" ? "+" : r.type === "del" ? "-" : " "}</span>
+            <span className="dv-code">{r.text || " "}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -9,8 +9,9 @@
 - **GitService** 新增 `log`（`git log` 用 `\x1f/\x1e` 分隔解析，封顶 200，新仓库空）、`remoteInfo`（远程/上游 + ahead/behind via `rev-list --left-right --count @{upstream}...HEAD`）、`push`/`pull`（新 `runNet`：`GIT_TERMINAL_PROMPT=0` + `ssh -oBatchMode=yes` + 60s 超时，杜绝凭证交互挂起；无上游 push 回退 `-u origin <branch>`，无 origin 优雅报错；pull 用 `--ff-only`）。
 - 端点 `GET /git/log|/git/remote` + `POST /git/push|/git/pull`；SDK `gitLog/gitRemote/gitPush/gitPull` + `GitCommit`/`GitRemoteInfo` 类型。
 - UI 审查面板：头部下方**远程条**（上游 + `↑ahead ↓behind` + 拉取/推送按钮，结果行内反馈）+ 底部**「提交历史」折叠区**（懒加载最近 30 条，提交/拉取后刷新）。
-- 验证：GitService 单测 +3、git 测试 12 全过、全量 **202 测试**绿；真机 API e2e（log 2 条 newest-first / 无远程 / push 文案）。
-- 剩余 v2：接受/拒绝单改动（per-hunk）、内嵌可编辑编辑器。
+- **接受/拒绝单改动（per-hunk）**：`GitService.hunkOp(path, hunkIndex, op)` 从该文件 diff 抽第 N 个 hunk 构造最小补丁 → `git apply`（stage=`--cached` / unstage=`--cached --reverse` / discard=`--reverse`，`--recount` 容错）；端点 `POST /git/hunk`、SDK `gitHunk`；diff 视图每个 @@ 块悬停显示「暂存块 / 丢弃块」（未暂存）或「取消暂存块」（已暂存），hunk 索引与后端按同一份 diff 对齐；untracked 仍按整文件。
+- 验证：GitService 单测 +5（log/remote/push/部分暂存/丢弃块）、git 测试 14 全过、全量 **204 测试**绿；真机 API e2e（log / remote / push 文案 / per-hunk 部分暂存：staged 含块 0、unstaged 含块 1、文件同时 staged&unstaged）。
+- v2 仅剩内嵌可编辑编辑器（按需，不引入）。
 
 ### 次级页视觉精修（知识库 / Skills / MCP / 记忆 / 设置）
 - section 头部图标**去彩虹**：原 `.ico.blue/.green/.violet` 三色统一为中性瓷砖 + 珊瑚字（页头仍珊瑚瓷砖，形成层级），贴合单 accent 暖色主题。

@@ -1009,6 +1009,21 @@ version: "0.1.0"
       return reply.code(400).send({ error: "git_error" });
     }
   });
+  const HunkSchema = z.object({
+    path: z.string().min(1),
+    hunkIndex: z.number().int().min(0),
+    op: z.enum(["stage", "unstage", "discard"]),
+  });
+  app.post("/workspace/:id/git/hunk", async (req, reply) => {
+    const b = HunkSchema.safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: "bad_request" });
+    try {
+      const r = await git((req.params as { id: string }).id).hunkOp(b.data.path, b.data.hunkIndex, b.data.op);
+      return { ok: r.ok, error: r.ok ? undefined : r.stderr || r.stdout };
+    } catch {
+      return reply.code(400).send({ error: "git_error" });
+    }
+  });
 
   // ---- 记忆 ----
   const MemoryWriteSchema = z.object({

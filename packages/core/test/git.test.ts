@@ -140,4 +140,41 @@ describe("GitService", () => {
     expect(rm.hasRemote).toBe(true);
     expect(rm.hasUpstream).toBe(false);
   });
+
+  // 造一个有两处相隔改动（两个 hunk）的文件。
+  function twoHunkFile(): GitService {
+    const f = path.join(root, "multi.txt");
+    const base = Array.from({ length: 20 }, (_, i) => `L${i}`);
+    fs.writeFileSync(f, base.join("\n") + "\n");
+    git("add", "-A");
+    git("commit", "-qm", "base");
+    const next = [...base];
+    next[1] = "L1-CHANGED";
+    next[18] = "L18-CHANGED";
+    fs.writeFileSync(f, next.join("\n") + "\n");
+    return new GitService(root);
+  }
+
+  it("hunkOp stage：仅暂存选中的块（部分暂存）", async () => {
+    const g = twoHunkFile();
+    const full = await g.diff("multi.txt");
+    expect(full.split("\n").filter((l) => l.startsWith("@@")).length).toBe(2); // 两个 hunk
+    const r = await g.hunkOp("multi.txt", 0, "stage");
+    expect(r.ok).toBe(true);
+    const cached = await g.diff("multi.txt", { staged: true });
+    const unstaged = await g.diff("multi.txt");
+    expect(cached).toContain("L1-CHANGED");
+    expect(cached).not.toContain("L18-CHANGED");
+    expect(unstaged).toContain("L18-CHANGED");
+    expect(unstaged).not.toContain("L1-CHANGED");
+  });
+
+  it("hunkOp discard：仅丢弃选中块（其余改动保留）", async () => {
+    const g = twoHunkFile();
+    const r = await g.hunkOp("multi.txt", 1, "discard");
+    expect(r.ok).toBe(true);
+    const content = fs.readFileSync(path.join(root, "multi.txt"), "utf8");
+    expect(content).toContain("L1-CHANGED"); // 第一处仍在
+    expect(content).not.toContain("L18-CHANGED"); // 第二处被丢弃
+  });
 });

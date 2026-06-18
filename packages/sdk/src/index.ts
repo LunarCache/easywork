@@ -380,6 +380,15 @@ export class EasyWorkClient {
   async gitPull(projectId: string): Promise<{ ok: boolean; message: string }> {
     return this.postJSON(`${this.wsGit(projectId)}/pull`, {});
   }
+  /** 单个改动块的接受/拒绝：stage（暂存块）/ unstage（取消暂存块）/ discard（丢弃块）。 */
+  async gitHunk(
+    projectId: string,
+    path: string,
+    hunkIndex: number,
+    op: "stage" | "unstage" | "discard",
+  ): Promise<{ ok: boolean; error?: string }> {
+    return this.postJSON(`${this.wsGit(projectId)}/hunk`, { path, hunkIndex, op });
+  }
 
   /** 回应工具审批请求（approval-request 事件携带 id）。 */
   async approveTool(id: string, verdict: "approve" | "approve-always" | "deny"): Promise<void> {
