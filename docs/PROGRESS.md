@@ -2,6 +2,17 @@
 
 > 每完成一个里程碑更新此文件。最新在上。
 
+## 2026-06-21 — 前端全重构为 Agent Desk 设计语言（冷灰三栏代理工作台）
+
+经 claude_design MCP 从 claude.ai/design 导入 **Agent Desk** 设计（项目「桌面代理设计风格研究」），把前端从「Claude 暖米白侧栏 + 单页」整体重构为冷灰 + 靛蓝的三栏 IDE 式工作台。分阶段落地，每阶段 typecheck/build/eslint 绿 + 真机 Playwright 验证、独立提交：
+
+- **P0 token + 字体**：`@fontsource/ibm-plex-sans + jetbrains-mono`（离线内置）；`styles.css` token 全量重写为 Agent Desk（`@theme` 浅色 + `[data-theme=dark]` + `[data-accent=iris|teal|amber]` + `[data-density]`），主题机制从 `.dark` class 改为 `<html>` 的 data-* 属性；prefs/index.html/设置页外观（明暗 + 三色 + 密度）。
+- **P1 工作台 shell**：重写 `App.tsx` → 标题栏（交通灯 + accent 三点 + 密度/主题/设置）+ 图标轨道（对话/工作区/收件箱 + 记忆/设置 + 账户）+ 会话列表 + 主区 + 可拖拽 resizer（持久化）；次级页（模型/知识库/Skills/MCP/记忆/设置）收进 Settings/Memory 浮层。新增 `components/{Titlebar,IconRail,SessionList,SettingsOverlay,MemoryOverlay}`。
+- **设置浮层面板**：scoped CSS 把复用页面收敛成 Agent Desk 设置观感（扁平区块 + 标题/描述 + 列表项卡片）；**Skills/MCP 改行卡片 + 真实开关**（Skills→`excludeSkills` 经 pi `skillsOverride` 过滤；MCP→`enabled`）。
+- **P2 对话区**：抽 `components/MessageStream`（聊天与工作区共用）——头像 + 名 + 时间线（思考 / 工具卡 READ·EDIT-diff·RUN-terminal / 文本）+ thinking 三点；**用户消息右对齐**。
+- **P3 会话列表分组 + 工作区面板**：工作区按项目分组→其会话（CWD 角标），会话选择上移到 App（Workspace 改受控 threadId）；工作区面板扩成 **Diff / Files(wsList+wsRead) / Terminal(最近 run_command)** 三标签。
+- 后端仅一处增量：`/agent/run` + SessionHost 加 `excludeSkills`（pi `skillsOverride` 按名过滤），其余纯前端。全量 **204 测试**绿。
+
 ## 2026-06-18 — 工作区 v2（提交历史 + push/pull）+ 次级页视觉精修
 
 ### 工作区 v2：提交历史 + push/pull

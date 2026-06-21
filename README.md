@@ -26,7 +26,7 @@
 - **多协议端点（网关）**：`/v1/chat/completions`（+stream）、`/v1/embeddings`、`/v1/models`（OpenAI 兼容）、`/v1/messages`（Anthropic 兼容）。本地模型**透传**到其 llama-server 原生端点（OpenAI + 原生 Anthropic）；云端**流式经 pi-ai**（统一鉴权，含 OAuth）。可让 Claude Code 等外部客户端直接指向。
 - **本地端口暴露**：llama-server 默认仅绑 `127.0.0.1`；可在「设置 → 本地网络」切到 `0.0.0.0` 让局域网其他服务直连（**强制设置 api-key**，未鉴权拒绝）。
 - **思维链**：`<think>` 与 gpt-oss harmony 多通道（analysis → 思考 / final → 正文）解析；**思考过程持久化**（作为 reasoning 片段落库），切换 / 重载会话仍可展开回放（不回喂模型）。
-- **桌面 UI**：Claude 桌面端设计语言（暖米白 + 黏土珊瑚 · 明暗双主题 · 衬线问候空态）。侧栏顶部分段「对话 / 工作区」+ 按需 Recents。聊天（流式 / 思维链 / 工具卡 / 引用 / HTML 工件 / 图片多模态 / 审批弹窗 / 右侧「工件」面板）、模型（本地 / 云端 API 分页）、知识库、Skills、MCP、记忆（按作用域）、设置 —— 各为独立页面。
+- **桌面 UI（Agent Desk 工作台）**：冷灰 + 靛蓝设计语言（IBM Plex Sans / JetBrains Mono · 明暗双主题 · iris/teal/amber 三色 + 紧凑/舒适密度，挂 `<html>` data-*）。布局 = 标题栏 + **图标轨道模式切换（对话 / 工作区 / 收件箱）** + 分组会话列表（工作区按项目→会话，CWD 角标）+ 可拖拽对话区（头像 + READ/EDIT-diff/RUN-terminal 工具卡 + thinking + 流式 / 引用 / HTML 工件 / 图片多模态 / 审批 / 右侧「工件」面板）+ 工作区面板（Diff / Files / Terminal 标签）+ Settings（模型 / 知识库 / Skills / MCP / 通用，Skills·MCP 行卡片开关）/ Memory 浮层。
 
 ---
 
@@ -105,7 +105,7 @@ apps/
 ```bash
 npm install            # 安装全部 workspace 依赖
 npm run build          # turbo 构建全部包
-npm test               # vitest（199 测试）
+npm test               # vitest（204 测试）
 npm run typecheck      # 全量类型检查
 npm run lint           # eslint
 ```
@@ -175,7 +175,7 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 - **记忆（作用域化）**：全局池 + 每工作区私有池；渐进式披露注入 + 批量事实抽取；sqlite-vec ⊕ 词法混合召回；markdown 可手改回灌。
 - **知识库 RAG**：上传 → 解析 → 分块 → 嵌入 → RRF 混合检索 + 引用来源。
 - **思考过程持久化**：reasoning 落库并跨会话回放（不回喂模型）。
-- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（Claude 暖色设计语言 · 明暗双主题）；聊天 / 模型（本地+云端 API）/ 知识库 / Skills / MCP / 记忆 / 设置 各独立页。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（**Agent Desk 工作台**设计语言：冷灰 + 靛蓝 · IBM Plex/JetBrains · 明暗 + 三色 accent + 密度）；标题栏 + 图标轨道（对话/工作区/收件箱）+ 分组会话列表 + 三栏可拖拽 + 工作区面板（Diff/Files/Terminal）+ 设置/记忆浮层。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP 持久化）。
 
 ### 🚧 待做
