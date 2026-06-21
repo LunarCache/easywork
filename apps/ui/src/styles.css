@@ -596,6 +596,11 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .cv-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
 .cv-name { font-size: 12.5px; font-weight: 600; }
 .cv-userbubble { background: var(--color-bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; font-size: 13px; white-space: pre-wrap; line-height: 1.6; }
+/* 用户消息靠右：头像在右、内容右对齐气泡。 */
+.cv-msg.user { flex-direction: row-reverse; }
+.cv-msg.user .cv-col { display: flex; flex-direction: column; align-items: flex-end; }
+.cv-msg.user .cv-userbubble { max-width: 85%; background: var(--color-accent-soft); border-color: var(--color-accent-border); }
+.cv-msg.user .cv-images { justify-content: flex-end; }
 .cv-images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
 .cv-images img { max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid var(--border); }
 .cv-msg.assistant:hover .msg-action { opacity: 1; }

@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
 import type { ApprovalMode, ChatMessage, Project } from "@ew/shared";
 import type { GitCommit, GitFile, GitRemoteInfo, GitStatus } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { loadDisabledSkills } from "../lib/prefs.js";
+import { MessageStream } from "../components/MessageStream.js";
 import {
   applyAgentEvent,
   messageText,
@@ -15,17 +13,13 @@ import {
   type PendingApproval,
   type StoredMsg,
   type UiMsg,
-  type UiTool,
 } from "../lib/agent-stream.js";
 import {
   ArrowUpIcon,
-  BrainIcon,
   ChevronIcon,
   CommitIcon,
   DiffIcon,
   DownloadIcon,
-  EditIcon,
-  FilePlusIcon,
   GitBranchIcon,
   NewChatIcon,
   RefreshIcon,
@@ -316,53 +310,7 @@ export function Workspace({
               </p>
             </div>
           )}
-          {msgs.map((m, i) => {
-            if (m.role === "user")
-              return (
-                <div key={i} className="msg user">
-                  <div className="bubble">{m.raw}</div>
-                </div>
-              );
-            const isLast = i === msgs.length - 1;
-            const live = busy && isLast;
-            const blocks = m.blocks ?? [];
-            const lastIdx = blocks.length - 1;
-            return (
-              <div key={i} className="msg assistant">
-                {/* 有序时间线：思考 → 工具 → 思考 → … → 文本。 */}
-                {blocks.map((b, bi) => {
-                  if (b.kind === "reasoning") {
-                    const liveThis = live && bi === lastIdx;
-                    const dur = b.end ? (b.end - b.start) / 1000 : null;
-                    const label = liveThis
-                      ? "思考中…"
-                      : dur != null
-                        ? `思考了 ${dur < 1 ? "<1" : Math.round(dur)} 秒`
-                        : "思考过程";
-                    return (
-                      <details key={bi} className="reason" open={liveThis}>
-                        <summary>
-                          <BrainIcon size={15} /> <span>{label}</span>
-                          <ChevronIcon size={14} className="chev" />
-                        </summary>
-                        <div className="reason-body">{b.text}</div>
-                      </details>
-                    );
-                  }
-                  if (b.kind === "tool") return <ToolCardDispatch key={bi} tool={b.tool} />;
-                  return (
-                    <div key={bi} className="text md">
-                      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                        {b.text}
-                      </Markdown>
-                      {live && bi === lastIdx && <span className="cursor" />}
-                    </div>
-                  );
-                })}
-                {blocks.length === 0 && live && <div className="text">正在思考…</div>}
-              </div>
-            );
-          })}
+          <MessageStream msgs={msgs} busy={busy} />
         </div>
 
         <footer className="composer">
@@ -434,63 +382,6 @@ export function Workspace({
   );
 }
 
-/** 聊天里的工具卡：run_command → 终端卡；fs_* → 文件改动 chip；其余 → 通用卡。 */
-function ToolCardDispatch({ tool }: { tool: UiTool }) {
-  if (tool.name === "run_command") return <ExecCard tool={tool} />;
-  if (tool.name === "fs_write" || tool.name === "fs_edit") {
-    const p = tool.diff?.path ?? "文件";
-    return (
-      <div className={`fs-chip ${tool.status}`}>
-        {tool.name === "fs_write" ? <FilePlusIcon size={14} /> : <EditIcon size={14} />}
-        <span>{tool.status === "running" ? "写入中…" : tool.name === "fs_write" ? "写入" : "编辑"}</span>
-        <code>{p}</code>
-      </div>
-    );
-  }
-  return (
-    <details className={`toolcard ${tool.status}`}>
-      <summary>
-        <WrenchIcon size={15} className="ticon" />
-        <span className="tname">{tool.name}</span>
-        <span className="tlabel">{tool.status === "running" ? "调用中…" : tool.status === "error" ? "失败" : "完成"}</span>
-        <ChevronIcon size={14} className="chev" />
-      </summary>
-      <div className="toolbody">
-        <div className="tkv">
-          <span>参数</span>
-          <code>{tool.args || "{}"}</code>
-        </div>
-        {tool.result != null && (
-          <div className="tkv">
-            <span>结果</span>
-            <code>{tool.result}</code>
-          </div>
-        )}
-      </div>
-    </details>
-  );
-}
-
-function ExecCard({ tool }: { tool: UiTool }) {
-  const out = tool.output ?? tool.result ?? "";
-  let cmd = "";
-  try {
-    cmd = (JSON.parse(tool.args || "{}") as { command?: string }).command ?? "";
-  } catch {
-    /* ignore */
-  }
-  return (
-    <details className={`execcard ${tool.status}`} open={tool.status === "running"}>
-      <summary>
-        <TerminalIcon size={15} className="ticon" />
-        <span className="tname">{cmd || "命令"}</span>
-        <span className="tlabel">{tool.status === "running" ? "运行中…" : tool.status === "error" ? "失败" : "完成"}</span>
-        <ChevronIcon size={14} className="chev" />
-      </summary>
-      <pre className="exec-out">{out || "（无输出）"}</pre>
-    </details>
-  );
-}
 
 // ===== 右侧 git 审查面板 =====
 function ReviewPanel({
