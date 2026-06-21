@@ -24,6 +24,16 @@ export interface WsEntry {
   size?: number;
 }
 
+/** 终端命令执行结果。 */
+export interface ExecResult {
+  /** 退出码（信号终止/启动失败为 null 或 -1）。 */
+  code: number | null;
+  /** stdout + stderr 合并输出。 */
+  output: string;
+  /** 输出超上限被截断。 */
+  truncated: boolean;
+}
+
 /** git 改动文件。 */
 export interface GitFile {
   path: string;
@@ -338,6 +348,23 @@ export class EasyWorkClient {
     if (range?.start) q.set("start", String(range.start));
     if (range?.end) q.set("end", String(range.end));
     return this.getJSON(`/chat/${encodeURIComponent(threadId)}/file?${q}`);
+  }
+
+  /** 在工作区目录里执行命令（终端 tab）。返回退出码 + 合并输出。 */
+  async wsExec(projectId: string, command: string): Promise<ExecResult> {
+    return this.postJSON(`/workspace/${encodeURIComponent(projectId)}/exec`, { command });
+  }
+  /** 在对话会话工件目录里执行命令（终端 tab）。 */
+  async chatExec(threadId: string, command: string): Promise<ExecResult> {
+    return this.postJSON(`/chat/${encodeURIComponent(threadId)}/exec`, { command });
+  }
+  /** 在系统文件管理器中打开工作区目录。 */
+  async wsReveal(projectId: string): Promise<{ ok: boolean; dir?: string }> {
+    return this.postJSON(`/workspace/${encodeURIComponent(projectId)}/reveal`, {});
+  }
+  /** 在系统文件管理器中打开对话会话工件目录。 */
+  async chatReveal(threadId: string): Promise<{ ok: boolean; dir?: string }> {
+    return this.postJSON(`/chat/${encodeURIComponent(threadId)}/reveal`, {});
   }
 
   // ---- 工作区 git ----

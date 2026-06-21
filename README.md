@@ -19,14 +19,14 @@
   - **记忆/知识库/会话检索**：记忆经 pi 扩展接入——**渐进式披露**（记忆「清单」注入系统提示词 + `recall_memory` 工具按需取全文，借鉴 Skill）+ **批量事实抽取**（空闲/关闭时，非每轮）；知识库 / 会话检索为 customTools。
   - **MCP**：stdio（默认禁用，需开关）+ HTTP；工具桥成 pi customTools；导入标准 `mcpServers` JSON。
   - **Skills**：pi 自带 skills（resourceLoader 发现）+ 应用内 Skills 管理。
-- **工作区模式**：在本地项目目录里读写文件 / 跑命令（git 改动审阅面板）。聊天模式也能写文件 / 跑命令，但**限定在每会话工件目录内**，右侧「工件」面板实时展示产出（网页 / 文件等）。
+- **工作区模式**：在本地项目目录里读写文件 / 跑命令（git 改动审阅面板）。聊天模式也能写文件 / 跑命令，但**限定在每会话工件目录内**。两种模式共用**右侧「工作台坞」**（改动 / 文件 / 终端 / 预览四 tab，详见下方桌面 UI）。
 - **文档知识库 RAG**：本地文件上传 → 异步解析（带进度）→ 分块 → 嵌入 → **RRF 混合检索**（sqlite-vec 语义 + 词法）→ 多集合作用域 → 首轮自动注入 + 引用来源。
 - **可插拔记忆（作用域化）**：**全局池**（所有对话共享）+ **每工作区私有池**（互相隔离、独立于全局，工作区盯约定 / 变动 / 坑）；**渐进式披露**注入（清单常驻 + 按需取全文）+ **批量抽取**（非每轮）；**sqlite-vec ⊕ 词法**混合召回；全局 markdown 可手改回灌；记忆页按作用域浏览 / 编辑 / 清空；Mem0 适配器。
 - **采样参数**：`temperature / top_p / top_k / min_p / repeat_penalty / frequency_penalty / presence_penalty / reasoning_effort`，全链路透传，**按模型**保存（聊天内快捷浮层）。
 - **多协议端点（网关）**：`/v1/chat/completions`（+stream）、`/v1/embeddings`、`/v1/models`（OpenAI 兼容）、`/v1/messages`（Anthropic 兼容）。本地模型**透传**到其 llama-server 原生端点（OpenAI + 原生 Anthropic）；云端**流式经 pi-ai**（统一鉴权，含 OAuth）。可让 Claude Code 等外部客户端直接指向。
 - **本地端口暴露**：llama-server 默认仅绑 `127.0.0.1`；可在「设置 → 本地网络」切到 `0.0.0.0` 让局域网其他服务直连（**强制设置 api-key**，未鉴权拒绝）。
 - **思维链**：`<think>` 与 gpt-oss harmony 多通道（analysis → 思考 / final → 正文）解析；**思考过程持久化**（作为 reasoning 片段落库），切换 / 重载会话仍可展开回放（不回喂模型）。
-- **桌面 UI（Agent Desk 工作台）**：冷灰 + 靛蓝设计语言（IBM Plex Sans / JetBrains Mono · 明暗双主题 · iris/teal/amber 三色 + 紧凑/舒适密度，挂 `<html>` data-*）。布局 = 标题栏 + **图标轨道模式切换（对话 / 工作区 / 收件箱）** + 分组会话列表（工作区按项目→会话，CWD 角标）+ 可拖拽对话区（头像 + READ/EDIT-diff/RUN-terminal 工具卡 + thinking + 流式 / 引用 / HTML 工件 / 图片多模态 / 审批 / 右侧「工件」面板）+ 工作区面板（Diff / Files / Terminal 标签）+ Settings（模型 / 知识库 / Skills / MCP / 通用，Skills·MCP 行卡片开关）/ Memory 浮层。
+- **桌面 UI（Agent Desk 工作台）**：冷灰 + 靛蓝设计语言（IBM Plex Sans / JetBrains Mono · 明暗双主题 · iris/teal/amber 三色 + 紧凑/舒适密度，挂 `<html>` data-*）。布局 = 标题栏 + **图标轨道模式切换（对话 / 工作区 / 收件箱）** + 分组会话列表（工作区按项目→会话，CWD 角标）+ 可拖拽对话区（头像 + READ/EDIT-diff/RUN-terminal 工具卡 + thinking + 流式 / 引用 / HTML 工件 / 图片多模态 / 审批）+ **统一右侧「工作台坞」**（对话区与工作区共用，一坞四 tab：**改动**（git 审查，按需）/ **文件**（工件 + 文件树内联预览，📂 在文件管理器打开目录）/ **终端**（看 AI 命令 + `$` 自己跑命令）/ **预览**（点来源 / 链接内联看网页、不导航走 app，⤢ 放大到整窗）） + Settings（模型 / 知识库 / Skills / MCP / 通用，Skills·MCP 行卡片开关）/ Memory 浮层。
 
 ---
 
@@ -171,11 +171,11 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 - **云端推理**：OpenAI 兼容 provider（OpenAI / OpenRouter / DeepSeek / vLLM …），云端流式经 pi-ai（含 OAuth）。
 - **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/web_search）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
-- **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录 + 右侧「工件」面板。
+- **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 终端 / 预览）。
 - **记忆（作用域化）**：全局池 + 每工作区私有池；渐进式披露注入 + 批量事实抽取；sqlite-vec ⊕ 词法混合召回；markdown 可手改回灌。
 - **知识库 RAG**：上传 → 解析 → 分块 → 嵌入 → RRF 混合检索 + 引用来源。
 - **思考过程持久化**：reasoning 落库并跨会话回放（不回喂模型）。
-- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（**Agent Desk 工作台**设计语言：冷灰 + 靛蓝 · IBM Plex/JetBrains · 明暗 + 三色 accent + 密度）；标题栏 + 图标轨道（对话/工作区/收件箱）+ 分组会话列表 + 三栏可拖拽 + 工作区面板（Diff/Files/Terminal）+ 设置/记忆浮层。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（**Agent Desk 工作台**设计语言：冷灰 + 靛蓝 · IBM Plex/JetBrains · 明暗 + 三色 accent + 密度）；标题栏 + 图标轨道（对话/工作区/收件箱）+ 分组会话列表 + 三栏可拖拽 + 统一「工作台坞」（改动/文件/终端/预览，可放大到整窗）+ 设置/记忆浮层。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP 持久化）。
 
 ### 🚧 待做

@@ -25,12 +25,6 @@ export function Titlebar({
   const AppIcon = APPEARANCE_ICON[theme.appearance];
   return (
     <div className="ad-titlebar">
-      <div className="ad-dots">
-        <span style={{ background: "#ED6A5E" }} />
-        <span style={{ background: "#F4BE4F" }} />
-        <span style={{ background: "#61C554" }} />
-      </div>
-      <span className="ad-tb-sep" />
       <span className="ad-tb-brand">
         Easy<b>Work</b>
       </span>

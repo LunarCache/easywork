@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -75,8 +75,15 @@ function DiffLines({ unified }: { unified: string }) {
   );
 }
 
+/** 外链点击：Tauri webview 里直接导航会把整个 app 替换掉且无法返回，
+ *  所以统一拦截 → 交给右侧网页预览抽屉（无 handler 时退化为新窗口）。 */
+function openExternal(url: string, onOpenUrl?: (url: string) => void) {
+  if (onOpenUrl) onOpenUrl(url);
+  else window.open(url, "_blank", "noopener,noreferrer");
+}
+
 /** Agent Desk 工具卡：READ / EDIT(diff) / RUN(终端) / 通用 + web_search 来源 + 引用 / HTML 工件。 */
-export function ToolView({ t }: { t: UiTool }) {
+export function ToolView({ t, onOpenUrl }: { t: UiTool; onOpenUrl?: (url: string) => void }) {
   if (t.name === "web_search") {
     return (
       <div className="cv-search">
@@ -90,14 +97,20 @@ export function ToolView({ t }: { t: UiTool }) {
         {t.sources && t.sources.length > 0 && (
           <div className="cv-search-chips">
             {t.sources.map((s, j) => (
-              <a key={j} className="src-chip" href={s.url} target="_blank" rel="noreferrer" title={s.url}>
+              <button
+                key={j}
+                type="button"
+                className="src-chip"
+                title={s.url}
+                onClick={() => openExternal(s.url, onOpenUrl)}
+              >
                 <img
                   src={`https://www.google.com/s2/favicons?domain=${host(s.url)}&sz=64`}
                   alt=""
                   onError={(e) => (e.currentTarget.style.visibility = "hidden")}
                 />
                 <span>{s.title || host(s.url)}</span>
-              </a>
+              </button>
             ))}
           </div>
         )}
@@ -171,7 +184,27 @@ export function ToolView({ t }: { t: UiTool }) {
 }
 
 /** Agent Desk 消息流（头像 + 名 + 时间线：思考/工具/文本）。聊天与工作区共用。 */
-export function MessageStream({ msgs, busy }: { msgs: UiMsg[]; busy: boolean }) {
+export function MessageStream({
+  msgs,
+  busy,
+  onOpenUrl,
+}: {
+  msgs: UiMsg[];
+  busy: boolean;
+  onOpenUrl?: (url: string) => void;
+}) {
+  const mdLink = ({ href, children }: { href?: string; children?: ReactNode }) => (
+    <a
+      href={href}
+      onClick={(e) => {
+        if (!href || !/^https?:/i.test(href)) return;
+        e.preventDefault();
+        openExternal(href, onOpenUrl);
+      }}
+    >
+      {children}
+    </a>
+  );
   return (
     <>
       {msgs.map((m, i) => {
@@ -228,10 +261,10 @@ export function MessageStream({ msgs, busy }: { msgs: UiMsg[]; busy: boolean }) 
                     </details>
                   );
                 }
-                if (b.kind === "tool") return <ToolView key={bi} t={b.tool} />;
+                if (b.kind === "tool") return <ToolView key={bi} t={b.tool} onOpenUrl={onOpenUrl} />;
                 return (
                   <div key={bi} className="text md">
-                    <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                    <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ a: mdLink }}>
                       {b.text}
                     </Markdown>
                     {live && bi === lastIdx && <span className="cursor" />}

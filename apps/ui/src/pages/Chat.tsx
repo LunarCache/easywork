@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@ew/shared";
 import type { WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
-import { MessageStream, CopyButton } from "../components/MessageStream.js";
+import { MessageStream } from "../components/MessageStream.js";
+import { SideDock } from "../components/SideDock.js";
 import {
   applyAgentEvent,
   messageText,
@@ -33,7 +34,6 @@ import {
   GlobeIcon,
   MicIcon,
   PlusBtnIcon,
-  RefreshIcon,
   SlidersIcon,
   SparkIcon,
   StopIcon,
@@ -49,24 +49,6 @@ const STARTERS: { label: string; prompt: string; Icon: typeof CodeIcon }[] = [
   { label: "总结文档", prompt: "帮我总结这段内容：\n\n", Icon: FileIcon },
   { label: "头脑风暴", prompt: "我想做一个项目，帮我头脑风暴一些点子：", Icon: SparkIcon },
 ];
-
-interface FilePreview {
-  content?: string;
-  binary?: boolean;
-  truncated?: boolean;
-  size: number;
-}
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|json|css|scss|html?|md|py|rs|go|java|c|h|cpp|sh|yml|yaml|toml|xml|sql)$/i;
-function fileIconFor(p: string) {
-  return CODE_EXT.test(p) ? <FileCodeIcon size={14} /> : <FileIcon size={14} />;
-}
 
 function fmtK(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
@@ -106,7 +88,8 @@ export function Chat({
   const [images, setImages] = useState<UiImage[]>([]);
   // 右侧「工件」面板：本会话目录下产出的文件（fs 工具写入 / 命令生成的网页/构建物）。
   const [files, setFiles] = useState<WsEntry[]>([]);
-  const [filesOpen, setFilesOpen] = useState(false);
+  const [dockOpen, setDockOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const autoOpenedRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -128,7 +111,7 @@ export function Chat({
   // 切换会话：重置面板，拉取该会话已有工件。
   useEffect(() => {
     autoOpenedRef.current = false;
-    setFilesOpen(false);
+    setDockOpen(false);
     setFiles([]);
     void refreshFiles();
   }, [refreshFiles]);
@@ -137,7 +120,7 @@ export function Chat({
   useEffect(() => {
     if (files.length > 0 && !autoOpenedRef.current) {
       autoOpenedRef.current = true;
-      setFilesOpen(true);
+      setDockOpen(true);
     }
   }, [files]);
 
@@ -187,6 +170,19 @@ export function Chat({
           blocks: [
             { kind: "reasoning", text: "先读现有 handler 定位缓冲点，再换成游标流式，按 Accept 头分支保留 CSV，最后跑测试。", start: 0, end: 2000 },
             { kind: "text", text: "计划：\n1. 读现有 handler，找到一次性缓冲全量结果的地方\n2. 换成基于游标的流式\n3. 按 `Accept` 头分支，保留 CSV" },
+            {
+              kind: "tool",
+              tool: {
+                id: "s",
+                name: "web_search",
+                args: '{"query":"node stream ndjson cursor pagination"}',
+                status: "done",
+                sources: [
+                  { url: "https://nodejs.org/api/stream.html", title: "Stream | Node.js Docs" },
+                  { url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept", title: "Accept header - MDN" },
+                ],
+              },
+            },
             { kind: "tool", tool: { id: "r", name: "fs_read", args: '{"path":"server/routes/export.ts"}', result: "142 行", status: "done" } },
             { kind: "text", text: "找到了——handler 把每一行 push 进单个数组再序列化，就是缓冲点。换成流式游标，并把 CSV 分流到限量路径。" },
             { kind: "tool", tool: { id: "e", name: "fs_write", args: '{"path":"server/routes/export.ts"}', status: "done", diff: { path: "server/routes/export.ts", before: null, after: "", unified: editUnified } } },
@@ -429,11 +425,11 @@ export function Chat({
             </span>
           ))}
         <button
-          className={`ws-review-toggle ${filesOpen ? "on" : ""}`}
-          onClick={() => setFilesOpen((v) => !v)}
-          title="本会话产出的文件 / 工件"
+          className={`ws-review-toggle ${dockOpen ? "on" : ""}`}
+          onClick={() => setDockOpen((v) => !v)}
+          title="工作台：文件 / 终端 / 预览"
         >
-          <FileCodeIcon size={14} /> 工件
+          <FileCodeIcon size={14} /> 工作台
           {files.length > 0 && <span className="rev-count">{files.length}</span>}
         </button>
       </header>
@@ -472,7 +468,14 @@ export function Chat({
             </div>
           </div>
         )}
-        <MessageStream msgs={msgs} busy={busy} />
+        <MessageStream
+          msgs={msgs}
+          busy={busy}
+          onOpenUrl={(u) => {
+            setPreviewUrl(u);
+            setDockOpen(true);
+          }}
+        />
       </div>
       {approval && (
         <div className="approval-overlay">
@@ -610,139 +613,19 @@ export function Chat({
         <div className="composer-note">本地 AI 也可能出错，请自行核实重要信息。</div>
       </footer>
       </div>
-      <ArtifactsPanel
-        threadId={threadId}
+      <SideDock
+        open={dockOpen}
+        onClose={() => setDockOpen(false)}
         files={files}
-        open={filesOpen}
-        onClose={() => setFilesOpen(false)}
-        onRefresh={refreshFiles}
+        readFile={(p) => getClient().chatFile(threadId, p)}
+        onFilesRefresh={() => void refreshFiles()}
+        onRevealDir={() => void getClient().chatReveal(threadId)}
+        filesEmpty="本会话还没有产出文件。让 AI 写文件、或运行命令生成网页 / 构建物后，会在这里展示并可预览。"
+        msgs={msgs}
+        exec={(c) => getClient().chatExec(threadId, c)}
+        previewUrl={previewUrl}
+        onClearPreview={() => setPreviewUrl(null)}
       />
-    </div>
-  );
-}
-
-/** 右侧「工件」面板：列出本会话目录下产出的文件，点击预览（文本/代码内联，HTML 可切换网页预览）。 */
-function ArtifactsPanel({
-  threadId,
-  files,
-  open,
-  onClose,
-  onRefresh,
-}: {
-  threadId: string;
-  files: WsEntry[];
-  open: boolean;
-  onClose: () => void;
-  onRefresh: () => Promise<void>;
-}) {
-  const [sel, setSel] = useState<string | null>(null);
-  const [data, setData] = useState<FilePreview | null>(null);
-  const [mode, setMode] = useState<"code" | "preview">("code");
-
-  // 选中的文件在刷新后消失（被删/改名）→ 收起预览。
-  useEffect(() => {
-    if (sel && !files.some((f) => f.path === sel)) {
-      setSel(null);
-      setData(null);
-    }
-  }, [files, sel]);
-
-  const openFile = async (p: string) => {
-    if (sel === p) {
-      setSel(null);
-      setData(null);
-      return;
-    }
-    setSel(p);
-    setData(null);
-    setMode(/\.html?$/i.test(p) ? "preview" : "code");
-    try {
-      setData(await getClient().chatFile(threadId, p));
-    } catch {
-      setData({ size: 0 });
-    }
-  };
-
-  return (
-    <aside className={`chat-files ${open ? "open" : ""}`}>
-      <div className="rev-head">
-        <FileCodeIcon size={15} />
-        <span>工件</span>
-        {files.length > 0 && <span className="rev-count">{files.length}</span>}
-        <span className="bar-spacer" />
-        <button className="fv-btn" title="刷新" onClick={() => void onRefresh()}>
-          <RefreshIcon size={13} />
-        </button>
-        <button className="fv-btn" title="关闭" onClick={onClose}>
-          <XIcon size={14} />
-        </button>
-      </div>
-      <div className="rev-scroll">
-        {files.length === 0 && (
-          <div className="rev-empty">
-            本会话还没有产出文件。让 AI 写文件、或运行命令生成网页 / 构建物后，会在这里展示并可预览。
-          </div>
-        )}
-        {files.map((f) => {
-          const isOpen = sel === f.path;
-          return (
-            <div key={f.path} className="af-file">
-              <div className={`af-file-head ${isOpen ? "open" : ""}`} onClick={() => void openFile(f.path)}>
-                <ChevronIcon size={13} className={`chev ${isOpen ? "open" : ""}`} />
-                {fileIconFor(f.path)}
-                <span className="af-path" title={f.path}>
-                  {f.path}
-                </span>
-                <span className="af-size">{fmtBytes(f.size ?? 0)}</span>
-              </div>
-              {isOpen && <FilePreviewView path={f.path} data={data} mode={mode} setMode={setMode} />}
-            </div>
-          );
-        })}
-      </div>
-    </aside>
-  );
-}
-
-function FilePreviewView({
-  path,
-  data,
-  mode,
-  setMode,
-}: {
-  path: string;
-  data: FilePreview | null;
-  mode: "code" | "preview";
-  setMode: (m: "code" | "preview") => void;
-}) {
-  if (!data) return <div className="af-loading">加载中…</div>;
-  if (data.binary) return <div className="af-bin">二进制文件，无法预览 · {fmtBytes(data.size)}</div>;
-  const content = data.content ?? "";
-  const isHtml = /\.html?$/i.test(path);
-  return (
-    <div className="af-body">
-      <div className="af-toolbar">
-        {isHtml && (
-          <div className="af-seg">
-            <button className={mode === "preview" ? "on" : ""} onClick={() => setMode("preview")}>
-              预览
-            </button>
-            <button className={mode === "code" ? "on" : ""} onClick={() => setMode("code")}>
-              源码
-            </button>
-          </div>
-        )}
-        <span className="bar-spacer" />
-        <CopyButton text={content} />
-      </div>
-      {isHtml && mode === "preview" ? (
-        <iframe className="af-frame" sandbox="allow-scripts" title={path} srcDoc={content} />
-      ) : (
-        <pre className="af-code">
-          <code>{content || "（空文件）"}</code>
-        </pre>
-      )}
-      {data.truncated && <div className="af-trunc">内容较大，已截断显示。</div>}
     </div>
   );
 }

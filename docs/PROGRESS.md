@@ -2,6 +2,18 @@
 
 > 每完成一个里程碑更新此文件。最新在上。
 
+## 2026-06-21（续）— 统一右侧「工作台坞」+ 网页内联预览 + 交互式终端
+
+把对话区与工作区右侧三套各自为政的抽屉（工件面板 / 网页预览 / 工作区 Diff·Files·Terminal）合并为**一个共享的 `SideDock`**，并按使用反馈补三项能力。后端仅新增 exec/reveal 两类端点，其余纯前端。
+
+- **网页内联预览（修 bug）**：Tauri webview 里点 web_search 来源 / 消息内 markdown 链接的 `target=_blank` 会把整个 app 导航走且回不来。改为 `MessageStream` 统一拦截 → 右侧预览（`onOpenUrl`），来源 chip 由 `<a>` 改 `<button>`、markdown 链接自定义 `a` 渲染；`referrerPolicy=no-referrer` + sandbox iframe，禁内嵌站点退化为「复制链接」。
+- **统一 `components/SideDock`**：一条 tab strip = **改动（git，按需）/ 文件 / 终端 / 预览**，对话区与工作区共用。合并点：工件列表 + 工作区文件树 → 同一「文件」浏览器（内联预览，HTML 源码/渲染切换）；独立 WebPreview + HTML 工件 → 统一「预览」；一套滑入外壳 + 一个 z-index（消除原预览 z=30 盖住工件 z=20 的叠加冲突）。点链接自动切「预览」tab。删除 `ArtifactsPanel`、独立 `WebPreview.tsx`、`WorkspacePanel` 及全部子组件 + 死 CSS（`.ws-review/.chat-files/.web-preview/.wp-tabs`）。对话线程非 git 项目 → 对话坞不显示「改动」。
+- **预览放大到窗口**：坞头部 ⤢/⤡ 切换 `position:fixed inset:0` 铺满整窗（盖住轨道/会话列表/标题栏）。
+- **交互式终端**：终端 tab 改 REPL —— 顶部展示 **AI 最近 run_command**（带「AI」标签），底部 `$` 输入框回车在当前工作目录执行，历史带退出码 / 截断提示。新增 `POST /workspace/:id/exec`、`/chat/:threadId/exec`（`spawn(shell)`，cwd 限定工作区/会话目录，120s 超时 + 200k 输出上限，合并 stdout/stderr）；SDK `wsExec/chatExec` + `ExecResult`。与 agent run_command 同为任意 shell，靠 daemon token 把守（0.0.0.0 仍强制 api-key）。
+- **打开目录**：文件 tab 头部 📂 → 系统文件管理器打开该目录。新增 `POST /workspace/:id/reveal`、`/chat/:threadId/reveal`（复用 `/skills/open` 的 `open`/`explorer`/`xdg-open` 模式）；SDK `wsReveal/chatReveal`。走 daemon 端点而非 Tauri 插件：不改 Rust capability，同时服务对话/工作区两种 cwd。
+- 顺手去掉标题栏装饰性假交通灯点（macOS 已有原生窗口按钮）。
+- 验证：shared/sdk/core 重建，ui tsc/eslint/build 全绿，core typecheck 通过；exec/reveal 真机 curl（退出码/cwd/截断/打开 Finder）+ Playwright（统一坞四 tab、来源点击自动切预览且 iframe 加载、终端 AI 命令 + 输入框、放大铺满窗口）。
+
 ## 2026-06-21 — 前端全重构为 Agent Desk 设计语言（冷灰三栏代理工作台）
 
 经 claude_design MCP 从 claude.ai/design 导入 **Agent Desk** 设计（项目「桌面代理设计风格研究」），把前端从「Claude 暖米白侧栏 + 单页」整体重构为冷灰 + 靛蓝的三栏 IDE 式工作台。分阶段落地，每阶段 typecheck/build/eslint 绿 + 真机 Playwright 验证、独立提交：
