@@ -42,6 +42,8 @@ import {
   SlidersIcon,
   SparkIcon,
   StopIcon,
+  TerminalIcon,
+  EditIcon,
   ThinkIcon,
   WrenchIcon,
   XIcon,
@@ -111,20 +113,48 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-/** 单个工具卡（web_search 来源卡 / 通用工具卡 + 引用/HTML 工件）。供时间线按序渲染。 */
+/** 工具调用参数里取命令/路径（run/fs 工具卡的标题）。 */
+function toolSubject(args: string): string {
+  try {
+    const a = JSON.parse(args || "{}") as { command?: string; path?: string; file_path?: string };
+    return a.command || a.path || a.file_path || "";
+  } catch {
+    return "";
+  }
+}
+
+/** 渲染 unified diff 行（+绿 / -红 / 上下文）。 */
+function DiffLines({ unified }: { unified: string }) {
+  const lines = unified.split("\n").filter((l) => !/^(diff --git|index |--- |\+\+\+ )/.test(l));
+  return (
+    <div className="cv-diff">
+      {lines.map((l, i) => {
+        const kind = l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : "ctx";
+        return (
+          <div key={i} className={`cv-diff-row ${kind}`}>
+            <span className="cv-diff-sign">{kind === "add" ? "+" : kind === "del" ? "-" : ""}</span>
+            <span className="cv-diff-code">{kind === "hunk" ? l : l.replace(/^[+-]/, "") || " "}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Agent Desk 工具卡：READ / EDIT(diff) / RUN(终端) / 通用 + web_search 来源 + 引用 / HTML 工件。 */
 function ToolView({ t }: { t: UiTool }) {
   if (t.name === "web_search") {
     return (
-      <div className="toolsearch">
-        <div className="ts-head">
-          <GlobeIcon size={15} />
+      <div className="cv-search">
+        <div className="cv-search-head">
+          <GlobeIcon size={14} />
           <span>
             {t.status === "running" ? "正在搜索" : "已搜索"}
             {toolQuery(t.args) && ` “${toolQuery(t.args)}”`}
           </span>
         </div>
         {t.sources && t.sources.length > 0 && (
-          <div className="ts-chips">
+          <div className="cv-search-chips">
             {t.sources.map((s, j) => (
               <a key={j} className="src-chip" href={s.url} target="_blank" rel="noreferrer" title={s.url}>
                 <img
@@ -140,27 +170,45 @@ function ToolView({ t }: { t: UiTool }) {
       </div>
     );
   }
+
+  const run = t.name === "run_command";
+  const edit = t.name === "fs_write" || t.name === "fs_edit";
+  const read = t.name === "fs_read";
+  const kind = run ? "RUN" : edit ? "EDIT" : read ? "READ" : t.name.toUpperCase();
+  const Icon = run ? TerminalIcon : edit ? EditIcon : read ? FileIcon : WrenchIcon;
+  const subject = toolSubject(t.args) || t.diff?.path || "";
+  const statusLabel = t.status === "running" ? "运行中…" : t.status === "error" ? "失败" : "完成";
+
   return (
-    <div>
-      <details className={`toolcard ${t.status}`}>
+    <div className="cv-tool-wrap">
+      <details className={`cv-tool ${t.status}`} open={t.status === "running" && run}>
         <summary>
-          <WrenchIcon size={15} className="ticon" />
-          <span className="tname">{t.name}</span>
-          <span className="tlabel">
-            {t.status === "running" ? "调用中…" : t.status === "error" ? "失败" : "完成"}
+          <Icon size={14} className="cv-tool-ico" />
+          <span className="cv-tool-label">{kind}</span>
+          {subject && <span className="cv-tool-name">{subject}</span>}
+          <span className={`cv-tool-status ${t.status}`}>
+            <span className="cv-tool-dot" /> {statusLabel}
           </span>
-          <ChevronIcon size={14} className="chev" />
+          <ChevronIcon size={13} className="chev" />
         </summary>
-        <div className="toolbody">
-          <div className="tkv">
-            <span>参数</span>
-            <code>{t.args || "{}"}</code>
-          </div>
-          {t.result != null && (
-            <div className="tkv">
-              <span>结果</span>
-              <code>{t.result}</code>
-            </div>
+        <div className="cv-tool-body">
+          {run ? (
+            <pre className="cv-term">{t.output || t.result || "（无输出）"}</pre>
+          ) : edit && t.diff?.unified ? (
+            <DiffLines unified={t.diff.unified} />
+          ) : (
+            <>
+              <div className="cv-kv">
+                <span>参数</span>
+                <code>{t.args || "{}"}</code>
+              </div>
+              {t.result != null && (
+                <div className="cv-kv">
+                  <span>结果</span>
+                  <code>{t.result}</code>
+                </div>
+              )}
+            </>
           )}
         </div>
       </details>
@@ -181,12 +229,7 @@ function ToolView({ t }: { t: UiTool }) {
           <div className="artifact-head">
             <CodeIcon size={13} /> {t.htmlTitle || "HTML 工件"}
           </div>
-          <iframe
-            className="artifact-frame"
-            sandbox="allow-scripts"
-            title={t.htmlTitle || "artifact"}
-            srcDoc={t.html}
-          />
+          <iframe className="artifact-frame" sandbox="allow-scripts" title={t.htmlTitle || "artifact"} srcDoc={t.html} />
         </div>
       )}
     </div>
@@ -281,27 +324,36 @@ export function Chat({
   // 切换会话时加载历史（新会话 → 空）。
   useEffect(() => {
     if (DEMO) {
+      const editUnified =
+        "@@ -38,4 +38,6 @@\n   const rows = await db.query(sql, [workspaceId]);\n" +
+        '-  res.setHeader("Content-Type", "text/csv");\n' +
+        '-  res.send(rows.map(toCSV).join("\\n"));\n' +
+        '+  if ((req.headers.accept ?? "").includes("text/csv"))\n' +
+        "+    return streamCsv(res, workspaceId);\n" +
+        '+  res.setHeader("Content-Type", "application/x-ndjson");\n' +
+        "+  for await (const row of cursor.stream({ batchSize: 1000 }))\n" +
+        '+    res.write(JSON.stringify(row) + "\\n");';
+      const term =
+        "$ npm test -- export.spec.ts\n\n" +
+        "✓ export › streams NDJSON for large workspaces (118ms)\n" +
+        "✓ export › paginates with cursor token (44ms)\n" +
+        "✓ export › preserves CSV download path (31ms)\n\n" +
+        "Test Files  1 passed (1)\n     Tests  12 passed (12)\n  Duration  1.92s";
       setMsgs([
-        { role: "user", raw: "北京现在几点？顺便算一下 (3+4)*2", reasoning: "", tools: [] },
+        { role: "user", raw: "/api/export 在大工作区会 504。改成流式 NDJSON + 游标分页，保留 CSV 下载。", reasoning: "", tools: [] },
         {
           role: "assistant",
-          raw: "<think>先取时间，再用计算器。</think>已经查到了 👇\n\n现在北京时间约为 **14:32**，`(3+4)*2 = 14`。\n\n### 用到的工具\n1. **get_time** — 取时间\n2. **calculator** — 计算\n\n```python\nresult = (3 + 4) * 2  # = 14\n```",
-          reasoning: "",
-          tools: [
-            {
-              id: "0",
-              name: "web_search",
-              args: '{"query":"Unsloth Studio 是什么"}',
-              result: "...",
-              status: "done",
-              sources: [
-                { title: "Introducing Unsloth Studio | Unsloth Documentation", url: "https://unsloth.ai/docs/new/studio" },
-                { title: "GitHub - unslothai/unsloth", url: "https://github.com/unslothai/unsloth" },
-                { title: "How to Run Unsloth Studio Locally", url: "https://www.datacamp.com/tutorial/unsloth-studio" },
-              ],
-            },
-            { id: "1", name: "get_time", args: '{"timezone":"Asia/Shanghai"}', result: "2026-06-13 14:32:10", status: "done" },
-            { id: "2", name: "calculator", args: '{"expression":"(3+4)*2"}', result: "14", status: "done" },
+          raw: "完成。`/api/export` 现在流式 NDJSON、按 `?cursor=` 分页，CSV 仍走缓冲路径（封顶 10k 行）。50k 行工作区峰值内存 **~480 MB → ~12 MB**。",
+          reasoning: "先读现有 handler 定位缓冲点，再换成游标流式，最后跑测试。",
+          tools: [],
+          blocks: [
+            { kind: "reasoning", text: "先读现有 handler 定位缓冲点，再换成游标流式，按 Accept 头分支保留 CSV，最后跑测试。", start: 0, end: 2000 },
+            { kind: "text", text: "计划：\n1. 读现有 handler，找到一次性缓冲全量结果的地方\n2. 换成基于游标的流式\n3. 按 `Accept` 头分支，保留 CSV" },
+            { kind: "tool", tool: { id: "r", name: "fs_read", args: '{"path":"server/routes/export.ts"}', result: "142 行", status: "done" } },
+            { kind: "text", text: "找到了——handler 把每一行 push 进单个数组再序列化，就是缓冲点。换成流式游标，并把 CSV 分流到限量路径。" },
+            { kind: "tool", tool: { id: "e", name: "fs_write", args: '{"path":"server/routes/export.ts"}', status: "done", diff: { path: "server/routes/export.ts", before: null, after: "", unified: editUnified } } },
+            { kind: "tool", tool: { id: "x", name: "run_command", args: '{"command":"npm test -- export.spec.ts"}', output: term, status: "done" } },
+            { kind: "text", text: "完成。`/api/export` 现在流式 NDJSON、按 `?cursor=` 分页，CSV 仍走缓冲路径（封顶 10k 行）。50k 行工作区峰值内存 **~480 MB → ~12 MB**。" },
           ],
         },
       ]);
@@ -585,16 +637,21 @@ export function Chat({
         {msgs.map((m, i) => {
           if (m.role === "user")
             return (
-              <div key={i} className="msg user">
-                <div className="role">你</div>
-                {m.images && m.images.length > 0 && (
-                  <div className="msg-images">
-                    {m.images.map((im, j) => (
-                      <img key={j} src={`data:${im.mimeType};base64,${im.data}`} alt="" />
-                    ))}
+              <div key={i} className="cv-msg user">
+                <span className="cv-avatar user">你</span>
+                <div className="cv-col">
+                  <div className="cv-head">
+                    <span className="cv-name">你</span>
                   </div>
-                )}
-                {m.raw && <div className="text">{m.raw}</div>}
+                  {m.images && m.images.length > 0 && (
+                    <div className="cv-images">
+                      {m.images.map((im, j) => (
+                        <img key={j} src={`data:${im.mimeType};base64,${im.data}`} alt="" />
+                      ))}
+                    </div>
+                  )}
+                  {m.raw && <div className="cv-userbubble">{m.raw}</div>}
+                </div>
               </div>
             );
           const answer = splitThink(m.raw).answer;
@@ -603,42 +660,55 @@ export function Chat({
           const blocks = m.blocks ?? [];
           const lastIdx = blocks.length - 1;
           return (
-            <div key={i} className="msg assistant">
-              <div className="role">助手</div>
-              {/* 有序时间线：思考 → 工具 → 思考 → … → 文本（保留真实先后顺序）。 */}
-              {blocks.map((b, bi) => {
-                if (b.kind === "reasoning") {
-                  const liveThis = live && bi === lastIdx;
-                  const dur = b.end ? (b.end - b.start) / 1000 : null;
-                  const label = liveThis
-                    ? "思考中…"
-                    : dur != null
-                      ? `思考了 ${dur < 1 ? "<1" : Math.round(dur)} 秒`
-                      : "思考过程";
+            <div key={i} className="cv-msg assistant">
+              <span className="cv-avatar bot">
+                <SparkIcon size={15} />
+              </span>
+              <div className="cv-col">
+                <div className="cv-head">
+                  <span className="cv-name">助手</span>
+                </div>
+                {/* 有序时间线：思考 → 工具 → 思考 → … → 文本（保留真实先后顺序）。 */}
+                {blocks.map((b, bi) => {
+                  if (b.kind === "reasoning") {
+                    const liveThis = live && bi === lastIdx;
+                    const dur = b.end ? (b.end - b.start) / 1000 : null;
+                    const label = liveThis
+                      ? "思考中…"
+                      : dur != null
+                        ? `思考了 ${dur < 1 ? "<1" : Math.round(dur)} 秒`
+                        : "思考过程";
+                    return (
+                      <details key={bi} className="reason" open={liveThis}>
+                        <summary>
+                          <BrainIcon size={15} />
+                          <span>{label}</span>
+                          <ChevronIcon size={14} className="chev" />
+                        </summary>
+                        <div className="reason-body">{b.text}</div>
+                      </details>
+                    );
+                  }
+                  if (b.kind === "tool") return <ToolView key={bi} t={b.tool} />;
                   return (
-                    <details key={bi} className="reason" open={liveThis}>
-                      <summary>
-                        <BrainIcon size={15} />
-                        <span>{label}</span>
-                        <ChevronIcon size={14} className="chev" />
-                      </summary>
-                      <div className="reason-body">{b.text}</div>
-                    </details>
+                    <div key={bi} className="text md">
+                      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                        {b.text}
+                      </Markdown>
+                      {live && bi === lastIdx && <span className="cursor" />}
+                    </div>
                   );
-                }
-                if (b.kind === "tool") return <ToolView key={bi} t={b.tool} />;
-                return (
-                  <div key={bi} className="text md">
-                    <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                      {b.text}
-                    </Markdown>
-                    {live && bi === lastIdx && <span className="cursor" />}
+                })}
+                {answer && !live && <CopyButton text={answer} />}
+                {blocks.length === 0 && live && (
+                  <div className="cv-think">
+                    <span />
+                    <span />
+                    <span />
                   </div>
-                );
-              })}
-              {answer && !live && <CopyButton text={answer} />}
-              {blocks.length === 0 && live && <div className="text">正在思考…</div>}
-              {m.cancelled && <div className="cancel-note">已停止 · 本轮不计入上下文</div>}
+                )}
+                {m.cancelled && <div className="cancel-note">已停止 · 本轮不计入上下文</div>}
+              </div>
             </div>
           );
         })}

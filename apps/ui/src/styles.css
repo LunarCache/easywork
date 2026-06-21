@@ -584,6 +584,67 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .msg.assistant:hover .msg-action { opacity: 1; }
 .msg-action:hover { color: var(--accent); }
 .cursor { display: inline-block; width: 7px; height: 15px; vertical-align: text-bottom; margin-left: 2px; background: var(--accent); border-radius: 1px; animation: blink 1s step-end infinite; }
+
+/* ================================================================
+   Agent Desk 对话区（头像 + 名 + 时间 + 工具卡 READ/EDIT/RUN + thinking）
+   ================================================================ */
+.cv-msg { display: flex; gap: 11px; max-width: 840px; width: 100%; margin: 0 auto; position: relative; animation: rise 0.25s var(--ease); }
+.cv-avatar { width: 26px; height: 26px; flex: none; border-radius: 7px; display: flex; align-items: center; justify-content: center; margin-top: 1px; font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+.cv-avatar.user { background: var(--color-bg-tertiary); border: 1px solid var(--border); color: var(--text-2); }
+.cv-avatar.bot { background: var(--accent); color: var(--color-text-inverse); box-shadow: var(--shadow-sm); }
+.cv-col { min-width: 0; flex: 1; }
+.cv-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.cv-name { font-size: 12.5px; font-weight: 600; }
+.cv-userbubble { background: var(--color-bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; font-size: 13px; white-space: pre-wrap; line-height: 1.6; }
+.cv-images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.cv-images img { max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid var(--border); }
+.cv-msg.assistant:hover .msg-action { opacity: 1; }
+
+/* thinking 三点 */
+.cv-think { display: inline-flex; gap: 5px; align-items: center; background: var(--color-bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px; }
+.cv-think span { width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); animation: tdot 1.2s infinite ease-in-out; }
+.cv-think span:nth-child(2) { animation-delay: 0.15s; }
+.cv-think span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes tdot { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+
+/* 工具卡 */
+.cv-tool-wrap { margin: 9px 0; }
+.cv-tool { border: 1px solid var(--border); border-radius: 10px; background: var(--color-bg-card); overflow: hidden; box-shadow: var(--shadow-sm); }
+.cv-tool > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 9px 12px; }
+.cv-tool > summary::-webkit-details-marker { display: none; }
+.cv-tool-ico { color: var(--text-2); flex: none; }
+.cv-tool.error .cv-tool-ico { color: var(--err); }
+.cv-tool-label { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0.04em; flex: none; }
+.cv-tool-name { font-family: var(--font-mono); font-size: 12px; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-tool-status { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10.5px; padding: 1px 8px; border-radius: 20px; color: var(--text-2); background: var(--color-bg-tertiary); border: 1px solid var(--border); }
+.cv-tool-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-tertiary); }
+.cv-tool-status.done { color: var(--ok); background: var(--color-success-soft); border-color: var(--color-success-border); }
+.cv-tool-status.done .cv-tool-dot { background: var(--ok); }
+.cv-tool-status.error { color: var(--err); background: var(--color-danger-soft); border-color: var(--color-diff-del-bg); }
+.cv-tool-status.error .cv-tool-dot { background: var(--err); }
+.cv-tool-status.running .cv-tool-dot { animation: pulse 1.2s infinite; }
+.cv-tool > summary .chev { color: var(--text-tertiary); flex: none; transition: transform 0.15s var(--ease); }
+.cv-tool[open] > summary .chev { transform: rotate(90deg); }
+.cv-tool-body { border-top: 1px solid var(--border); background: var(--color-bg-inset); }
+.cv-kv { padding: 8px 12px; }
+.cv-kv > span { display: block; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 4px; }
+.cv-kv > code { display: block; font-family: var(--font-mono); font-size: 12px; color: var(--text-2); white-space: pre-wrap; word-break: break-all; }
+.cv-term { margin: 0; padding: 11px 14px; background: var(--color-exec-bg); color: var(--color-exec-text); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.7; overflow-x: auto; max-height: 340px; white-space: pre-wrap; word-break: break-all; }
+.cv-diff { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.65; overflow-x: auto; padding: 4px 0; }
+.cv-diff-row { display: flex; padding: 0 12px; white-space: pre; }
+.cv-diff-row.add { background: var(--color-diff-add-bg); }
+.cv-diff-row.del { background: var(--color-diff-del-bg); }
+.cv-diff-row.hunk { color: var(--accent); }
+.cv-diff-sign { width: 14px; flex: none; text-align: center; color: var(--text-tertiary); user-select: none; }
+.cv-diff-row.add .cv-diff-sign { color: var(--color-diff-add-text); }
+.cv-diff-row.del .cv-diff-sign { color: var(--color-diff-del-text); }
+.cv-diff-code { white-space: pre; color: var(--text); }
+
+/* web 搜索来源 */
+.cv-search { margin: 9px 0; }
+.cv-search-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); margin-bottom: 8px; }
+.cv-search-head svg { color: var(--accent); flex: none; }
+.cv-search-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .msg.user .text { background: var(--color-bg-user-msg); color: var(--color-text-user-msg); border: 0; border-radius: 16px 4px 16px 16px; box-shadow: var(--shadow-1); }
 .msg.assistant { position: relative; max-width: 820px; }
 .msg.assistant .text { background: transparent; border: 0; box-shadow: none; padding: 2px 2px; border-radius: 0; white-space: normal; }
