@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Skill } from "@ew/shared";
 import { getClient } from "../lib/client.js";
+import { loadDisabledSkills, saveDisabledSkills } from "../lib/prefs.js";
 import { SparkIcon, FolderIcon, PlusIcon } from "../icons.js";
 
 export function Skills() {
@@ -8,6 +9,7 @@ export function Skills() {
   const [dir, setDir] = useState("");
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState("");
+  const [disabled, setDisabled] = useState<string[]>(() => loadDisabledSkills());
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -46,29 +48,31 @@ export function Skills() {
     }
   };
 
+  const toggle = (name: string) => {
+    setDisabled((cur) => {
+      const next = cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name];
+      saveDisabledSkills(next);
+      return next;
+    });
+  };
+
   return (
     <div className="page">
-      <div className="page-head">
-        <span className="ico">
-          <SparkIcon size={20} />
-        </span>
+      <div className="set-head">
         <div>
-          <h2>Skills</h2>
-          <p className="lead">
-            放入 skills 目录的 SKILL.md 自动发现（渐进披露：系统提示只放目录，模型按需 open_skill 加载全文）。
-          </p>
+          <h3>Skills</h3>
+          <p>放入技能目录的 SKILL.md 自动发现；关掉的技能不再提供给模型（新会话生效）。</p>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button className="btn-ghost btn" onClick={() => void openDir()}>
+        <div style={{ display: "flex", gap: 8, flex: "none" }}>
+          <button className="set-add" onClick={() => void openDir()}>
             <FolderIcon size={14} /> 打开目录
           </button>
-          <button className="btn" onClick={() => void newTemplate()}>
+          <button className="set-add" onClick={() => void newTemplate()}>
             <PlusIcon size={14} /> 新建 SKILL.md
           </button>
         </div>
       </div>
       {note && <div className="note">{note}</div>}
-      {dir && <div className="sub" style={{ marginBottom: 12 }}>技能目录：<code>{dir}</code></div>}
 
       {!loading && skills.length === 0 && (
         <div className="empty-models">
@@ -78,25 +82,43 @@ export function Skills() {
         </div>
       )}
 
-      <div className="skill-grid">
-        {skills.map((s) => (
-          <div key={s.id} className="skill-card">
-            <div className="skill-name">{s.frontmatter.name}</div>
-            {s.frontmatter.description && <div className="skill-desc">{s.frontmatter.description}</div>}
-            {s.frontmatter.whenToUse && (
-              <div className="skill-when">
-                <span>何时使用</span>
-                {s.frontmatter.whenToUse}
+      <div className="set-list">
+        {skills.map((s) => {
+          const name = s.frontmatter.name;
+          const on = !disabled.includes(name);
+          return (
+            <div key={s.id} className="set-row">
+              <span className="set-row-ico">
+                <SparkIcon size={17} />
+              </span>
+              <div className="set-row-body">
+                <div className="set-row-name">
+                  {name}
+                  {s.frontmatter.version && <span className="set-pill">v{s.frontmatter.version}</span>}
+                  {s.scripts.length > 0 && <span className="set-pill">{s.scripts.length} 脚本</span>}
+                </div>
+                <div className="set-row-desc" title={s.frontmatter.description || s.frontmatter.whenToUse}>
+                  {s.frontmatter.description || s.frontmatter.whenToUse || "（无描述）"}
+                </div>
               </div>
-            )}
-            <div className="skill-meta">
-              {s.frontmatter.version ? `v${s.frontmatter.version} · ` : ""}
-              {s.scripts.length > 0 ? `${s.scripts.length} 脚本 · ` : ""}
-              {s.resources.length > 0 ? `${s.resources.length} 资源` : "无附加资源"}
+              <button
+                className={`set-toggle ${on ? "on" : ""}`}
+                title={on ? "已启用（点击关闭）" : "已关闭（点击启用）"}
+                aria-pressed={on}
+                onClick={() => toggle(name)}
+              >
+                <span />
+              </button>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      {dir && (
+        <div className="sub" style={{ marginTop: 14 }}>
+          技能目录：<code>{dir}</code>
+        </div>
+      )}
     </div>
   );
 }

@@ -254,6 +254,7 @@ export class EasyWorkClient {
       history: ChatMessage[];
       maxIterations?: number;
       excludeTools?: string[];
+      excludeSkills?: string[];
       think?: boolean;
       sampling?: SamplingParams;
       kb?: boolean;

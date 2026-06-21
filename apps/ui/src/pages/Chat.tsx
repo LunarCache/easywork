@@ -22,6 +22,7 @@ import {
   saveSampling,
   samplingToRequest,
   loadAgentPrefs,
+  loadDisabledSkills,
   type Sampling,
 } from "../lib/prefs.js";
 import {
@@ -391,6 +392,7 @@ export function Chat({
     const excludeTools = web ? [] : ["web_search", "http_get"];
     const sampling = samplingToRequest(loadSampling(model));
     const agentPrefs = loadAgentPrefs();
+    const excludeSkills = loadDisabledSkills();
     const ac = new AbortController();
     abortRef.current = ac;
     const FS_TOOLS = new Set(["fs_write", "fs_edit", "run_command"]);
@@ -406,6 +408,7 @@ export function Chat({
           ...(kb && kbId ? { kbId } : {}),
           ...(Object.keys(sampling).length ? { sampling } : {}),
           ...(agentPrefs.maxIterations ? { maxIterations: agentPrefs.maxIterations } : {}),
+          ...(excludeSkills.length ? { excludeSkills } : {}),
         },
         { signal: ac.signal },
       )) {

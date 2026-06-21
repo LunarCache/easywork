@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { McpServerConfig } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { WrenchIcon, TrashIcon } from "../icons.js";
+import { WrenchIcon, TrashIcon, RefreshIcon } from "../icons.js";
 
 type Kind = "stdio" | "http";
 
@@ -62,6 +62,13 @@ export function Mcp() {
 
   const remove = async (id: string) => {
     await getClient().removeMcpServer(id);
+    await refresh();
+  };
+
+  // 启用/禁用服务器（enabled 翻转）：写回后端 → 下次会话重建工具集时生效。
+  const toggleEnabled = async (s: McpServerConfig) => {
+    await getClient().upsertMcpServer({ ...s, enabled: s.enabled === false });
+    setNote(`已${s.enabled === false ? "启用" : "禁用"} ${s.displayName || s.id}`);
     await refresh();
   };
 
@@ -220,35 +227,51 @@ export function Mcp() {
             <span>用上方表单添加 stdio / HTTP 服务器，或粘贴 mcpServers JSON 批量导入。</span>
           </div>
         )}
-        {servers.map((s) => {
-          const pr = probeResult[s.id];
-          return (
-            <div key={s.id} className="mcp-row">
-              <div className="mcp-info">
-                <div className="mcp-name">
-                  {s.displayName || s.id}
-                  <span className="mcp-kind">{s.transport.kind}</span>
-                </div>
-                <div className="mcp-detail">
-                  {s.transport.kind === "stdio"
-                    ? `${s.transport.command} ${s.transport.args.join(" ")}`
-                    : s.transport.url}
-                </div>
-                {pr && (
-                  <div className={`mcp-probe ${pr.ok ? "ok" : "err"}`}>
-                    {pr.ok ? `✓ 连接成功 · ${pr.toolCount} 个工具` : `✗ ${pr.error ?? "连接失败"}`}
+        <div className="set-list">
+          {servers.map((s) => {
+            const pr = probeResult[s.id];
+            const on = s.enabled !== false;
+            const detail =
+              s.transport.kind === "stdio"
+                ? `${s.transport.command} ${s.transport.args.join(" ")}`
+                : s.transport.url;
+            return (
+              <div key={s.id} className="set-row">
+                <span className="set-row-ico">
+                  <WrenchIcon size={16} />
+                </span>
+                <div className="set-row-body">
+                  <div className="set-row-name">
+                    <span className="mono">{s.displayName || s.id}</span>
+                    <span className="set-pill">{s.transport.kind}</span>
+                    {pr && (
+                      <span className={`mcp-probe ${pr.ok ? "ok" : "err"}`}>
+                        {pr.ok ? `${pr.toolCount} 工具` : pr.error ?? "连接失败"}
+                      </span>
+                    )}
                   </div>
-                )}
+                  <div className="set-row-desc mono" title={detail}>
+                    {detail}
+                  </div>
+                </div>
+                <button className="set-row-btn" title="测试连接" disabled={probing === s.id} onClick={() => void probe(s)}>
+                  <RefreshIcon size={14} className={probing === s.id ? "spin" : ""} />
+                </button>
+                <button
+                  className={`set-toggle ${on ? "on" : ""}`}
+                  title={on ? "已启用（点击禁用）" : "已禁用（点击启用）"}
+                  aria-pressed={on}
+                  onClick={() => void toggleEnabled(s)}
+                >
+                  <span />
+                </button>
+                <button className="set-row-btn danger" title="删除" onClick={() => void remove(s.id)}>
+                  <TrashIcon size={14} />
+                </button>
               </div>
-              <button className="btn-ghost" style={{ padding: "5px 11px", fontSize: 12.5 }} disabled={probing === s.id} onClick={() => void probe(s)}>
-                {probing === s.id ? "测试中…" : "测试"}
-              </button>
-              <button className="mcp-del" title="删除" onClick={() => void remove(s.id)}>
-                <TrashIcon size={14} />
-              </button>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </section>
     </div>
   );

@@ -61,6 +61,24 @@ export function saveAgentPrefs(p: AgentPrefs): void {
   }
 }
 
+// 被禁用的 Skill 名称（按名传给 runAgent.excludeSkills，过滤 pi 发现的 skills）。
+const DISABLED_SKILLS_KEY = "ew.disabledSkills";
+export function loadDisabledSkills(): string[] {
+  try {
+    const raw = localStorage.getItem(DISABLED_SKILLS_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+export function saveDisabledSkills(names: string[]): void {
+  try {
+    localStorage.setItem(DISABLED_SKILLS_KEY, JSON.stringify(names));
+  } catch {
+    /* ignore */
+  }
+}
+
 // ---------- 外观（Agent Desk：明暗 + accent + 密度），持久化到 localStorage ----------
 
 export type Appearance = "light" | "dark" | "system";

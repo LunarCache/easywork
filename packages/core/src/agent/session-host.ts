@@ -70,6 +70,8 @@ export interface EwAgentRunInput {
   sampling?: SamplingParams;
   /** 思考开关：true→/think，false→/no_think（Qwen3 约定，注入给模型，不污染持久化消息）。 */
   think?: boolean;
+  /** 禁用的 Skill 名称：按名从 pi resourceLoader 的 skills 里过滤掉（改变即重建会话）。 */
+  excludeSkills?: string[];
 }
 
 interface HostedSession {
@@ -78,6 +80,7 @@ interface HostedSession {
   cwd: string;
   workspace: boolean;
   memoryScope: string;
+  excludeSkillsKey: string;
   runtime: RunRuntime;
   dispose: () => void;
 }
@@ -283,14 +286,17 @@ export class SessionHost {
     cwd: string,
     workspace: boolean,
     memoryScope: string,
+    excludeSkills: string[],
   ): Promise<HostedSession> {
+    const excludeSkillsKey = excludeSkills.slice().sort().join(",");
     const existing = this.sessions.get(threadId);
     if (
       existing &&
       existing.modelId === modelId &&
       existing.cwd === cwd &&
       existing.workspace === workspace &&
-      existing.memoryScope === memoryScope
+      existing.memoryScope === memoryScope &&
+      existing.excludeSkillsKey === excludeSkillsKey
     ) {
       return existing;
     }
@@ -319,10 +325,15 @@ export class SessionHost {
     // bash 是任意 shell 无法按路径沙箱，经审批把守。工作区模式按项目档位；对话模式由调用方传 auto-edits
     //（工作区内写放行、bash 需审批）。
     factories.push(permissionExtensionFactory(runtime, cwd));
+    const excluded = new Set(excludeSkills);
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir: this.agentDir,
       extensionFactories: factories,
+      // 禁用的 Skill 按名过滤掉（默认无 → 不改变发现结果）。
+      ...(excluded.size
+        ? { skillsOverride: (base) => ({ ...base, skills: base.skills.filter((s) => !excluded.has(s.name)) }) }
+        : {}),
     });
     await resourceLoader.reload();
     const customTools = await buildEwCustomTools({
@@ -375,6 +386,7 @@ export class SessionHost {
       cwd,
       workspace,
       memoryScope,
+      excludeSkillsKey,
       runtime,
       dispose: () => session.dispose(),
     };
@@ -401,7 +413,14 @@ export class SessionHost {
   private async *runOne(input: EwAgentRunInput): AsyncGenerator<AgentEvent> {
     const workspace = input.workspace ?? false;
     const memoryScope = input.memoryScope ?? GLOBAL_SCOPE;
-    const hosted = await this.getOrCreate(input.threadId, input.modelId, input.cwd, workspace, memoryScope);
+    const hosted = await this.getOrCreate(
+      input.threadId,
+      input.modelId,
+      input.cwd,
+      workspace,
+      memoryScope,
+      input.excludeSkills ?? [],
+    );
     const session = hosted.session;
     // R4：写入本轮权限上下文（工作区模式下 tool_call 扩展据此审批）。
     hosted.runtime.mode = input.approvalMode ?? "approve-each";

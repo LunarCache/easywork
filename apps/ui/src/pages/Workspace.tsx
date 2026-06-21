@@ -5,6 +5,7 @@ import rehypeHighlight from "rehype-highlight";
 import type { ApprovalMode, ChatMessage, Project } from "@ew/shared";
 import type { GitCommit, GitFile, GitRemoteInfo, GitStatus } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
+import { loadDisabledSkills } from "../lib/prefs.js";
 import {
   applyAgentEvent,
   messageText,
@@ -203,10 +204,11 @@ export function Workspace({
       });
     const ac = new AbortController();
     abortRef.current = ac;
+    const excludeSkills = loadDisabledSkills();
     const MUTATING = new Set(["fs_write", "fs_edit", "run_command"]);
     try {
       for await (const ev of getClient().runAgent(
-        { threadId, model, history, projectId: project.id },
+        { threadId, model, history, projectId: project.id, ...(excludeSkills.length ? { excludeSkills } : {}) },
         { signal: ac.signal },
       )) {
         if (ev.type === "approval-request") setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });

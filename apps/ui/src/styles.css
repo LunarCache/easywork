@@ -518,6 +518,32 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .ad-ov-content .models-tabs,
 .ad-ov-content .form { max-width: 620px; }
 
+/* —— Agent Desk 设置行卡片（图标瓷砖 + 名称/描述 + 右控件/开关）—— */
+.set-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.set-head h3 { font-size: 14px; font-weight: 600; margin: 0; }
+.set-head p { font-size: 12px; color: var(--text-2); margin: 3px 0 0; line-height: 1.5; }
+.set-add { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--color-bg-card); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 600; }
+.set-add:hover { background: var(--color-bg-tertiary); }
+.set-add svg { flex: none; }
+.set-list { display: flex; flex-direction: column; gap: 9px; }
+.set-row { display: flex; align-items: center; gap: 13px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--color-bg-card); }
+.set-row-ico { width: 32px; height: 32px; border-radius: 8px; background: var(--color-bg-tertiary); color: var(--text-2); display: flex; align-items: center; justify-content: center; flex: none; }
+.set-row-body { flex: 1; min-width: 0; }
+.set-row-name { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.set-row-name .mono { font-family: var(--font-mono); }
+.set-row-desc { font-size: 11.5px; color: var(--text-2); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.set-pill { font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--text-2); background: var(--color-bg-tertiary); border: 1px solid var(--border); padding: 0 6px; border-radius: 5px; }
+.set-row .mcp-probe { font-family: var(--font-mono); font-size: 10.5px; }
+/* 开关（toggle switch） */
+.set-toggle { width: 36px; height: 20px; border-radius: 20px; border: none; cursor: pointer; background: var(--border-strong); position: relative; flex: none; transition: background 0.15s var(--ease); padding: 0; }
+.set-toggle.on { background: var(--accent); }
+.set-toggle span { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s var(--ease); }
+.set-toggle.on span { transform: translateX(16px); }
+.set-row-btn { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border); background: transparent; color: var(--text-2); cursor: pointer; }
+.set-row-btn:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.set-row-btn:disabled { opacity: 0.55; cursor: default; }
+.set-row-btn.danger:hover { background: var(--color-danger-soft); color: var(--err); border-color: var(--err); }
+
 /* ================================================================
    聊天
    ================================================================ */
