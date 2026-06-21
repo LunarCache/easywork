@@ -61,22 +61,30 @@ export function saveAgentPrefs(p: AgentPrefs): void {
   }
 }
 
-// ---------- 外观（明暗双主题），持久化到 localStorage ----------
+// ---------- 外观（Agent Desk：明暗 + accent + 密度），持久化到 localStorage ----------
 
 export type Appearance = "light" | "dark" | "system";
+export type Accent = "iris" | "teal" | "amber";
+export type Density = "compact" | "comfortable";
 export interface ThemePrefs {
   appearance: Appearance;
+  accent: Accent;
+  density: Density;
 }
 
 const THEME_KEY = "ew.theme";
-const THEME_DEFAULT: ThemePrefs = { appearance: "system" };
+const THEME_DEFAULT: ThemePrefs = { appearance: "system", accent: "iris", density: "compact" };
 
 export function loadThemePrefs(): ThemePrefs {
   try {
     const raw = localStorage.getItem(THEME_KEY);
     if (!raw) return { ...THEME_DEFAULT };
     const p = JSON.parse(raw) as Partial<ThemePrefs>;
-    return { appearance: p.appearance ?? THEME_DEFAULT.appearance };
+    return {
+      appearance: p.appearance ?? THEME_DEFAULT.appearance,
+      accent: p.accent ?? THEME_DEFAULT.accent,
+      density: p.density ?? THEME_DEFAULT.density,
+    };
   } catch {
     return { ...THEME_DEFAULT };
   }
@@ -90,13 +98,15 @@ export function saveThemePrefs(p: ThemePrefs): void {
   }
 }
 
-/** 把外观偏好应用到 <html>：明暗经 .dark。 */
+/** 把外观偏好应用到 <html>：明暗 data-theme、accent data-accent、密度 data-density。 */
 export function applyTheme(p: ThemePrefs): void {
   const root = document.documentElement;
   const prefersDark =
     typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
   const dark = p.appearance === "dark" || (p.appearance === "system" && prefersDark);
-  root.classList.toggle("dark", dark);
+  root.setAttribute("data-theme", dark ? "dark" : "light");
+  root.setAttribute("data-accent", p.accent);
+  root.setAttribute("data-density", p.density);
 }
 
 /** 采样对象 → runAgent 的 sampling 字段（仅含已设置项）。 */

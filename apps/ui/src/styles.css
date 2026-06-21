@@ -1,7 +1,7 @@
-/* EasyWork UI — Tailwind v4 + Claude 桌面端设计语言（暖米白 + 黏土珊瑚 · 明暗双主题）。
-   策略：分层导入 Tailwind（不含 preflight，避免重置既有 CSS）+ @theme token +
-   .dark 覆盖；旧语义变量别名到新 token，组件规则近乎原样、仅硬编码色 token 化。
-   单 accent（珊瑚），无多主题色切换；衬线体仅用于空态问候标题。 */
+/* EasyWork UI — Tailwind v4 + Agent Desk 设计语言（冷灰 + 靛蓝 · IBM Plex Sans/JetBrains Mono）。
+   策略：分层导入 Tailwind + @theme token（浅色默认）+ [data-theme=dark] / [data-accent=*] /
+   [data-density] 覆盖；旧语义别名（--bg/--surface/--text/--accent…）重映射到新 token，组件规则
+   平滑过渡。三套 accent（iris 默认 / teal / amber）+ 明暗 + 密度。主题挂 <html> 的 data-* 属性。 */
 
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
@@ -11,141 +11,190 @@
    设计 token（默认 Black 主题 · 浅色）—— 采用 TOKENICODE 值
    ================================================================ */
 @theme {
-  --color-bg-primary: #FAF9F5;       /* 主区暖纸白 */
-  --color-bg-secondary: #F2F0E9;
-  --color-bg-tertiary: #EAE7DD;
-  --color-bg-chat: #FFFFFF;
-  --color-bg-sidebar: #F2F0E9;       /* 侧栏略暖于主区 */
+  /* ---- Agent Desk · LIGHT（iris accent 默认） ---- */
+  --color-bg-primary: #FBFBFC;       /* bg-0 应用底 */
+  --color-bg-secondary: #F4F5F7;     /* bg-1 面板/侧栏 */
+  --color-bg-tertiary: #ECEEF1;      /* bg-3 hover/嵌入 */
+  --color-bg-chat: #FBFBFC;
+  --color-bg-sidebar: #F4F5F7;
   --color-bg-input: #FFFFFF;
-  --color-bg-user-msg: #EEEBE3;      /* 用户气泡：暖中性块（深色文字） */
-  --color-text-user-msg: #1F1E1C;
-  --color-bg-assistant-msg: #FAF9F5;
-  --color-bg-tool: #F2F0E9;
-  --color-bg-thinking: #F2F0E9;
-  --color-bg-card: #FFFFFF;
-  --color-bg-nav-active: rgba(201, 100, 66, 0.10);   /* 珊瑚软底 */
+  --color-bg-card: #FFFFFF;          /* bg-2 卡片 */
+  --color-bg-tool: #FFFFFF;
+  --color-bg-thinking: #FFFFFF;
+  --color-bg-assistant-msg: #FBFBFC;
+  --color-bg-inset: #F1F2F5;
+  --color-bg-user-msg: #FFFFFF;      /* 用户消息：卡片(bg-2 + 边框) */
+  --color-text-user-msg: #15171C;
+  --color-bg-nav-active: #EDEDFB;    /* accent soft（随 accent 覆盖） */
 
-  --color-text-primary: #1F1E1C;     /* 暖近黑 */
-  --color-text-secondary: #5C5A54;
-  --color-text-tertiary: #8B8980;
-  --color-text-inverse: #FFFFFF;
-  --color-text-muted: #8B8980;
+  --color-text-primary: #15171C;
+  --color-text-secondary: #565D68;
+  --color-text-tertiary: #8A919C;
+  --color-text-inverse: #FFFFFF;     /* on-accent（随 accent 覆盖） */
+  --color-text-muted: #8A919C;
 
-  --color-border: #E5E1D8;
-  --color-border-subtle: #EFECE4;
-  --color-border-focus: #C96442;
+  --color-border: #E5E7EC;
+  --color-border-subtle: #ECEEF1;
+  --color-border-strong: #D6DAE0;
+  --color-border-focus: #5256E0;
 
-  --color-accent: #C96442;           /* Claude 黏土珊瑚 */
-  --color-accent-light: #D97757;
-  --color-accent-hover: #B5573A;
-  --color-accent-glow: rgba(201, 100, 66, 0.14);
-  --color-success: #2E7D52;
-  --color-error: #C0392B;
-  --color-warning: #B7791F;
+  --color-accent: #5256E0;           /* iris */
+  --color-accent-light: #5256E0;
+  --color-accent-hover: #4549C9;
+  --color-accent-glow: #EDEDFB;
+  --color-accent-soft: #EDEDFB;
+  --color-accent-border: #CACCF6;
+  --color-success: #1A7F37;
+  --color-error: #CF222E;
+  --color-warning: #9A6700;
 
-  --color-gradient-start: #C96442;
-  --color-gradient-mid: #D06B49;
-  --color-gradient-end: #D97757;
+  /* Agent Desk 无渐变 → 渐变 token 全置为 accent（扁平） */
+  --color-gradient-start: #5256E0;
+  --color-gradient-mid: #5256E0;
+  --color-gradient-end: #5256E0;
 
   /* 语法高亮（与语义色解耦） */
-  --color-syntax-keyword:  #7C3AED;
-  --color-syntax-string:   #059669;
-  --color-syntax-number:   #D97706;
-  --color-syntax-function: #2563EB;
-  --color-syntax-comment:  #9CA3AF;
-  --color-syntax-type:     #0891B2;
-  --color-syntax-builtin:  #6366F1;
-  --color-syntax-delete:   #DC2626;
-  --color-syntax-meta:     #78716C;
+  --color-syntax-keyword:  #5256E0;
+  --color-syntax-string:   #1A7F37;
+  --color-syntax-number:   #9A6700;
+  --color-syntax-function: #0F857A;
+  --color-syntax-comment:  #8A919C;
+  --color-syntax-type:     #0F857A;
+  --color-syntax-builtin:  #5256E0;
+  --color-syntax-delete:   #CF222E;
+  --color-syntax-meta:     #8A919C;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08), 0 4px 8px rgba(0, 0, 0, 0.04);
-  --shadow-glow: 0 0 20px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 1px 2px rgba(16, 18, 22, 0.06);
+  --shadow-md: 0 1px 2px rgba(16, 18, 22, 0.05), 0 6px 18px rgba(16, 18, 22, 0.06);
+  --shadow-lg: 0 1px 2px rgba(16, 18, 22, 0.06), 0 12px 32px rgba(16, 18, 22, 0.12);
+  --shadow-glow: 0 0 0 3px var(--color-accent-glow);
 
-  /* EasyWork 专属补充 token（TOKENICODE 没有的：diff/终端/危险态/分类色） */
-  --color-accent-soft: var(--color-bg-nav-active);
-  --color-success-soft: #E3F6EA;
-  --color-embed-bg: #EDE9FE;
-  --color-embed-text: #7C3AED;
-  --color-vision-bg: #E0F7F4;
-  --color-vision-text: #0D9488;
-  --color-diff-add-bg: #E6FFED;
+  /* 语义软底/diff/终端 */
+  --color-success-soft: #E7F4EB;
+  --color-success-border: #BBE3C5;
+  --color-embed-bg: #EDEDFB;
+  --color-embed-text: #5256E0;
+  --color-vision-bg: #E7F4EB;
+  --color-vision-text: #1A7F37;
+  --color-diff-add-bg: #E7F4EB;
   --color-diff-add-text: #1A7F37;
-  --color-diff-del-bg: #FFEBE9;
-  --color-diff-del-text: #DC2626;
-  --color-danger-soft: #FDECEE;
-  --color-exec-bg: #0D1117;
-  --color-exec-text: #D6DEEB;
+  --color-diff-del-bg: #FDEEEC;
+  --color-diff-del-text: #CF222E;
+  --color-danger-soft: #FDEEEC;
+  --color-exec-bg: #0A0B0D;
+  --color-exec-text: #C7CDD6;
 }
 
-@variant dark (&:where(.dark, .dark *));
+@variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* ================================================================
-   Black — 暗色
+   Agent Desk — 暗色
    ================================================================ */
-.dark {
-  --color-bg-primary: #262624;       /* 暖炭灰 */
-  --color-bg-secondary: #1F1E1D;
-  --color-bg-tertiary: #33322F;
-  --color-bg-chat: #1F1E1D;
-  --color-bg-sidebar: #1A1917;
-  --color-bg-input: #2A2926;
-  --color-bg-user-msg: #34322E;      /* 用户气泡：暖深灰块 */
-  --color-text-user-msg: #F5F4EE;
-  --color-bg-assistant-msg: #262624;
-  --color-bg-tool: #2A2926;
-  --color-bg-thinking: #232220;
-  --color-bg-card: #2A2926;
-  --color-bg-nav-active: rgba(217, 119, 87, 0.16);
+[data-theme="dark"] {
+  --color-bg-primary: #0C0D10;
+  --color-bg-secondary: #121419;
+  --color-bg-tertiary: #22262E;
+  --color-bg-chat: #0C0D10;
+  --color-bg-sidebar: #121419;
+  --color-bg-input: #181B21;
+  --color-bg-card: #181B21;
+  --color-bg-tool: #181B21;
+  --color-bg-thinking: #181B21;
+  --color-bg-assistant-msg: #0C0D10;
+  --color-bg-inset: #0A0B0D;
+  --color-bg-user-msg: #181B21;
+  --color-text-user-msg: #E8EAEE;
+  --color-bg-nav-active: #1A1C30;
 
-  --color-text-primary: #F5F4EE;     /* 暖白 */
-  --color-text-secondary: #B8B4A8;
-  --color-text-tertiary: #908C82;
-  --color-text-inverse: #1A1917;
-  --color-text-muted: #908C82;
+  --color-text-primary: #E8EAEE;
+  --color-text-secondary: #9AA1AC;
+  --color-text-tertiary: #646B76;
+  --color-text-inverse: #0E1020;
+  --color-text-muted: #646B76;
 
-  --color-border: #3A3835;
-  --color-border-subtle: #2E2C29;
-  --color-border-focus: #D97757;
+  --color-border: #23272F;
+  --color-border-subtle: #1E2127;
+  --color-border-strong: #333842;
+  --color-border-focus: #7C84FF;
 
-  --color-accent: #D97757;           /* 暗色下更亮的珊瑚 */
-  --color-accent-light: #E08A6B;
-  --color-accent-hover: #E8A085;
-  --color-accent-glow: rgba(217, 119, 87, 0.18);
+  --color-accent: #7C84FF;
+  --color-accent-light: #7C84FF;
+  --color-accent-hover: #9AA0FF;
+  --color-accent-glow: #1A1C30;
+  --color-accent-soft: #1A1C30;
+  --color-accent-border: #363A66;
+  --color-success: #3FB950;
+  --color-error: #FA6A62;
+  --color-warning: #D8A526;
 
-  --color-gradient-start: #C96442;
-  --color-gradient-mid: #D06B49;
-  --color-gradient-end: #D97757;
+  --color-gradient-start: #7C84FF;
+  --color-gradient-mid: #7C84FF;
+  --color-gradient-end: #7C84FF;
 
-  --color-syntax-keyword:  #A78BFA;
-  --color-syntax-string:   #34D399;
-  --color-syntax-number:   #FBBF24;
-  --color-syntax-function: #60A5FA;
-  --color-syntax-comment:  #6B7280;
-  --color-syntax-type:     #22D3EE;
-  --color-syntax-builtin:  #818CF8;
-  --color-syntax-delete:   #F87171;
-  --color-syntax-meta:     #A8A29E;
+  --color-syntax-keyword:  #7C84FF;
+  --color-syntax-string:   #3FB950;
+  --color-syntax-number:   #D8A526;
+  --color-syntax-function: #34D6C6;
+  --color-syntax-comment:  #646B76;
+  --color-syntax-type:     #34D6C6;
+  --color-syntax-builtin:  #7C84FF;
+  --color-syntax-delete:   #FA6A62;
+  --color-syntax-meta:     #646B76;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
-  --shadow-glow: 0 0 20px rgba(255, 255, 255, 0.06);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 0 3px var(--color-accent-glow);
 
-  /* 专属 token 暗色覆盖 */
-  --color-success-soft: rgba(16, 185, 129, 0.16);
-  --color-embed-bg: rgba(139, 92, 246, 0.20);
-  --color-embed-text: #C4B5FD;
-  --color-vision-bg: rgba(13, 148, 136, 0.22);
-  --color-vision-text: #5EEAD4;
-  --color-diff-add-bg: #0F2A17;
-  --color-diff-add-text: #4ADE80;
-  --color-diff-del-bg: #2A1416;
-  --color-diff-del-text: #F87171;
-  --color-danger-soft: rgba(239, 68, 68, 0.15);
-  --color-exec-bg: #0A0A0A;
-  --color-exec-text: #D6DEEB;
+  --color-success-soft: #11251A;
+  --color-success-border: #1C3E2A;
+  --color-embed-bg: #1A1C30;
+  --color-embed-text: #7C84FF;
+  --color-vision-bg: #11251A;
+  --color-vision-text: #3FB950;
+  --color-diff-add-bg: #11251A;
+  --color-diff-add-text: #3FB950;
+  --color-diff-del-bg: #2A1516;
+  --color-diff-del-text: #FA6A62;
+  --color-danger-soft: #2A1516;
+  --color-exec-bg: #0A0B0D;
+  --color-exec-text: #C7CDD6;
+}
+
+/* ================================================================
+   ACCENT 套（teal / amber）—— 仅覆盖 accent 系；明 + 暗组合
+   ================================================================ */
+[data-accent="teal"] {
+  --color-accent: #0F857A; --color-accent-light: #0F857A; --color-accent-hover: #0C6F66;
+  --color-border-focus: #0F857A; --color-accent-glow: #E1F4F1; --color-accent-soft: #E1F4F1;
+  --color-accent-border: #B1E1DA; --color-bg-nav-active: #E1F4F1;
+  --color-embed-bg: #E1F4F1; --color-embed-text: #0F857A;
+  --color-gradient-start: #0F857A; --color-gradient-mid: #0F857A; --color-gradient-end: #0F857A;
+  --color-syntax-keyword: #0F857A; --color-syntax-builtin: #0F857A;
+}
+[data-theme="dark"][data-accent="teal"] {
+  --color-accent: #34D6C6; --color-accent-light: #34D6C6; --color-accent-hover: #5FE0D3;
+  --color-border-focus: #34D6C6; --color-accent-glow: #0D2521; --color-accent-soft: #0D2521;
+  --color-accent-border: #1C4842; --color-bg-nav-active: #0D2521; --color-text-inverse: #06231F;
+  --color-embed-bg: #0D2521; --color-embed-text: #34D6C6;
+  --color-gradient-start: #34D6C6; --color-gradient-mid: #34D6C6; --color-gradient-end: #34D6C6;
+  --color-syntax-keyword: #34D6C6; --color-syntax-builtin: #34D6C6;
+}
+[data-accent="amber"] {
+  --color-accent: #B5640A; --color-accent-light: #B5640A; --color-accent-hover: #95520A;
+  --color-border-focus: #B5640A; --color-accent-glow: #FBEEDD; --color-accent-soft: #FBEEDD;
+  --color-accent-border: #ECD3AE; --color-bg-nav-active: #FBEEDD;
+  --color-embed-bg: #FBEEDD; --color-embed-text: #B5640A;
+  --color-gradient-start: #B5640A; --color-gradient-mid: #B5640A; --color-gradient-end: #B5640A;
+  --color-syntax-keyword: #B5640A; --color-syntax-builtin: #B5640A;
+}
+[data-theme="dark"][data-accent="amber"] {
+  --color-accent: #F0A33B; --color-accent-light: #F0A33B; --color-accent-hover: #F5B85F;
+  --color-border-focus: #F0A33B; --color-accent-glow: #2A1E0C; --color-accent-soft: #2A1E0C;
+  --color-accent-border: #4D3819; --color-bg-nav-active: #2A1E0C; --color-text-inverse: #241806;
+  --color-embed-bg: #2A1E0C; --color-embed-text: #F0A33B;
+  --color-gradient-start: #F0A33B; --color-gradient-mid: #F0A33B; --color-gradient-end: #F0A33B;
+  --color-syntax-keyword: #F0A33B; --color-syntax-builtin: #F0A33B;
 }
 
 /* ================================================================
@@ -153,40 +202,40 @@
    var() 在使用处再解析，故 .dark/.theme-* 覆盖会随链级联。
    ================================================================ */
 :root {
+  /* 密度单位（影响半径/紧凑度）；comfortable 更松。 */
+  --du: 4px;
   --bg: var(--color-bg-primary);
   --surface: var(--color-bg-card);
   --surface-2: var(--color-bg-secondary);
   --surface-3: var(--color-bg-tertiary);
-  --border: var(--color-border-subtle);
-  --border-strong: var(--color-border);
+  --border: var(--color-border);
+  --border-strong: var(--color-border-strong);
   --text: var(--color-text-primary);
-  /* 次级文字保持中性暖灰（不染珊瑚），强调色只用于真正的交互/品牌元素 → 整体更统一 */
-  --text-2: #5C5A54;
+  --text-2: var(--color-text-secondary);
   --muted: var(--color-text-muted);
   --accent: var(--color-accent);
   --accent-2: var(--color-accent);
   --accent-hover: var(--color-accent-hover);
-  --accent-soft: var(--color-bg-nav-active);
-  --accent-grad: linear-gradient(135deg, var(--color-gradient-start) 0%, var(--color-gradient-end) 100%);
+  --accent-soft: var(--color-accent-soft);
+  /* Agent Desk 无渐变 → 别名为扁平 accent（旧规则用它做背景仍生效）。 */
+  --accent-grad: var(--color-accent);
   --ok: var(--color-success);
   --err: var(--color-error);
 
-  --r-sm: 8px;
-  --r: 12px;
-  --r-lg: 16px;
+  --r-sm: calc(var(--du) + 3px);
+  --r: calc(var(--du) + 6px);
+  --r-lg: calc(var(--du) + 8px);
   --shadow-1: var(--shadow-sm);
   --shadow-2: var(--shadow-md);
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", "Roboto",
-    "Helvetica Neue", Arial, sans-serif;
+  --font: "IBM Plex Sans", system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif;
   --font-head: var(--font);
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "PingFang SC", monospace;
-  /* 衬线体：仅用于空态问候标题，系统栈、离线可用、零依赖。 */
-  --font-serif: ui-serif, Georgia, Charter, "Songti SC", "Times New Roman", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Agent Desk 无衬线：空态问候沿用 sans。 */
+  --font-serif: var(--font);
 }
 
-/* 暗色下的中性次级文字（放在 :root 别名之后，确保覆盖生效）。 */
-.dark { --text-2: #B8B4A8; }
+[data-density="comfortable"] { --du: 6px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0s !important; animation-duration: 0s !important; }
@@ -513,6 +562,11 @@ details.toolcard[open] > summary .chev { transform: rotate(90deg); }
 .appearance-row { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
 .appearance-block { display: flex; flex-direction: column; gap: 8px; }
 .appearance-block > span { font-size: 12px; color: var(--text-2); font-weight: 600; }
+.swatches { display: flex; gap: 10px; }
+.swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; box-shadow: var(--shadow-1); cursor: pointer; position: relative; transition: transform var(--ease) 0.15s; }
+.swatch:hover { transform: translateY(-1px); }
+.swatch.on { border-color: var(--color-border-strong); }
+.swatch.on::after { content: ""; position: absolute; inset: 0; margin: auto; width: 9px; height: 9px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.2); }
 
 /* ================================================================
    模型页

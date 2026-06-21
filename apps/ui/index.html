@@ -3,18 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#FAF9F5" />
+    <meta name="theme-color" content="#FBFBFC" />
     <title>EasyWork — 本地 AI 工作台</title>
     <script>
-      // 防 FOUC：React 挂载前先按持久化偏好给 <html> 打上明暗 class。
+      // 防 FOUC：React 挂载前先按持久化偏好给 <html> 打上 data-theme/accent/density。
       (function () {
         try {
           var p = JSON.parse(localStorage.getItem("ew.theme") || "{}");
           var appearance = p.appearance || "system";
           var prefersDark = matchMedia("(prefers-color-scheme: dark)").matches;
-          if (appearance === "dark" || (appearance === "system" && prefersDark)) {
-            document.documentElement.classList.add("dark");
-          }
+          var dark = appearance === "dark" || (appearance === "system" && prefersDark);
+          var r = document.documentElement;
+          r.setAttribute("data-theme", dark ? "dark" : "light");
+          r.setAttribute("data-accent", p.accent || "iris");
+          r.setAttribute("data-density", p.density || "compact");
         } catch (e) {}
       })();
     </script>

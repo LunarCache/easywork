@@ -6,6 +6,8 @@ import {
   saveAgentPrefs,
   type AgentPrefs,
   type Appearance,
+  type Accent,
+  type Density,
   type ThemePrefs,
 } from "../lib/prefs.js";
 import { SlidersIcon, BrainIcon, GlobeIcon, SunIcon, MoonIcon, MonitorIcon, PaletteIcon, AlertIcon } from "../icons.js";
@@ -14,6 +16,15 @@ const APPEARANCES: { id: Appearance; label: string; Icon: typeof SunIcon }[] = [
   { id: "light", label: "浅色", Icon: SunIcon },
   { id: "dark", label: "深色", Icon: MoonIcon },
   { id: "system", label: "跟随系统", Icon: MonitorIcon },
+];
+const ACCENTS: { id: Accent; label: string; color: string }[] = [
+  { id: "iris", label: "靛蓝", color: "#5256E0" },
+  { id: "teal", label: "青绿", color: "#0F857A" },
+  { id: "amber", label: "琥珀", color: "#B5640A" },
+];
+const DENSITIES: { id: Density; label: string }[] = [
+  { id: "compact", label: "紧凑" },
+  { id: "comfortable", label: "舒适" },
 ];
 /** 生成一个随机 api-key（暴露 0.0.0.0 时用）。 */
 function genApiKey(): string {
@@ -100,7 +111,7 @@ export function Settings({
           </span>
           <div>
             <h3>外观</h3>
-            <p className="hint">明暗模式（仅影响本机界面，立即生效）</p>
+            <p className="hint">明暗模式 · 主题色 · 密度（仅影响本机界面，立即生效）</p>
           </div>
         </div>
         <div className="appearance-row">
@@ -114,6 +125,35 @@ export function Settings({
                   onClick={() => onThemeChange({ ...theme, appearance: id })}
                 >
                   <Icon size={14} style={{ marginRight: 5, verticalAlign: "-2px" }} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="appearance-block">
+            <span>主题色</span>
+            <div className="swatches">
+              {ACCENTS.map(({ id, label, color }) => (
+                <button
+                  key={id}
+                  className={`swatch ${theme.accent === id ? "on" : ""}`}
+                  style={{ background: color }}
+                  title={label}
+                  aria-label={label}
+                  onClick={() => onThemeChange({ ...theme, accent: id })}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="appearance-block">
+            <span>密度</span>
+            <div className="seg">
+              {DENSITIES.map(({ id, label }) => (
+                <button
+                  key={id}
+                  className={theme.density === id ? "on" : ""}
+                  onClick={() => onThemeChange({ ...theme, density: id })}
+                >
                   {label}
                 </button>
               ))}
