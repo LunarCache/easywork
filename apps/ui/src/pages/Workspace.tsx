@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ApprovalMode, ChatMessage, Project } from "@ew/shared";
-import type { GitCommit, GitFile, GitRemoteInfo, GitStatus } from "@ew/sdk";
+import type { GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { loadDisabledSkills } from "../lib/prefs.js";
 import { MessageStream } from "../components/MessageStream.js";
@@ -275,10 +275,11 @@ export function Workspace({
         </footer>
       </div>
 
-      <ReviewPanel
+      <WorkspacePanel
         projectId={project.id}
         git={git}
         remote={remote}
+        msgs={msgs}
         onRefresh={refreshGit}
         open={reviewOpen}
         onClose={() => setReviewOpen(false)}
@@ -310,10 +311,11 @@ export function Workspace({
 
 
 // ===== 右侧 git 审查面板 =====
-function ReviewPanel({
+function WorkspacePanel({
   projectId,
   git,
   remote,
+  msgs,
   onRefresh,
   open,
   onClose,
@@ -321,10 +323,12 @@ function ReviewPanel({
   projectId: string;
   git: GitStatus;
   remote: GitRemoteInfo;
+  msgs: UiMsg[];
   onRefresh: () => Promise<void>;
   open: boolean;
   onClose: () => void;
 }) {
+  const [tab, setTab] = useState<"diff" | "files" | "terminal">("diff");
   const [commitMsg, setCommitMsg] = useState("");
   const [committing, setCommitting] = useState(false);
   const [netBusy, setNetBusy] = useState(false);
@@ -369,37 +373,40 @@ function ReviewPanel({
     }
   };
 
-  if (!git.repo)
-    return (
-      <aside className={`ws-review ${open ? "open" : ""}`}>
-        <div className="rev-head">
-          <span>改动</span>
-          <span className="bar-spacer" />
+  return (
+    <aside className={`ws-review ${open ? "open" : ""}`}>
+      <div className="wp-tabs">
+        <button className={`wp-tab ${tab === "diff" ? "on" : ""}`} onClick={() => setTab("diff")}>
+          Diff{git.files.length > 0 && <span className="rev-count">{git.files.length}</span>}
+        </button>
+        <button className={`wp-tab ${tab === "terminal" ? "on" : ""}`} onClick={() => setTab("terminal")}>
+          Terminal
+        </button>
+        <button className={`wp-tab ${tab === "files" ? "on" : ""}`} onClick={() => setTab("files")}>
+          Files
+        </button>
+        <span className="bar-spacer" />
+        {tab === "diff" && (
           <button className="fv-btn" title="刷新" onClick={() => void onRefresh()}>
             <RefreshIcon size={13} />
           </button>
-          <button className="fv-btn" title="关闭" onClick={onClose}>
-            <XIcon size={14} />
-          </button>
-        </div>
-        <div className="rev-empty">该目录不是 git 仓库。运行 <code>git init</code> 后即可在此审阅改动。</div>
-      </aside>
-    );
-
-  return (
-    <aside className={`ws-review ${open ? "open" : ""}`}>
-      <div className="rev-head">
-        <span>改动</span>
-        <span className="rev-count">{git.files.length}</span>
-        <span className="bar-spacer" />
-        <button className="fv-btn" title="刷新" onClick={() => void onRefresh()}>
-          <RefreshIcon size={13} />
-        </button>
+        )}
         <button className="fv-btn" title="关闭" onClick={onClose}>
           <XIcon size={14} />
         </button>
       </div>
 
+      {tab === "files" && <FilesTab projectId={projectId} />}
+      {tab === "terminal" && <TerminalTab msgs={msgs} />}
+
+      {tab === "diff" && !git.repo && (
+        <div className="rev-empty">
+          该目录不是 git 仓库。运行 <code>git init</code> 后即可在此审阅改动。
+        </div>
+      )}
+
+      {tab === "diff" && git.repo && (
+        <>
       {remote.hasRemote && (
         <div className="rev-remote">
           <span className="rev-remote-info" title={remote.upstream}>
@@ -478,7 +485,88 @@ function ReviewPanel({
           </button>
         </div>
       )}
+        </>
+      )}
     </aside>
+  );
+}
+
+/** 工作区文件树（wsList + wsRead 预览）。 */
+function FilesTab({ projectId }: { projectId: string }) {
+  const [entries, setEntries] = useState<WsEntry[]>([]);
+  const [sel, setSel] = useState<string | null>(null);
+  const [data, setData] = useState<{ content?: string; binary?: boolean; truncated?: boolean; size: number } | null>(null);
+
+  useEffect(() => {
+    setSel(null);
+    setData(null);
+    void getClient()
+      .wsList(projectId, ".", 4)
+      .then((es) => setEntries(es.filter((e) => e.type === "file").sort((a, b) => a.path.localeCompare(b.path))))
+      .catch(() => setEntries([]));
+  }, [projectId]);
+
+  const openFile = async (p: string) => {
+    if (sel === p) {
+      setSel(null);
+      setData(null);
+      return;
+    }
+    setSel(p);
+    setData(null);
+    try {
+      setData(await getClient().wsRead(projectId, p));
+    } catch {
+      setData({ size: 0 });
+    }
+  };
+
+  if (entries.length === 0) return <div className="rev-empty">该工作区暂无可显示的文件。</div>;
+  return (
+    <div className="rev-scroll">
+      {entries.map((f) => (
+        <div key={f.path} className="af-file">
+          <div className={`af-file-head ${sel === f.path ? "open" : ""}`} onClick={() => void openFile(f.path)}>
+            <ChevronIcon size={13} className={`chev ${sel === f.path ? "open" : ""}`} />
+            <span className="af-path" title={f.path}>
+              {f.path}
+            </span>
+          </div>
+          {sel === f.path && (
+            <div className="af-body">
+              {!data ? (
+                <div className="af-loading">加载中…</div>
+              ) : data.binary ? (
+                <div className="af-bin">二进制文件，无法预览</div>
+              ) : (
+                <pre className="af-code">
+                  <code>{data.content || "（空文件）"}</code>
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 终端：展示最近一次 run_command 的输出。 */
+function TerminalTab({ msgs }: { msgs: UiMsg[] }) {
+  let last: { output?: string; result?: string; args: string } | undefined;
+  for (const m of msgs) for (const b of m.blocks ?? []) if (b.kind === "tool" && b.tool.name === "run_command") last = b.tool;
+  let cmd = "";
+  try {
+    cmd = (JSON.parse(last?.args || "{}") as { command?: string }).command ?? "";
+  } catch {
+    /* ignore */
+  }
+  if (!last) return <div className="rev-empty">还没有运行过命令。对话里让 AI 执行命令后，输出会显示在这里。</div>;
+  return (
+    <pre className="cv-term wp-term">
+      {cmd && <div className="wp-term-cmd">$ {cmd}</div>}
+      {last.output || last.result || "（无输出）"}
+    </pre>
   );
 }
 

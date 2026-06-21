@@ -1143,6 +1143,14 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
 .rev-csubject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .rev-cmeta { flex: none; font-size: 11px; color: var(--muted); }
 
+/* 工作区面板 Diff/Terminal/Files 标签页 */
+.wp-tabs { display: flex; align-items: center; gap: 2px; padding: 7px 8px; border-bottom: 1px solid var(--border); flex: none; }
+.wp-tab { height: 28px; padding: 0 11px; border: none; border-radius: 7px; cursor: pointer; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+.wp-tab:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.wp-tab.on { background: var(--accent-soft); color: var(--accent); }
+.wp-term { flex: 1; min-height: 0; margin: 0; border-radius: 0; max-height: none; overflow: auto; }
+.wp-term-cmd { color: #7b8694; margin-bottom: 8px; }
+
 /* 对话模式右侧「工件」面板（复用 .ws-review 的滑入观感） */
 .chat-files { position: absolute; top: 0; right: 0; height: 100%; width: min(46%, 560px); border-left: 1px solid var(--border-strong); background: var(--surface-2); display: flex; flex-direction: column; min-height: 0; transform: translateX(100%); transition: transform var(--ease) 0.22s; box-shadow: -10px 0 28px rgba(0,0,0,0.18); z-index: 20; }
 .chat-files.open { transform: none; }
