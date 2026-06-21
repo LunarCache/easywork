@@ -487,8 +487,36 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .ad-ov-nav-btn.on { background: var(--accent-soft); color: var(--accent); }
 .ad-ov-content { flex: 1; min-width: 0; overflow-y: auto; background: var(--color-bg-primary); }
 /* 浮层内复用既有页面：取消页面自身滚动，由 .ad-ov-content 统一滚动。 */
-.ad-ov-content .page { overflow: visible; height: auto; }
+.ad-ov-content .page { overflow: visible; height: auto; padding: 22px 28px 40px; }
 @keyframes fade { from { opacity: 0; } }
+
+/* —— 设置浮层内把复用页面收敛成 Agent Desk 设置面板观感 ——
+   扁平区块（去卡片边框/阴影）+ 标题/描述（去大图标瓷砖）+ 边框列表项卡片，铺在 bg-0 上。 */
+.ad-ov-content .page-head { align-items: flex-start; gap: 0; margin-bottom: 18px; }
+.ad-ov-content .page-head .ico { display: none; }
+.ad-ov-content .page-head h2 { font-size: 15px; }
+.ad-ov-content .page-head .lead { font-size: 12px; color: var(--text-2); margin-top: 3px; }
+.ad-ov-content section { background: transparent; border: none; box-shadow: none; padding: 0; margin-bottom: 26px; max-width: none; }
+.ad-ov-content .sec-head { gap: 0; margin-bottom: 12px; align-items: flex-start; }
+.ad-ov-content .sec-head .ico { display: none; }
+.ad-ov-content .sec-head h3 { font-size: 14px; }
+.ad-ov-content .sec-head .hint { font-size: 12px; color: var(--text-2); margin-top: 3px; }
+/* 子区小标题（区块内）走 mono 大写细标，呼应参考的 Appearance/Behavior 分组标。 */
+.ad-ov-content .ls-head h3 { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); }
+/* 列表项卡片：bg-0 上的 bg-2 边框卡，无阴影（Agent Desk item card）。 */
+.ad-ov-content .model-card,
+.ad-ov-content .mcp-row,
+.ad-ov-content .kb-doc,
+.ad-ov-content .skill-card,
+.ad-ov-content .mem-item,
+.ad-ov-content .mem-hit,
+.ad-ov-content .kb-upload,
+.ad-ov-content .search-panel { box-shadow: none; }
+.ad-ov-content .empty-models { background: transparent; }
+/* 内容统一最大宽度，避免在 1000px 浮层里过度拉伸。 */
+.ad-ov-content .row,
+.ad-ov-content .models-tabs,
+.ad-ov-content .form { max-width: 620px; }
 
 /* ================================================================
    聊天
