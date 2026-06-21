@@ -658,11 +658,10 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .cv-diff-row.del .cv-diff-sign { color: var(--color-diff-del-text); }
 .cv-diff-code { white-space: pre; color: var(--text); }
 
-/* web 搜索来源 */
-.cv-search { margin: 9px 0; }
-.cv-search-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); margin-bottom: 8px; }
-.cv-search-head svg { color: var(--accent); flex: none; }
-.cv-search-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+/* 思考过程正文（套用工具卡折叠体 cv-tool-body） */
+.cv-reason { padding: 9px 13px; white-space: pre-wrap; color: var(--muted); font-size: 13px; line-height: 1.6; font-style: italic; }
+/* web 搜索来源 chips（在工具卡折叠体内） */
+.cv-search-chips { display: flex; flex-wrap: wrap; gap: 7px; padding: 10px 12px; }
 .msg.user .text { background: var(--color-bg-user-msg); color: var(--color-text-user-msg); border: 0; border-radius: 16px 4px 16px 16px; box-shadow: var(--shadow-1); }
 .msg.assistant { position: relative; max-width: 820px; }
 .msg.assistant .text { background: transparent; border: 0; box-shadow: none; padding: 2px 2px; border-radius: 0; white-space: normal; }
@@ -690,15 +689,6 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .md table { border-collapse: collapse; margin: 0 0 10px; font-size: 13px; }
 .md th, .md td { border: 1px solid var(--border); padding: 6px 10px; }
 .md th { background: var(--surface-2); font-weight: 600; }
-
-/* 思维链（reasoning） */
-details.reason { margin-bottom: 10px; }
-details.reason > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 0; color: var(--text-2); font-size: 13px; font-weight: 500; user-select: none; }
-details.reason > summary::-webkit-details-marker { display: none; }
-details.reason > summary svg { color: var(--accent); flex: none; }
-details.reason > summary .chev { margin-left: 2px; color: var(--muted); transition: transform var(--ease) 0.15s; }
-details.reason[open] > summary .chev { transform: rotate(90deg); }
-.reason-body { white-space: pre-wrap; color: var(--muted); font-size: 13px; line-height: 1.6; margin: 8px 0 0 7px; padding: 2px 0 2px 12px; border-left: 2px solid var(--accent-soft); font-style: italic; }
 
 /* Web 搜索结果 */
 .toolsearch { margin-bottom: 10px; }

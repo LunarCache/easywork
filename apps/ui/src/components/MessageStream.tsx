@@ -85,35 +85,49 @@ function openExternal(url: string, onOpenUrl?: (url: string) => void) {
 /** Agent Desk 工具卡：READ / EDIT(diff) / RUN(终端) / 通用 + web_search 来源 + 引用 / HTML 工件。 */
 export function ToolView({ t, onOpenUrl }: { t: UiTool; onOpenUrl?: (url: string) => void }) {
   if (t.name === "web_search") {
+    const q = toolQuery(t.args);
+    const hasSrc = !!(t.sources && t.sources.length);
+    const statusLabel = t.status === "running" ? "搜索中…" : t.status === "error" ? "失败" : "完成";
     return (
-      <div className="cv-search">
-        <div className="cv-search-head">
-          <GlobeIcon size={14} />
-          <span>
-            {t.status === "running" ? "正在搜索" : "已搜索"}
-            {toolQuery(t.args) && ` “${toolQuery(t.args)}”`}
-          </span>
-        </div>
-        {t.sources && t.sources.length > 0 && (
-          <div className="cv-search-chips">
-            {t.sources.map((s, j) => (
-              <button
-                key={j}
-                type="button"
-                className="src-chip"
-                title={s.url}
-                onClick={() => openExternal(s.url, onOpenUrl)}
-              >
-                <img
-                  src={`https://www.google.com/s2/favicons?domain=${host(s.url)}&sz=64`}
-                  alt=""
-                  onError={(e) => (e.currentTarget.style.visibility = "hidden")}
-                />
-                <span>{s.title || host(s.url)}</span>
-              </button>
-            ))}
+      <div className="cv-tool-wrap">
+        <details className={`cv-tool ${t.status}`} open={t.status === "running" || hasSrc}>
+          <summary>
+            <GlobeIcon size={14} className="cv-tool-ico" />
+            <span className="cv-tool-label">SEARCH</span>
+            {q && <span className="cv-tool-name">{q}</span>}
+            <span className={`cv-tool-status ${t.status}`}>
+              <span className="cv-tool-dot" /> {statusLabel}
+            </span>
+            <ChevronIcon size={13} className="chev" />
+          </summary>
+          <div className="cv-tool-body">
+            {hasSrc ? (
+              <div className="cv-search-chips">
+                {t.sources!.map((s, j) => (
+                  <button
+                    key={j}
+                    type="button"
+                    className="src-chip"
+                    title={s.url}
+                    onClick={() => openExternal(s.url, onOpenUrl)}
+                  >
+                    <img
+                      src={`https://www.google.com/s2/favicons?domain=${host(s.url)}&sz=64`}
+                      alt=""
+                      onError={(e) => (e.currentTarget.style.visibility = "hidden")}
+                    />
+                    <span>{s.title || host(s.url)}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="cv-kv">
+                <span>查询</span>
+                <code>{q || "（无）"}</code>
+              </div>
+            )}
           </div>
-        )}
+        </details>
       </div>
     );
   }
@@ -245,20 +259,28 @@ export function MessageStream({
                 if (b.kind === "reasoning") {
                   const liveThis = live && bi === lastIdx;
                   const dur = b.end ? (b.end - b.start) / 1000 : null;
-                  const label = liveThis
+                  const status = liveThis ? "running" : "done";
+                  const statusLabel = liveThis
                     ? "思考中…"
                     : dur != null
-                      ? `思考了 ${dur < 1 ? "<1" : Math.round(dur)} 秒`
-                      : "思考过程";
+                      ? `${dur < 1 ? "<1" : Math.round(dur)} 秒`
+                      : "完成";
                   return (
-                    <details key={bi} className="reason" open={liveThis}>
-                      <summary>
-                        <BrainIcon size={15} />
-                        <span>{label}</span>
-                        <ChevronIcon size={14} className="chev" />
-                      </summary>
-                      <div className="reason-body">{b.text}</div>
-                    </details>
+                    <div key={bi} className="cv-tool-wrap">
+                      <details className={`cv-tool ${status}`} open={liveThis}>
+                        <summary>
+                          <BrainIcon size={14} className="cv-tool-ico" />
+                          <span className="cv-tool-label">THINK</span>
+                          <span className={`cv-tool-status ${status}`}>
+                            <span className="cv-tool-dot" /> {statusLabel}
+                          </span>
+                          <ChevronIcon size={13} className="chev" />
+                        </summary>
+                        <div className="cv-tool-body">
+                          <div className="cv-reason">{b.text}</div>
+                        </div>
+                      </details>
+                    </div>
                   );
                 }
                 if (b.kind === "tool") return <ToolView key={bi} t={b.tool} onOpenUrl={onOpenUrl} />;
