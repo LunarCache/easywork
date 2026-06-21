@@ -39,6 +39,7 @@ export function App() {
   const [contexts, setContexts] = useState<Record<string, number>>({});
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [workThreadId, setWorkThreadId] = useState<string>("");
   const [theme, setTheme] = useState<ThemePrefs>(loadThemePrefs);
   const [sessionWidth, setSessionWidth] = useState<number>(loadSessionWidth);
 
@@ -57,10 +58,10 @@ export function App() {
     saveThemePrefs(next);
   }, []);
 
+  // 全量会话（含工作区会话，带 projectId）；对话/工作区列表各自从中筛选/分组。
   const refreshThreads = useCallback(async () => {
     try {
-      // 对话模式只列纯聊天会话（无 projectId）；工作区会话在各自工作区内管理。
-      setThreads((await getClient().listThreads()).filter((t) => !t.projectId));
+      setThreads(await getClient().listThreads());
     } catch {
       /* ignore */
     }
@@ -140,8 +141,21 @@ export function App() {
     setThreadId(id);
     setMode("chat");
   };
+  // 某工作区的最近会话 id（threads 按 updatedAt desc）；无则用默认 ws-<id> 线程。
+  const latestWorkThread = (pid: string) => threads.find((t) => t.projectId === pid)?.id ?? `ws-${pid}`;
   const selectProject = (id: string) => {
     setProjectId(id);
+    setWorkThreadId(latestWorkThread(id));
+    setMode("work");
+  };
+  const selectWorkThread = (pid: string, tid: string) => {
+    setProjectId(pid);
+    setWorkThreadId(tid);
+    setMode("work");
+  };
+  const newWorkThread = (pid: string) => {
+    setProjectId(pid);
+    setWorkThreadId(`ws-${pid}-${crypto.randomUUID().slice(0, 8)}`);
     setMode("work");
   };
   const delThread = async (id: string, e: React.MouseEvent) => {
@@ -150,6 +164,7 @@ export function App() {
     if (!confirm(`删除对话「${t?.title || "新会话"}」？此操作不可撤销（删除会话记录及由其抽取的记忆事实）。`)) return;
     await getClient().deleteThread(id);
     if (id === threadId) newChat();
+    if (id === workThreadId) setWorkThreadId(`ws-${projectId ?? ""}`);
     void refreshThreads();
   };
 
@@ -205,10 +220,13 @@ export function App() {
             projects={projects}
             threadId={threadId}
             projectId={projectId}
+            workThreadId={workThreadId}
             onNewChat={newChat}
             onNewWorkspace={() => void newWorkspace()}
             onSelectThread={selectThread}
             onSelectProject={selectProject}
+            onSelectWorkThread={selectWorkThread}
+            onNewWorkThread={newWorkThread}
             onDelThread={(id, e) => void delThread(id, e)}
             onDelProject={(id, e) => void delProject(id, e)}
           />
@@ -223,7 +241,14 @@ export function App() {
           )}
           {mode === "work" &&
             (project ? (
-              <Workspace key={project.id} project={project} models={models} onChanged={refreshProjects} />
+              <Workspace
+                key={project.id}
+                project={project}
+                models={models}
+                threadId={workThreadId || latestWorkThread(project.id)}
+                onChanged={refreshProjects}
+                onThreadsChanged={refreshThreads}
+              />
             ) : (
               <div className="empty">
                 <div className="ring">

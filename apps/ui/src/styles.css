@@ -463,6 +463,21 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .ad-sl-inbox-empty svg { color: var(--border-strong); }
 .ad-sl-inbox-empty p { margin: 6px 0 0; font-weight: 600; color: var(--text-2); }
 .ad-sl-inbox-empty span { font-size: 12px; line-height: 1.5; }
+/* 工作区：项目分组 → 嵌套会话 */
+.ad-sl-group { margin-bottom: 2px; }
+.ad-sl-grouphead { width: 100%; display: flex; align-items: center; gap: 7px; padding: 8px; border: none; border-radius: 8px; background: transparent; cursor: pointer; color: var(--text); }
+.ad-sl-grouphead:hover, .ad-sl-grouphead.active { background: var(--color-bg-tertiary); }
+.ad-sl-chev { color: var(--text-tertiary); flex: none; transition: transform 0.15s var(--ease); }
+.ad-sl-chev.open { transform: rotate(90deg); }
+.ad-sl-cwd { flex: none; font-family: var(--font-mono); font-size: 9px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--color-accent-border); padding: 0 5px; border-radius: 4px; }
+.ad-sl-count { flex: none; font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); }
+.ad-sl-grouphead:hover .ad-sl-del { opacity: 1; }
+.ad-sl-sub { display: flex; flex-direction: column; gap: 1px; margin: 1px 0 4px; }
+.ad-sl-row.sub { padding: 6px 9px 6px 10px; }
+.ad-sl-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--border-strong); margin-left: 12px; }
+.ad-sl-row.sub.on .ad-sl-dot { background: var(--accent); }
+.ad-sl-newsub { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 9px 6px 14px; border: none; background: transparent; color: var(--text-tertiary); font-size: 12px; cursor: pointer; border-radius: 8px; }
+.ad-sl-newsub:hover { background: var(--color-bg-tertiary); color: var(--text); }
 
 /* —— resizer —— */
 .ad-resizer { width: 7px; flex: none; cursor: col-resize; display: flex; align-items: stretch; justify-content: center; background: var(--color-bg-secondary); }
