@@ -46,4 +46,9 @@ export {
   Square as StopIcon,
   X as XIcon,
   TriangleAlert as AlertIcon,
+  Inbox as InboxIcon,
+  Settings as GearIcon,
+  History as HistoryIcon,
+  User as UserIcon,
+  AlignJustify as DensityIcon,
 } from "lucide-react";

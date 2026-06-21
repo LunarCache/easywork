@@ -5,16 +5,15 @@ import { applyTheme, loadThemePrefs, saveThemePrefs, type ThemePrefs } from "./l
 import { pickWorkspaceDir } from "./lib/desktop.js";
 import { Chat } from "./pages/Chat.js";
 import { Workspace } from "./pages/Workspace.js";
-import { Models } from "./pages/Models.js";
-import { Settings } from "./pages/Settings.js";
-import { KnowledgeBase } from "./pages/KnowledgeBase.js";
-import { Skills } from "./pages/Skills.js";
-import { Mcp } from "./pages/Mcp.js";
-import { Memory } from "./pages/Memory.js";
-import { BoxIcon, BrainIcon, ChatIcon, FolderTreeIcon, FolderClosedIcon, GlobeIcon, KbIcon, NewChatIcon, PanelIcon, PlusIcon, SlidersIcon, SparkIcon, TrashIcon, WrenchIcon } from "./icons.js";
+import { Titlebar } from "./components/Titlebar.js";
+import { IconRail, type Mode } from "./components/IconRail.js";
+import { SessionList } from "./components/SessionList.js";
+import { SettingsOverlay, type SettingsTab } from "./components/SettingsOverlay.js";
+import { MemoryOverlay } from "./components/MemoryOverlay.js";
+import { FolderTreeIcon, InboxIcon } from "./icons.js";
 
-type Tab = "chat" | "workspace" | "models" | "kb" | "skills" | "mcp" | "memory" | "settings";
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
+type Overlay = null | "settings" | "memory";
 interface ThreadItem {
   id: string;
   title: string;
@@ -22,29 +21,26 @@ interface ThreadItem {
   projectId?: string;
 }
 
-// 左下角 EasyWork 块的弹出菜单项（不含「聊天」——聊天经「新对话」/会话列表进入）
-const MENU: { id: Tab; label: string; Icon: typeof ChatIcon }[] = [
-  { id: "models", label: "模型", Icon: BoxIcon },
-  { id: "kb", label: "知识库", Icon: KbIcon },
-  { id: "skills", label: "Skills", Icon: SparkIcon },
-  { id: "mcp", label: "MCP", Icon: WrenchIcon },
-  { id: "memory", label: "记忆", Icon: BrainIcon },
-  { id: "settings", label: "设置", Icon: SlidersIcon },
-];
+const SESSION_W_KEY = "ew.sessionWidth";
+const loadSessionWidth = (): number => {
+  const n = Number(localStorage.getItem(SESSION_W_KEY));
+  return Number.isFinite(n) && n >= 200 && n <= 460 ? n : 272;
+};
 
 export function App() {
-  const [tab, setTab] = useState<Tab>("chat");
+  const [mode, setMode] = useState<Mode>("chat");
+  const [overlay, setOverlay] = useState<Overlay>(null);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("models");
   const [models, setModels] = useState<string[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const [threadId, setThreadId] = useState<string>(() => crypto.randomUUID());
   const [threads, setThreads] = useState<ThreadItem[]>([]);
   const [contexts, setContexts] = useState<Record<string, number>>({});
-  const [collapsed, setCollapsed] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemePrefs>(loadThemePrefs);
+  const [sessionWidth, setSessionWidth] = useState<number>(loadSessionWidth);
 
   // 外观：应用到 <html>；系统模式下跟随系统明暗变化。
   useEffect(() => {
@@ -63,7 +59,7 @@ export function App() {
 
   const refreshThreads = useCallback(async () => {
     try {
-      // 侧栏「对话」仅列纯聊天会话；工作区会话（带 projectId）在各自工作区内管理。
+      // 对话模式只列纯聊天会话（无 projectId）；工作区会话在各自工作区内管理。
       setThreads((await getClient().listThreads()).filter((t) => !t.projectId));
     } catch {
       /* ignore */
@@ -82,7 +78,6 @@ export function App() {
 
   const newWorkspace = async () => {
     const dir = await pickWorkspaceDir();
-    // 未选目录 → 后端在 ~/.easywork/workspace 下自动新建 NewProject{N}（名称/目录均由后端生成）。
     if (!dir && !confirm("未选择目录。在默认工作区下新建 NewProject？")) return;
     try {
       const p = dir
@@ -90,7 +85,7 @@ export function App() {
         : await getClient().createProject({});
       await refreshProjects();
       setProjectId(p.id);
-      setTab("workspace");
+      setMode("work");
     } catch (e) {
       alert(`创建工作区失败：${e instanceof Error ? e.message : String(e)}`);
     }
@@ -99,9 +94,8 @@ export function App() {
   const delProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const p = projects.find((x) => x.id === id);
-    const name = p?.name ?? "该工作区";
     const ok = confirm(
-      `删除工作区「${name}」？\n\n` +
+      `删除工作区「${p?.name ?? "该工作区"}」？\n\n` +
         `仅删除本软件内的会话历史（含其下全部对话及由其抽取的记忆事实），不会删除工作区目录中的任何文件：\n` +
         `${p?.workspaceDir ?? ""}`,
     );
@@ -140,15 +134,15 @@ export function App() {
 
   const newChat = () => {
     setThreadId(crypto.randomUUID());
-    setTab("chat");
+    setMode("chat");
   };
   const selectThread = (id: string) => {
     setThreadId(id);
-    setTab("chat");
+    setMode("chat");
   };
   const selectProject = (id: string) => {
     setProjectId(id);
-    setTab("workspace");
+    setMode("work");
   };
   const delThread = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -162,142 +156,73 @@ export function App() {
   const statusText =
     status === "ok" ? "已连接" : status === "connecting" ? "连接中…" : status === "unauthorized" ? "未授权" : "未连接";
 
+  // 会话列表宽度拖拽（持久化）。
+  const onResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sessionWidth;
+    let w = startW;
+    const move = (ev: MouseEvent) => {
+      w = Math.min(460, Math.max(200, startW + ev.clientX - startX));
+      setSessionWidth(w);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      try {
+        localStorage.setItem(SESSION_W_KEY, String(w));
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
+  const project = projects.find((p) => p.id === projectId);
+
   return (
-    <div className="app">
-      <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
-        <div className="brand">
-          <span className="logo">
-            <SparkIcon size={17} />
-          </span>
-          <span className="name">
-            Easy<b>Work</b>
-          </span>
-          <button className="collapse-btn" title={collapsed ? "展开侧栏" : "收起侧栏"} onClick={() => setCollapsed((v) => !v)}>
-            <PanelIcon size={17} />
-          </button>
+    <div className="ad-app">
+      <Titlebar
+        theme={theme}
+        onThemeChange={changeTheme}
+        onOpenSettings={() => setOverlay("settings")}
+        {...(mode === "work" && project ? { branch: project.name } : {})}
+      />
+      <div className="ad-body">
+        <IconRail
+          mode={mode}
+          setMode={setMode}
+          onMemory={() => setOverlay("memory")}
+          onSettings={() => setOverlay("settings")}
+          status={status}
+          statusText={statusText}
+        />
+        <div className="ad-sessions-wrap" style={{ width: sessionWidth }}>
+          <SessionList
+            mode={mode}
+            threads={threads}
+            projects={projects}
+            threadId={threadId}
+            projectId={projectId}
+            onNewChat={newChat}
+            onNewWorkspace={() => void newWorkspace()}
+            onSelectThread={selectThread}
+            onSelectProject={selectProject}
+            onDelThread={(id, e) => void delThread(id, e)}
+            onDelProject={(id, e) => void delProject(id, e)}
+          />
+        </div>
+        <div className="ad-resizer" title="拖动调整宽度" onMouseDown={onResizeStart}>
+          <span />
         </div>
 
-        {/* 主模式分段控件（对话 / 工作区），仿 Claude 桌面端 */}
-        <div className="seg-tabs">
-          <button className={tab === "chat" ? "on" : ""} onClick={() => setTab("chat")} title="对话">
-            <ChatIcon size={15} />
-            <span>对话</span>
-          </button>
-          <button className={tab === "workspace" ? "on" : ""} onClick={() => setTab("workspace")} title="工作区">
-            <FolderTreeIcon size={15} />
-            <span>工作区</span>
-          </button>
-        </div>
-
-        {/* 上下文动作行：工作区模式=新建工作区，否则=新对话 */}
-        <div className="side-nav">
-          {tab === "workspace" ? (
-            <button className="navrow" onClick={() => void newWorkspace()} title="新建工作区（选择本地目录）">
-              <PlusIcon size={16} />
-              <span>新建工作区</span>
-            </button>
-          ) : (
-            <button className="navrow" onClick={newChat} title="新建对话">
-              <NewChatIcon size={16} />
-              <span>新对话</span>
-            </button>
+        <main className="ad-main">
+          {mode === "chat" && (
+            <Chat key={threadId} models={models} contexts={contexts} threadId={threadId} onSaved={refreshThreads} />
           )}
-        </div>
-
-        <div className="side-scroll">
-          {tab === "workspace" ? (
-            <div className="side-threads">
-              <div className="side-label">工作区</div>
-              <div className="threads-list">
-                {projects.length === 0 && <div className="threads-empty">还没有工作区</div>}
-                {projects.map((p) => (
-                  <div
-                    key={p.id}
-                    className={`thread-item ${p.id === projectId ? "active" : ""}`}
-                    onClick={() => selectProject(p.id)}
-                    title={p.workspaceDir}
-                  >
-                    <FolderClosedIcon size={14} />
-                    <span>{p.name}</span>
-                    <button className="thread-del" title="删除" onClick={(e) => void delProject(p.id, e)}>
-                      <TrashIcon size={13} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="side-threads">
-              <div className="side-label">最近</div>
-              <div className="threads-list">
-                {threads.length === 0 && <div className="threads-empty">还没有会话</div>}
-                {threads.map((t) => (
-                  <div
-                    key={t.id}
-                    className={`thread-item ${tab === "chat" && t.id === threadId ? "active" : ""}`}
-                    onClick={() => selectThread(t.id)}
-                    title={t.title}
-                  >
-                    <ChatIcon size={14} />
-                    <span>{t.title || "新会话"}</span>
-                    <button className="thread-del" title="删除" onClick={(e) => void delThread(t.id, e)}>
-                      <TrashIcon size={13} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="side-foot">
-          {menuOpen && (
-            <>
-              <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />
-              <div className="profile-menu" role="menu">
-                {MENU.map(({ id, label, Icon }) => (
-                  <button
-                    key={id}
-                    className={tab === id ? "active" : ""}
-                    role="menuitem"
-                    onClick={() => {
-                      setTab(id);
-                      setMenuOpen(false);
-                    }}
-                  >
-                    <Icon size={16} />
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          <button
-            className={`profile ${status} ${menuOpen ? "open" : ""}`}
-            onClick={() => setMenuOpen((v) => !v)}
-            title={statusText}
-          >
-            <span className="avatar">
-              <GlobeIcon size={15} />
-            </span>
-            <span className="pinfo">
-              <b>
-                <span className={`dot ${status === "ok" ? "ok" : status === "connecting" ? "" : "err"}`} />
-                {statusText}
-              </b>
-            </span>
-          </button>
-        </div>
-      </aside>
-
-      <main className="content">
-        {tab === "chat" && (
-          <Chat key={threadId} models={models} contexts={contexts} threadId={threadId} onSaved={refreshThreads} />
-        )}
-        {tab === "workspace" &&
-          (() => {
-            const project = projects.find((p) => p.id === projectId);
-            return project ? (
+          {mode === "work" &&
+            (project ? (
               <Workspace key={project.id} project={project} models={models} onChanged={refreshProjects} />
             ) : (
               <div className="empty">
@@ -305,17 +230,32 @@ export function App() {
                   <FolderTreeIcon size={28} />
                 </div>
                 <h2>工作区</h2>
-                <p>在本地项目目录里让 AI 读写文件、运行命令完成编码任务。点击左侧「新建工作区」选择目录开始。</p>
+                <p>在本地项目目录里让 AI 读写文件、运行命令完成编码任务。点击「新建工作区」选择目录开始。</p>
               </div>
-            );
-          })()}
-        {tab === "models" && <Models onChange={check} />}
-        {tab === "kb" && <KnowledgeBase />}
-        {tab === "skills" && <Skills />}
-        {tab === "mcp" && <Mcp />}
-        {tab === "memory" && <Memory />}
-        {tab === "settings" && <Settings theme={theme} onThemeChange={changeTheme} />}
-      </main>
+            ))}
+          {mode === "inbox" && (
+            <div className="empty">
+              <div className="ring">
+                <InboxIcon size={28} />
+              </div>
+              <h2>收件箱</h2>
+              <p>连接 Telegram / 企业微信 / 飞书等 IM 渠道后，外部对话会汇入这里，由同一个大脑处理。</p>
+            </div>
+          )}
+        </main>
+      </div>
+
+      {overlay === "settings" && (
+        <SettingsOverlay
+          tab={settingsTab}
+          setTab={setSettingsTab}
+          onClose={() => setOverlay(null)}
+          onModelsChange={check}
+          theme={theme}
+          onThemeChange={changeTheme}
+        />
+      )}
+      {overlay === "memory" && <MemoryOverlay onClose={() => setOverlay(null)} />}
     </div>
   );
 }
