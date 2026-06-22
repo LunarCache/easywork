@@ -1,8 +1,20 @@
+<div align="center">
+
+<img src="apps/desktop/src-tauri/icons/128x128@2x.png" width="92" alt="EasyWork" />
+
 # EasyWork · 本地 AI 工作台
 
-> 纯推理（无训练 / 微调）的跨平台本地 AI 工作台。下载并运行本地 GGUF 模型，也可接云端 OpenAI-兼容模型；具备 Agent 工具能力（内置工具 / Skills / MCP）、文档知识库 RAG、可插拔记忆系统；支持应用内聊天与外部 IM 渠道。
->
-> TypeScript 全栈，跨 Linux / macOS / Windows。能力**思路**参考 Unsloth Studio 与 Hermes Studio，独立实现。
+纯推理（无训练 / 微调）的跨平台本地 AI 工作台
+
+**本地 GGUF / 云端 OpenAI-兼容模型** · **Agent 工具**（内置 / Skills / MCP）· **知识库 RAG** · **可插拔记忆** · 应用内聊天 + 外部 IM
+
+TypeScript 全栈 · Linux / macOS / Windows · Agent 内核 = 托管 [pi-coding-agent](https://github.com/earendil-works/pi)
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh | sh
+```
+
+</div>
 
 ---
 
@@ -26,7 +38,11 @@
 - **多协议端点（网关）**：`/v1/chat/completions`（+stream）、`/v1/embeddings`、`/v1/models`（OpenAI 兼容）、`/v1/messages`（Anthropic 兼容）。本地模型**透传**到其 llama-server 原生端点（OpenAI + 原生 Anthropic）；云端**流式经 pi-ai**（统一鉴权，含 OAuth）。可让 Claude Code 等外部客户端直接指向。
 - **本地端口暴露**：llama-server 默认仅绑 `127.0.0.1`；可在「设置 → 本地网络」切到 `0.0.0.0` 让局域网其他服务直连（**强制设置 api-key**，未鉴权拒绝）。
 - **思维链**：`<think>` 与 gpt-oss harmony 多通道（analysis → 思考 / final → 正文）解析；**思考过程持久化**（作为 reasoning 片段落库），切换 / 重载会话仍可展开回放（不回喂模型）。
-- **桌面 UI（Agent Desk 工作台）**：冷灰 + 靛蓝设计语言（IBM Plex Sans / JetBrains Mono · 明暗双主题 · iris/teal/amber 三色 + 紧凑/舒适密度，挂 `<html>` data-*）。布局 = 标题栏 + **图标轨道模式切换（对话 / 工作区 / 收件箱）** + 分组会话列表（工作区按项目→会话，CWD 角标）+ 可拖拽对话区（用户**强调色气泡右对齐** / AI 消息头像左对齐；THINK·SEARCH·READ·EDIT-diff·RUN-terminal **统一工具卡** + 流式 / 引用 / HTML 工件 / 图片多模态 / 审批；composer **上下文用量进度环**）+ **统一右侧「工作台坞」**（对话区与工作区共用，一坞四 tab：**改动**（git 审查，按需）/ **文件**（工件 + 文件树内联预览，📂 在文件管理器打开目录）/ **终端**（看 AI 命令 + `$` 自己跑命令）/ **预览**（点来源 / 链接内联看网页、不导航走 app，⤢ 放大到整窗）） + Settings（模型 / 知识库 / Skills / MCP / 通用，Skills·MCP 行卡片开关）/ Memory 浮层。
+- **桌面 UI（Agent Desk 工作台）**：冷灰 + 靛蓝设计语言（IBM Plex Sans / JetBrains Mono · 明暗双主题 · iris/teal/amber 三色 + 紧凑/舒适密度，挂 `<html>` data-*）。
+  - **布局**：标题栏 + 图标轨道（对话 / 工作区 / 收件箱）+ 分组会话列表（工作区按项目→会话，带 CWD 角标）+ 可拖拽对话区 + 右侧「工作台坞」。
+  - **对话区**：用户强调色气泡右对齐 / AI 消息左对齐；`THINK·SEARCH·READ·EDIT·RUN` 统一工具卡 + 流式 / 引用 / HTML 工件 / 图片多模态 / 审批；composer 带**上下文用量进度环**。
+  - **工作台坞**（对话区与工作区共用，四 tab）：**改动**（git 审查，按需）/ **文件**（工件 + 文件树内联预览，📂 打开目录）/ **终端**（看 AI 命令 + `$` 自己跑命令）/ **预览**（来源 / 链接内联看网页，⤢ 放大到整窗）。
+  - **浮层**：Settings（模型 / 知识库 / Skills / MCP / 通用，行卡片开关）+ Memory。
 
 ---
 
@@ -193,11 +209,12 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 - **思考过程持久化**：reasoning 落库并跨会话回放（不回喂模型）。
 - **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（**Agent Desk 工作台**设计语言：冷灰 + 靛蓝 · IBM Plex/JetBrains · 明暗 + 三色 accent + 密度）；标题栏 + 图标轨道（对话/工作区/收件箱）+ 分组会话列表 + 三栏可拖拽 + 统一「工作台坞」（改动/文件/终端/预览，可放大到整窗）+ 设置/记忆浮层。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP 持久化）。
+- **打包发布（macOS）**：daemon 打成**单文件原生二进制**（Node SEA，运行免 Node）；Tauri 出 **dmg**（Apple Silicon / Intel，内置 daemon + sqlite-vec）；`install.sh` 一键安装并**自动备齐 llama 运行时**（缺失经 llama.app 装）；`v*` tag 触发 GitHub Actions 构建 + 发布到 Releases。
 
 ### 🚧 待做
 
 - **IM 连接器**：Telegram 已实现；**Discord / 企业微信 / 飞书待补**（需实盘凭证联调）。
-- **桌面打包分发**：Tauri 三平台安装包 + 随附 `llama-server` / `sqlite-vec` 二进制冒烟（目前仅 `cargo check` + dev 实跑验证）。
+- **打包发布收尾**：macOS dmg 已发；**Windows / Linux 安装包 + 代码签名/公证 + 自动更新待做**。
 - **代码执行沙箱**：python / terminal 的独立 OS 级隔离（当前经 pi `bash` 工具 + 审批 4 档把守，无独立沙箱）。
 - **密钥存储**：provider / MCP key 现存 SQLite `settings`，待迁 OS keychain（keytar / Tauri stronghold）。
 - **工作区 v2**：多会话回放 ✅、提交历史 ✅、push/pull ✅、接受 / 拒绝单改动（per-hunk 暂存 / 取消暂存 / 丢弃）✅ 已完成；仅剩 **内嵌可编辑编辑器**（按需）。
@@ -211,4 +228,4 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 
 ## 📄 许可
 
-私有项目。能力思路参考 Unsloth Studio（AGPL-3.0）与 Hermes Studio，但为独立实现，不复制其代码。
+源码公开，暂未设开源许可证（默认保留所有权利，开源许可待定）。能力**思路**参考 Unsloth Studio（AGPL-3.0）与 Hermes Studio，但为独立实现，不复制其代码。
