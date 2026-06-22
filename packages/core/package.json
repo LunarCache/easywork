@@ -20,9 +20,9 @@
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.79.3",
-    "@earendil-works/pi-ai": "0.79.3",
-    "@earendil-works/pi-coding-agent": "0.79.3",
+    "@earendil-works/pi-agent-core": "0.79.9",
+    "@earendil-works/pi-ai": "0.79.9",
+    "@earendil-works/pi-coding-agent": "0.79.9",
     "@ew/mcp": "*",
     "@ew/memory": "*",
     "@ew/providers": "*",
@@ -38,6 +38,6 @@
     "@ew/sdk": "*",
     "tsup": "^8.3.5",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "vitest": "^4.0.0"
   }
 }
