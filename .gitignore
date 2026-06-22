@@ -26,9 +26,6 @@ release/
 /models/
 *.gguf
 
-# Reference repo (Unsloth, 仅作思路借鉴，不纳入本仓库)
-unsloth/
-
 # Editor / OS
 .DS_Store
 .vscode/

@@ -77,4 +77,4 @@ npm run app:build --workspace @ew/desktop  # 出 macOS dmg + .app
 
 ## 许可
 
-源码公开，暂未设开源许可证（默认保留所有权利，开源许可待定）。能力**思路**参考 Unsloth Studio（AGPL-3.0）与 Hermes Studio，但为独立实现，不复制其代码。
+源码公开，暂未设开源许可证（默认保留所有权利，开源许可待定）。
