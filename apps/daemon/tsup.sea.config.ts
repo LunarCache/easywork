@@ -12,7 +12,7 @@ export default defineConfig({
   dts: false,
   clean: true,
   sourcemap: false,
-  target: "node22",
+  target: "node24",
   outDir: "dist-sea",
   noExternal: [/.*/],
   external: ["sqlite-vec"],

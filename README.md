@@ -69,7 +69,7 @@ easywork status / stop         # daemon 状态 / 停止
 
 ## 从源码开发
 
-环境：**Node ≥ 20**（推荐 26）、npm 11、`llama-server` 或 `llama`（`brew install llama.cpp` 或 `curl -LsSf https://llama.app/install.sh | sh`）。桌面需 Rust（`cargo`）。Windows 另需 Git（见 [平台说明](docs/ARCHITECTURE.md#平台说明)）。
+环境：**Node ≥ 24**（内置 `node:sqlite`；推荐 26）、npm 11、`llama-server` 或 `llama`（`brew install llama.cpp` 或 `curl -LsSf https://llama.app/install.sh | sh`）。桌面需 Rust（`cargo`）。Windows 另需 Git（见 [平台说明](docs/ARCHITECTURE.md#平台说明)）。
 
 ```bash
 npm install            # 安装依赖
