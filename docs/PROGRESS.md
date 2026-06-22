@@ -1,6 +1,35 @@
 # 项目进展（PROGRESS）
 
-> 每完成一个里程碑更新此文件。最新在上。
+> 每完成一个里程碑更新此文件。下方「状态总览」是滚动结论，再往下是按时间倒序的里程碑日志。
+
+## 状态总览
+
+### ✅ 已完成
+
+- **核心守护进程**（`@ew/core`）：Fastify HTTP + SSE，托管 pi-coding-agent 内核（`SessionHost`，按 threadId 串行化），无头可运行（`easywork serve`）。
+- **本地推理**：`llama-server` / `llama serve` 子进程管理（文本 / 视觉 / embedding），每模型一进程 + LRU 淘汰；HF 搜索 / 断点续传下载 / GGUF 头解析。
+- **云端推理**：OpenAI 兼容 provider（OpenAI / OpenRouter / DeepSeek / vLLM …），云端流式经 pi-ai（含 OAuth）。
+- **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi。
+- **Agent 工具**：内置工具（time/calculator/http_get+SSRF/web_search）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
+- **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 终端 / 预览）。
+- **记忆（作用域化）**：全局池 + 每工作区私有池；渐进式披露注入 + 批量事实抽取；sqlite-vec ⊕ 词法混合召回；markdown 可手改回灌。
+- **知识库 RAG**：上传 → 解析 → 分块 → 嵌入 → RRF 混合检索 + 引用来源。
+- **思考过程持久化**：reasoning 落库并跨会话回放（不回喂模型）。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（Agent Desk 工作台设计语言）；图标轨道 + 分组会话列表 + 三栏可拖拽 + 统一「工作台坞」+ 设置 / 记忆浮层。
+- **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP 持久化）。
+- **打包发布（macOS）**：daemon 打成单文件原生二进制（Node SEA，运行免 Node）；Tauri 出 dmg（Apple Silicon，内置 daemon + sqlite-vec）；`install.sh` 一键安装并自动备齐 llama 运行时（缺失经 llama.app 装）；`v*` tag 触发 GitHub Actions 构建 + 发布到 Releases。
+
+### 🚧 待做
+
+- **IM 连接器**：Telegram 已实现；Discord / 企业微信 / 飞书待补（需实盘凭证联调）。个人微信无官方机器人 API → 仅做企业微信。
+- **打包发布收尾**：macOS（Apple Silicon）dmg 已发；Intel / Windows / Linux 安装包 + 代码签名 / 公证 + 自动更新待做。
+- **代码执行沙箱**：python / terminal 的独立 OS 级隔离（当前经 pi `bash` 工具 + 审批 4 档把守，无独立沙箱）。
+- **密钥存储**：provider / MCP key 现存 SQLite `settings`，待迁 OS keychain（keytar / Tauri stronghold）。
+- **工作区 v2**：多会话回放 / 提交历史 / push-pull / per-hunk 暂存均已完成；仅剩内嵌可编辑编辑器（按需）。
+
+---
+
+## 里程碑日志
 
 ## 2026-06-22（续）— 打包发布阶段：llama 运行时整合 + 单文件 daemon + macOS dmg + 一键安装
 
