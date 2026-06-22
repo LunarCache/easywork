@@ -77,4 +77,4 @@ npm run app:build --workspace @ew/desktop  # 出 macOS dmg + .app
 
 ## 许可
 
-源码公开，暂未设开源许可证（默认保留所有权利，开源许可待定）。
+[MIT](LICENSE) © 2026 LunarCache
