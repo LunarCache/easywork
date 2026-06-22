@@ -39,6 +39,8 @@ export interface UiMsg {
   /** 有序时间线（渲染源）：思考/工具/文本按发生顺序排列。 */
   blocks?: UiBlock[];
   images?: UiImage[];
+  /** 用户消息发送时刻（epoch ms），用于气泡时间戳；历史消息无此字段。 */
+  at?: number;
   start?: number;
   thinkEnd?: number;
   /** 本轮被用户取消（部分输出，不计入上下文/历史）。 */

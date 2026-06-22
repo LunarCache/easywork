@@ -459,6 +459,13 @@ export class EasyWorkClient {
     return messages;
   }
 
+  /** 该会话最后一轮上下文用量（打开历史会话时回填进度环；无记录返回 null）。 */
+  async threadUsage(
+    id: string,
+  ): Promise<{ usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null }> {
+    return this.getJSON(`/threads/${encodeURIComponent(id)}/usage`);
+  }
+
   async listSkills(): Promise<Skill[]> {
     const { skills } = await this.getJSON<{ skills: Skill[] }>("/skills");
     return skills;

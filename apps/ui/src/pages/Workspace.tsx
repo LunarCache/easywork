@@ -137,7 +137,7 @@ export function Workspace({
     history.push({ role: "user", content: text });
     setMsgs((m) => [
       ...m,
-      { role: "user", raw: text, reasoning: "", tools: [] },
+      { role: "user", raw: text, reasoning: "", tools: [], at: Date.now() },
       { role: "assistant", raw: "", reasoning: "", tools: [] },
     ]);
     const apply = (fn: (m: UiMsg) => UiMsg) =>

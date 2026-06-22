@@ -17,6 +17,14 @@ import {
   CheckIcon,
 } from "../icons.js";
 
+function fmtTime(ms: number): string {
+  try {
+    return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
 function host(url: string): string {
   try {
     return new URL(url).hostname;
@@ -225,10 +233,10 @@ export function MessageStream({
         if (m.role === "user")
           return (
             <div key={i} className="cv-msg user">
-              <span className="cv-avatar user">你</span>
               <div className="cv-col">
                 <div className="cv-head">
-                  <span className="cv-name">你</span>
+                  <span className="cv-name">You</span>
+                  {m.at && <span className="cv-time">{fmtTime(m.at)}</span>}
                 </div>
                 {m.images && m.images.length > 0 && (
                   <div className="cv-images">
@@ -253,7 +261,7 @@ export function MessageStream({
             </span>
             <div className="cv-col">
               <div className="cv-head">
-                <span className="cv-name">助手</span>
+                <span className="cv-name">AI assistant</span>
               </div>
               {blocks.map((b, bi) => {
                 if (b.kind === "reasoning") {

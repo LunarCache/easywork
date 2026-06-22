@@ -784,6 +784,10 @@ version: "0.1.0"
   app.get("/threads/:id/messages", async (req) => ({
     messages: repo.history((req.params as { id: string }).id),
   }));
+  // 该会话最后一轮的上下文用量（打开历史会话时回填进度环；无 pi 日志则 null）。
+  app.get("/threads/:id/usage", async (req) => ({
+    usage: sessionHost.lastUsage((req.params as { id: string }).id),
+  }));
   app.delete("/threads/:id", async (req) => {
     const id = (req.params as { id: string }).id;
     const projectId = repo.getThread(id)?.projectId;

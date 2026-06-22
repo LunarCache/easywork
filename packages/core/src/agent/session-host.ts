@@ -279,6 +279,30 @@ export class SessionHost {
     return sm;
   }
 
+  /**
+   * 读该会话 pi 日志里最后一条 assistant 消息的 usage —— 打开历史会话时回填上下文用量环
+   * （存档消息文本无 token 数，且不含 system/记忆/工具 schema 开销，只能从 pi 实测 usage 取）。
+   * promptTokens 含缓存命中/写入（cacheRead+cacheWrite），与实时事件口径一致。
+   */
+  lastUsage(threadId: string): { promptTokens: number; completionTokens: number; totalTokens: number } | null {
+    const file = path.join(this.sessionsDir, `${threadId}.jsonl`);
+    if (!fs.existsSync(file)) return null;
+    let last: { promptTokens: number; completionTokens: number; totalTokens: number } | null = null;
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const o = JSON.parse(line) as { message?: { role?: string; usage?: PiUsage } };
+        const m = o.message;
+        if (m?.role === "assistant" && m.usage) {
+          last = { promptTokens: promptTokensOf(m.usage), completionTokens: m.usage.output, totalTokens: m.usage.totalTokens };
+        }
+      } catch {
+        /* 跳过坏行 */
+      }
+    }
+    return last;
+  }
+
   /** 取/建该 thread 的会话。modelId/cwd/workspace/scope 变化则重建。 */
   private async getOrCreate(
     threadId: string,
@@ -547,6 +571,13 @@ export class SessionHost {
   }
 }
 
+type PiUsage = { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number };
+
+/** pi Usage → 完整提示词 token（含缓存命中/写入；只取 input 会在 prompt cache 活跃时严重低估上下文占用）。 */
+function promptTokensOf(u: { input: number; cacheRead: number; cacheWrite: number }): number {
+  return u.input + u.cacheRead + u.cacheWrite;
+}
+
 /** pi `AgentSessionEvent` → 我们的 `AgentEvent`（0..n 条）。唯一的边界翻译。 */
 export function mapSessionEvent(ev: AgentSessionEvent): AgentEvent[] {
   switch (ev.type) {
@@ -585,7 +616,7 @@ export function mapSessionEvent(ev: AgentSessionEvent): AgentEvent[] {
         return [
           {
             type: "usage",
-            usage: { promptTokens: u.input, completionTokens: u.output, totalTokens: u.totalTokens },
+            usage: { promptTokens: promptTokensOf(u), completionTokens: u.output, totalTokens: u.totalTokens },
           },
         ];
       }

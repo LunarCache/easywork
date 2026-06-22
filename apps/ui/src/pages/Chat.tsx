@@ -4,6 +4,7 @@ import type { WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { SideDock } from "../components/SideDock.js";
+import { ContextRing } from "../components/ContextRing.js";
 import {
   applyAgentEvent,
   messageText,
@@ -49,10 +50,6 @@ const STARTERS: { label: string; prompt: string; Icon: typeof CodeIcon }[] = [
   { label: "总结文档", prompt: "帮我总结这段内容：\n\n", Icon: FileIcon },
   { label: "头脑风暴", prompt: "我想做一个项目，帮我头脑风暴一些点子：", Icon: SparkIcon },
 ];
-
-function fmtK(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-}
 
 // 工具卡 / 消息渲染已抽到 components/MessageStream.tsx（聊天与工作区共用）。
 
@@ -108,11 +105,12 @@ export function Chat({
     }
   }, [threadId]);
 
-  // 切换会话：重置面板，拉取该会话已有工件。
+  // 切换会话：重置面板 + 清空上下文用量（否则会沿用上个会话的 token 数 → 进度环显示错误百分比），拉取该会话已有工件。
   useEffect(() => {
     autoOpenedRef.current = false;
     setDockOpen(false);
     setFiles([]);
+    setUsage(null);
     void refreshFiles();
   }, [refreshFiles]);
 
@@ -161,7 +159,7 @@ export function Chat({
         "✓ export › preserves CSV download path (31ms)\n\n" +
         "Test Files  1 passed (1)\n     Tests  12 passed (12)\n  Duration  1.92s";
       setMsgs([
-        { role: "user", raw: "/api/export 在大工作区会 504。改成流式 NDJSON + 游标分页，保留 CSV 下载。", reasoning: "", tools: [] },
+        { role: "user", raw: "/api/export 在大工作区会 504。改成流式 NDJSON + 游标分页，保留 CSV 下载。", reasoning: "", tools: [], at: Date.now() },
         {
           role: "assistant",
           raw: "完成。`/api/export` 现在流式 NDJSON、按 `?cursor=` 分页，CSV 仍走缓冲路径（封顶 10k 行）。50k 行工作区峰值内存 **~480 MB → ~12 MB**。",
@@ -199,6 +197,11 @@ export function Chat({
         const list = await getClient().threadMessages(threadId);
         if (cancelled) return;
         setMsgs(storedToUiMsgs(list as unknown as StoredMsg[]));
+        // 回填该会话最后一轮的上下文用量 → 打开历史长会话即显示进度环（实测 token，含 system/记忆/工具开销）。
+        const u = await getClient()
+          .threadUsage(threadId)
+          .catch(() => ({ usage: null }));
+        if (!cancelled && u.usage) setUsage(u.usage);
       } catch {
         if (!cancelled) setMsgs([]);
       }
@@ -264,7 +267,7 @@ export function Chat({
     history.push({ role: "user", content: userContent });
     setMsgs((m) => [
       ...m,
-      { role: "user", raw: text, reasoning: "", tools: [], ...(sentImages.length ? { images: sentImages } : {}) },
+      { role: "user", raw: text, reasoning: "", tools: [], at: Date.now(), ...(sentImages.length ? { images: sentImages } : {}) },
       { role: "assistant", raw: "", reasoning: "", tools: [] },
     ]);
 
@@ -406,24 +409,11 @@ export function Chat({
           )}
         </div>
         <span className="bar-spacer" />
-        {usage &&
-          (contexts[model] ? (
-            <div className="ctxbar" title={`上下文用量 ${usage.promptTokens} / ${contexts[model]} tokens`}>
-              <span className="ctxnum">
-                {fmtK(usage.promptTokens)} / {fmtK(contexts[model]!)}
-              </span>
-              <div className="ctxtrack">
-                <div
-                  className="ctxfill"
-                  style={{ width: `${Math.min(100, (usage.promptTokens / contexts[model]!) * 100)}%` }}
-                />
-              </div>
-            </div>
-          ) : (
-            <span className="usage" title="本轮 token 用量">
-              ↑{usage.promptTokens} ↓{usage.completionTokens}
-            </span>
-          ))}
+        {usage && (
+          <span className="usage" title="本轮 token 用量">
+            ↑{usage.promptTokens} ↓{usage.completionTokens}
+          </span>
+        )}
         <button
           className={`ws-review-toggle ${dockOpen ? "on" : ""}`}
           onClick={() => setDockOpen((v) => !v)}
@@ -596,6 +586,9 @@ export function Chat({
               )}
             </div>
             <span className="cspacer" />
+            {contexts[model] ? (
+              <ContextRing pct={usage ? (usage.promptTokens / contexts[model]!) * 100 : 0} />
+            ) : null}
             <button className="cbtn" title="语音（即将支持）" disabled>
               <MicIcon size={18} />
             </button>
