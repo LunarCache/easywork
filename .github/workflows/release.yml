@@ -1,0 +1,53 @@
+name: release
+
+# 打 tag（v*）触发：macOS 双架构构建 dmg，发布到主仓公开 Releases。
+# 初版未签名（ad-hoc）；后续接入 Apple 证书/公证再补。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14 # Apple Silicon
+            arch: aarch64
+          - runner: macos-13 # Intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          key: ${{ matrix.runner }}-cargo-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+
+      - run: npm ci
+
+      - name: Build (UI + 单文件 daemon + Tauri dmg)
+        run: npm run app:build --workspace @ew/desktop
+
+      - name: Upload dmg to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/desktop/src-tauri/target/release/bundle/dmg/*_${{ matrix.arch }}.dmg
+          fail_on_unmatched_files: true
+          generate_release_notes: true

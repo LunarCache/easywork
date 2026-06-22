@@ -98,7 +98,19 @@ apps/
 
 ## 🚀 快速开始
 
-环境：**Node ≥ 20**（推荐 26）、npm 11、`llama-server`（本地推理用，Mac `brew install llama.cpp`；env `EW_LLAMA_SERVER` 可指定路径）。桌面需 Rust 工具链（`cargo`）。
+### 安装（macOS，推荐）
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh | sh
+```
+
+从主仓[公开 Releases](https://github.com/LunarCache/easywork/releases) 下载对应架构（Apple Silicon / Intel）的 dmg 装到 `/Applications`。**安装包内置单文件 daemon（Node SEA），运行无需 Node**。首次运行会自动检测**本地推理运行时**（`llama-server` / llama.app 的 `llama`），缺失时可在「模型」页一键经 [llama.app](https://llama.app) 安装（也可手动 `curl -LsSf https://llama.app/install.sh | sh`）。
+
+> 初版**未签名**（ad-hoc）：脚本会去除 quarantine 属性；若手动下载 dmg 安装，首次打开如遇 Gatekeeper 提示，在「系统设置 → 隐私与安全性」点「仍要打开」，或 `xattr -dr com.apple.quarantine /Applications/EasyWork.app`。Windows / Linux 版即将发布。
+
+### 从源码开发
+
+环境：**Node ≥ 20**（推荐 26）、npm 11、`llama-server` 或 `llama`（本地推理用，Mac `brew install llama.cpp` 或 `curl -LsSf https://llama.app/install.sh | sh`；env `EW_LLAMA_SERVER` 可指定路径）。桌面需 Rust 工具链（`cargo`）。
 
 > **Windows 运行需安装 Git**（[Git for Windows](https://git-scm.com/download/win)）。工作区模式用它做两件事：① git 改动审阅面板；② 命令执行工具（`run_command`）会优先用 Git 自带的 **bash.exe** + Unix 工具（`ls`/`cat`/`grep` 等）执行命令，否则模型生成的 Unix 命令在 `cmd.exe` 下无法运行。装好后通常自动探测；如未在标准路径，可用 env `EW_GIT_BASH` 指定 `bash.exe` 路径。macOS / Linux 用系统自带 `/bin/sh` + git，无需额外配置。
 
@@ -121,8 +133,12 @@ npm run dev:ui         # 起 Vite (http://localhost:5173)
 ### 桌面（Tauri）
 
 ```bash
-npm run dev:desktop    # tauri dev：编译 Rust 壳、起 Vite、spawn daemon sidecar
+npm run dev:desktop                       # tauri dev：编译 Rust 壳、起 Vite、spawn daemon（node cli.js）
+node scripts/build-daemon-sea.mjs         # 把 daemon 打成单文件二进制（Node SEA → apps/daemon/dist-sea/easywork）
+npm run app:build --workspace @ew/desktop # 出 macOS 安装包（dmg + .app，内置单文件 daemon，本机架构）
 ```
+
+> 发布：打 `v*` tag 触发 `.github/workflows/release.yml`，在 macOS 双架构 runner 构建 dmg 并发到 Releases。
 
 ### 直接跑 daemon
 

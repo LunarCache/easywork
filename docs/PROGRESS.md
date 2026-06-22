@@ -2,6 +2,16 @@
 
 > 每完成一个里程碑更新此文件。最新在上。
 
+## 2026-06-22（续）— 打包发布阶段：llama 运行时整合 + 单文件 daemon + macOS dmg + 一键安装
+
+让 EasyWork 可分发：免 Node 依赖、内置/引导 llama 运行时、出 macOS 安装包、`curl|sh` 一键装。分四步落地，每步实跑验证。
+
+- **P1 llama 运行时整合**：支持 llama.app 的统一 `llama` 二进制（经 `llama serve`，flag 与 `llama-server` 实测完全一致：`-m/--host/--port/--jinja/--embedding/--mmproj/-ngl/--api-key/-c/--pooling`）+ 兼容经典 `llama-server`。`resolve-llama.ts` 解析顺序 `EW_LLAMA_SERVER → llama-server → llama`（含 `~/.local/bin`/`/opt/homebrew/bin`，GUI 应用 PATH 很少）；缺失时 `GET /local/runtime` 状态 + `POST /local/install-runtime`（跑官方脚本）+ Models 页运行时状态条/一键安装。
+- **P2 daemon 单文件二进制（Node SEA）**：bun 因不支持 `node:sqlite` 排除。`tsup.sea.config.ts` 把 cli + 全部依赖内联成单 CJS bundle（`splitting:false`；SEA main 须 CJS；`import.meta.url` 经 define+banner 顶替）；`scripts/build-daemon-sea.mjs` 做 bundle→SEA blob→注入 node 副本→macOS ad-hoc 重签→随附 `vec0.dylib`。`resolveVecExtensionPath` 加 `EW_SQLITE_VEC` + 可执行文件同目录回退（SEA 无 node_modules）。实跑 `easywork serve`（Mach-O arm64，无 node）→ /health ok。
+- **P3 Tauri 打包（macOS）**：`lib.rs` 改为 spawn 随附的 `daemon/easywork`（开发仍 `node $EW_DAEMON_ENTRY`）；`tauri.conf.json` resources 随附 dist-sea；版本 0.0.0→0.1.0。实跑 `tauri build` → `EasyWork_0.1.0_aarch64.dmg`(48MB) + `.app`（Resources/daemon 含 157MB easywork + vec0.dylib）；启动打包 .app → 外壳 spawn 随附 `easywork serve`（非 node）→ /health ok，**全程零 Node 依赖**。
+- **P4 一键安装 + Release CI**：`install.sh`（macOS：按架构从主仓公开 Releases 拉 dmg → 装 /Applications → 去 quarantine）/`install.ps1`（Windows 占位）；`.github/workflows/release.yml`（打 `v*` tag → macOS 双架构 runner → dmg 发 Release）。仓库已设公开 → `curl -LsSf .../install.sh | sh` 可直跑。
+- 初版**未签名**（ad-hoc，文档说明 Gatekeeper 绕过）；Apple 证书/公证 + Windows/Linux + 自动更新为后续。
+
 ## 2026-06-22 — 依赖升级 + 对话区细节打磨 + 上下文窗口配置
 
 延续 Agent Desk 一轮收尾：升级内核与工具链、统一对话区卡片与消息样式、补齐上下文用量显示，并让上下文窗口可按模型确定/配置。
