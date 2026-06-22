@@ -57,7 +57,29 @@ hdiutil detach "$MNT" >/dev/null 2>&1 || true
 # 未签名构建：移除 quarantine，避免 “已损坏 / 无法验证开发者” 提示。
 xattr -dr com.apple.quarantine "$DEST/EasyWork.app" 2>/dev/null || true
 
+# 本地推理运行时（llama.cpp）：未检测到则自动经 llama.app 官方脚本安装（与解析逻辑一致：
+# PATH + ~/.local/bin + 常见包管理路径）。失败不阻断——App「模型」页仍可一键重试。
+have_llama() {
+  for n in llama-server llama; do
+    command -v "$n" >/dev/null 2>&1 && return 0
+    for d in "$HOME/.local/bin" /opt/homebrew/bin /usr/local/bin /usr/bin; do
+      [ -x "$d/$n" ] && return 0
+    done
+  done
+  return 1
+}
+if have_llama; then
+  echo "→ 已检测到本地推理运行时（llama）"
+else
+  echo "→ 未检测到 llama 运行时，正在经 llama.app 安装…"
+  if curl -LsSf https://llama.app/install.sh | sh; then
+    echo "→ llama 运行时安装完成"
+  else
+    echo "  ⚠ llama 自动安装未成功，可稍后在 App「模型」页一键安装，或手动："
+    echo "    curl -LsSf https://llama.app/install.sh | sh"
+  fi
+fi
+
 echo ""
 echo "✓ 已安装：$DEST/EasyWork.app"
 echo "  启动：open -a EasyWork  （或在启动台 / 访达里打开）"
-echo "  首次运行会自动检测本地推理运行时（llama），缺失时可在「模型」页一键安装。"

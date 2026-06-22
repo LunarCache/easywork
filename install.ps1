@@ -21,4 +21,21 @@ Write-Host "→ 下载 $($asset.browser_download_url)"
 Invoke-WebRequest -UseBasicParsing $asset.browser_download_url -OutFile $tmp
 Write-Host "→ 启动安装程序"
 Start-Process -FilePath $tmp -Wait
+
+# 本地推理运行时（llama.cpp）：未检测到则自动经 llama.app 官方脚本安装。
+function Test-Llama {
+  foreach ($n in @("llama-server", "llama")) {
+    if (Get-Command $n -ErrorAction SilentlyContinue) { return $true }
+    if (Test-Path (Join-Path $env:USERPROFILE ".local\bin\$n.exe")) { return $true }
+  }
+  return $false
+}
+if (Test-Llama) {
+  Write-Host "→ 已检测到本地推理运行时（llama）"
+} else {
+  Write-Host "→ 未检测到 llama 运行时，正在经 llama.app 安装…"
+  try { irm https://llama.app/install.ps1 | iex; Write-Host "→ llama 运行时安装完成" }
+  catch { Write-Host "  ⚠ llama 自动安装未成功，可稍后在 App「模型」页一键安装。" }
+}
+
 Write-Host "✓ 安装完成。"

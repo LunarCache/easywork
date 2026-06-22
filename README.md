@@ -104,7 +104,7 @@ apps/
 curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh | sh
 ```
 
-从主仓[公开 Releases](https://github.com/LunarCache/easywork/releases) 下载对应架构（Apple Silicon / Intel）的 dmg 装到 `/Applications`。**安装包内置单文件 daemon（Node SEA），运行无需 Node**。首次运行会自动检测**本地推理运行时**（`llama-server` / llama.app 的 `llama`），缺失时可在「模型」页一键经 [llama.app](https://llama.app) 安装（也可手动 `curl -LsSf https://llama.app/install.sh | sh`）。
+从主仓[公开 Releases](https://github.com/LunarCache/easywork/releases) 下载对应架构（Apple Silicon / Intel）的 dmg 装到 `/Applications`。**安装包内置单文件 daemon（Node SEA），运行无需 Node**。脚本**装完会自动检测本地推理运行时**（`llama-server` / llama.app 的 `llama`），**缺失则自动经 [llama.app](https://llama.app) 装上**；万一失败也可在 App「模型」页一键重试。
 
 > 初版**未签名**（ad-hoc）：脚本会去除 quarantine 属性；若手动下载 dmg 安装，首次打开如遇 Gatekeeper 提示，在「系统设置 → 隐私与安全性」点「仍要打开」，或 `xattr -dr com.apple.quarantine /Applications/EasyWork.app`。Windows / Linux 版即将发布。
 
