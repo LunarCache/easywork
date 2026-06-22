@@ -1,7 +1,16 @@
 import { useState } from "react";
 import type { Project } from "@ew/shared";
 import type { Mode } from "./IconRail.js";
-import { PlusIcon, SearchIcon, ChatIcon, FolderClosedIcon, TrashIcon, InboxIcon, ChevronIcon } from "../icons.js";
+import {
+  PlusIcon,
+  SearchIcon,
+  ChatIcon,
+  FolderClosedIcon,
+  FolderTreeIcon,
+  TrashIcon,
+  InboxIcon,
+  ChevronIcon,
+} from "../icons.js";
 
 interface ThreadItem {
   id: string;
@@ -26,6 +35,7 @@ export function SessionList({
   onNewWorkThread,
   onDelThread,
   onDelProject,
+  onOpenFiles,
 }: {
   mode: Mode;
   threads: ThreadItem[];
@@ -41,6 +51,8 @@ export function SessionList({
   onNewWorkThread: (pid: string) => void;
   onDelThread: (id: string, e: React.MouseEvent) => void;
   onDelProject: (id: string, e: React.MouseEvent) => void;
+  /** 点击项目「查看文件」图标 → 主区切到该项目的文件浏览页。 */
+  onOpenFiles: (pid: string) => void;
 }) {
   // 工作区分组展开态（默认展开当前项目）。
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -114,6 +126,16 @@ export function SessionList({
                     <span className="ad-sl-name mono">{p.name}</span>
                     {p.id === projectId && <span className="ad-sl-cwd">CWD</span>}
                     <span className="ad-sl-count">{pThreads.length}</span>
+                    <span
+                      className="ad-sl-files-btn"
+                      title="查看文件"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenFiles(p.id);
+                      }}
+                    >
+                      <FolderTreeIcon size={12} />
+                    </span>
                     <span className="ad-sl-del" title="删除工作区" onClick={(e) => onDelProject(p.id, e)}>
                       <TrashIcon size={12} />
                     </span>

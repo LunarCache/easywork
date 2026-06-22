@@ -222,7 +222,7 @@ function FilesTab({
   );
 }
 
-function FilePreviewView({
+export function FilePreviewView({
   path,
   data,
   mode,

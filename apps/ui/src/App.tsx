@@ -5,6 +5,7 @@ import { applyTheme, loadThemePrefs, saveThemePrefs, type ThemePrefs } from "./l
 import { pickWorkspaceDir } from "./lib/desktop.js";
 import { Chat } from "./pages/Chat.js";
 import { Workspace } from "./pages/Workspace.js";
+import { FilesPage } from "./pages/FilesPage.js";
 import { Titlebar } from "./components/Titlebar.js";
 import { IconRail, type Mode } from "./components/IconRail.js";
 import { SessionList } from "./components/SessionList.js";
@@ -42,6 +43,8 @@ export function App() {
   const [workThreadId, setWorkThreadId] = useState<string>("");
   const [theme, setTheme] = useState<ThemePrefs>(loadThemePrefs);
   const [sessionWidth, setSessionWidth] = useState<number>(loadSessionWidth);
+  // 点项目「查看文件」→ 主区切到该项目的文件浏览页（替代对话，左上角「返回任务」回退）。
+  const [filesProjectId, setFilesProjectId] = useState<string | null>(null);
 
   // 外观：应用到 <html>；系统模式下跟随系统明暗变化。
   useEffect(() => {
@@ -134,29 +137,46 @@ export function App() {
   }, [check]);
 
   const newChat = () => {
+    setFilesProjectId(null);
     setThreadId(crypto.randomUUID());
     setMode("chat");
   };
   const selectThread = (id: string) => {
+    setFilesProjectId(null);
     setThreadId(id);
     setMode("chat");
   };
   // 某工作区的最近会话 id（threads 按 updatedAt desc）；无则用默认 ws-<id> 线程。
   const latestWorkThread = (pid: string) => threads.find((t) => t.projectId === pid)?.id ?? `ws-${pid}`;
   const selectProject = (id: string) => {
+    setFilesProjectId(null);
     setProjectId(id);
     setWorkThreadId(latestWorkThread(id));
     setMode("work");
   };
   const selectWorkThread = (pid: string, tid: string) => {
+    setFilesProjectId(null);
     setProjectId(pid);
     setWorkThreadId(tid);
     setMode("work");
   };
   const newWorkThread = (pid: string) => {
+    setFilesProjectId(null);
     setProjectId(pid);
     setWorkThreadId(`ws-${pid}-${crypto.randomUUID().slice(0, 8)}`);
     setMode("work");
+  };
+  // 点项目「查看文件」：切到该项目（work 模式）并把主区切到文件浏览页。
+  const openProjectFiles = (pid: string) => {
+    setProjectId(pid);
+    setWorkThreadId((cur) => cur || latestWorkThread(pid));
+    setFilesProjectId(pid);
+    setMode("work");
+  };
+  // 切换顶部模式（对话/工作区/收件箱）时退出文件浏览页。
+  const changeMode = (m: Mode) => {
+    setFilesProjectId(null);
+    setMode(m);
   };
   const delThread = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -207,7 +227,7 @@ export function App() {
       <div className="ad-body">
         <IconRail
           mode={mode}
-          setMode={setMode}
+          setMode={changeMode}
           onMemory={() => setOverlay("memory")}
           onSettings={() => setOverlay("settings")}
           status={status}
@@ -229,6 +249,7 @@ export function App() {
             onNewWorkThread={newWorkThread}
             onDelThread={(id, e) => void delThread(id, e)}
             onDelProject={(id, e) => void delProject(id, e)}
+            onOpenFiles={openProjectFiles}
           />
         </div>
         <div className="ad-resizer" title="拖动调整宽度" onMouseDown={onResizeStart}>
@@ -240,7 +261,9 @@ export function App() {
             <Chat key={threadId} models={models} contexts={contexts} threadId={threadId} onSaved={refreshThreads} />
           )}
           {mode === "work" &&
-            (project ? (
+            (project && filesProjectId === project.id ? (
+              <FilesPage key={`files-${project.id}`} project={project} onBack={() => setFilesProjectId(null)} />
+            ) : project ? (
               <Workspace
                 key={project.id}
                 project={project}

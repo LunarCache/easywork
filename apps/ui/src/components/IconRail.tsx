@@ -1,4 +1,4 @@
-import { SparkIcon, ChatIcon, FolderTreeIcon, InboxIcon, BrainIcon, GearIcon, GlobeIcon } from "../icons.js";
+import { EasyWorkLogo, ChatIcon, FolderTreeIcon, InboxIcon, BrainIcon, GearIcon, GlobeIcon } from "../icons.js";
 
 export type Mode = "chat" | "work" | "inbox";
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
@@ -27,8 +27,8 @@ export function IconRail({
 }) {
   return (
     <div className="ad-rail">
-      <span className="ad-rail-logo">
-        <SparkIcon size={17} />
+      <span className="ad-rail-logo" title="EasyWork">
+        <EasyWorkLogo size={30} />
       </span>
       {MODES.map(({ id, label, Icon, title }) => (
         <button
