@@ -65,7 +65,7 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   // 子页切换 + 云端 provider 状态
   const [tab, setTab] = useState<ModelsTab>("local");
-  const [prov, setProv] = useState({ id: "", baseUrl: "", apiKey: "", models: "" });
+  const [prov, setProv] = useState({ id: "", baseUrl: "", apiKey: "", models: "", context: "" });
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [provNote, setProvNote] = useState("");
 
@@ -102,14 +102,16 @@ export function Models({ onChange }: { onChange: () => void }) {
       return;
     }
     try {
+      const ctx = Number(prov.context.trim());
       await getClient().addProvider({
         id: prov.id.trim(),
         baseUrl: prov.baseUrl.trim(),
         ...(prov.apiKey ? { apiKey: prov.apiKey } : {}),
         models: prov.models.split(",").map((s) => s.trim()).filter(Boolean),
+        ...(Number.isFinite(ctx) && ctx > 0 ? { contextWindow: Math.floor(ctx) } : {}),
       });
       setProvNote(`已添加 provider「${prov.id.trim()}」`);
-      setProv({ id: "", baseUrl: "", apiKey: "", models: "" });
+      setProv({ id: "", baseUrl: "", apiKey: "", models: "", context: "" });
       await refreshProviders();
       onChange();
     } catch (e) {
@@ -182,7 +184,9 @@ export function Models({ onChange }: { onChange: () => void }) {
     setBusy(m.path);
     setProgress(`加载 ${m.fileName}…（首次启动 llama-server 需几秒）`);
     try {
-      const contextSize = m.contextDefault ? Math.min(m.contextDefault, 8192) : 4096;
+      // 默认用模型原生最大上下文长度（GGUF context_length），不再封顶 8192；未知则回退 4096。
+      // 注：长上下文（如 32K/128K）会相应增加 llama-server 的 KV-cache 内存占用。
+      const contextSize = m.contextDefault ?? 4096;
       await getClient().loadModel({ modelPath: m.path, contextSize, gpuLayers: 999 });
       setProgress(`已加载 ${m.fileName}`);
       await refreshLocal();
@@ -432,8 +436,8 @@ function LocalModels(props: {
 
 /** 云端 API 子页：OpenAI 兼容 provider 的添加 / 列表 / 删除。 */
 function CloudProviders(props: {
-  prov: { id: string; baseUrl: string; apiKey: string; models: string };
-  setProv: (v: { id: string; baseUrl: string; apiKey: string; models: string }) => void;
+  prov: { id: string; baseUrl: string; apiKey: string; models: string; context: string };
+  setProv: (v: { id: string; baseUrl: string; apiKey: string; models: string; context: string }) => void;
   providers: ProviderInfo[];
   note: string;
   onAdd: () => void;
@@ -471,6 +475,14 @@ function CloudProviders(props: {
           <input placeholder="baseUrl（.../v1）" value={prov.baseUrl} onChange={(e) => setProv({ ...prov, baseUrl: e.target.value })} />
           <input placeholder="API Key" type="password" value={prov.apiKey} onChange={(e) => setProv({ ...prov, apiKey: e.target.value })} />
           <input placeholder="模型（逗号分隔）" value={prov.models} onChange={(e) => setProv({ ...prov, models: e.target.value })} />
+          <input
+            type="number"
+            min={1}
+            placeholder="上下文大小（token，如 131072）"
+            title="云端模型无法自动探测上下文窗口，手动填写用于压缩阈值与进度环；留空默认 32768"
+            value={prov.context}
+            onChange={(e) => setProv({ ...prov, context: e.target.value })}
+          />
           <button onClick={onAdd}>添加</button>
         </div>
       </section>
@@ -496,7 +508,10 @@ function CloudProviders(props: {
                 <div className="mcp-name">{p.id}</div>
                 <div className="mcp-detail">{p.baseUrl}</div>
                 {p.models.length > 0 && (
-                  <div className="mcp-detail">{p.models.join("、")}</div>
+                  <div className="mcp-detail">
+                    {p.models.join("、")}
+                    {p.contextWindow ? ` · 上下文 ${fmtCtx(p.contextWindow)}` : ""}
+                  </div>
                 )}
               </div>
               <button className="mcp-del" title="删除" onClick={() => onRemove(p.id)}>

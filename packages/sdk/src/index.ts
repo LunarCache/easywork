@@ -100,6 +100,8 @@ export interface ProviderInfo {
   id: string;
   baseUrl: string;
   models: string[];
+  /** 手动配置的上下文窗口（token）。 */
+  contextWindow?: number;
 }
 
 export interface AddProviderConfig {
@@ -108,6 +110,8 @@ export interface AddProviderConfig {
   apiKey?: string;
   headers?: Record<string, string>;
   models: string[];
+  /** 手动配置的上下文窗口（token）：云端模型无法自动探测，用于 compaction + UI 进度环。 */
+  contextWindow?: number;
 }
 
 export class EasyWorkClient {

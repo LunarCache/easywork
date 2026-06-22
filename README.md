@@ -9,8 +9,8 @@
 ## ✨ 特性
 
 - **本地 / 云端模型**
-  - 本地：从 HuggingFace 搜索、下载（断点续传）GGUF，经 `llama-server` 子进程运行（文本 / 视觉 / embedding）。每模型一进程，带 LRU 淘汰。
-  - 云端：通用 **OpenAI-兼容** provider，接 OpenAI / OpenRouter / DeepSeek / vLLM 等（在「模型 → 云端 API」页管理，带常见端点预设）。
+  - 本地：从 HuggingFace 搜索、下载（断点续传）GGUF，经 `llama-server` 子进程运行（文本 / 视觉 / embedding）。每模型一进程，带 LRU 淘汰。加载默认用模型**原生最大上下文长度**（GGUF `context_length`，未知回退 4096）。
+  - 云端：通用 **OpenAI-兼容** provider，接 OpenAI / OpenRouter / DeepSeek / vLLM 等（在「模型 → 云端 API」页管理，带常见端点预设）。可**手动配置上下文窗口**（云端无法自动探测，用于 compaction 阈值 + 进度环；缺省 32768）。
 - **Agent 内核 = pi-coding-agent（托管）**
   - 内核为托管 [`@earendil-works/pi`](https://github.com/earendil-works/pi) 的 `AgentSession`（无头嵌入）：自带编码工具（read/bash/edit/write/grep/ls/find）、自动上下文 compaction、会话管理。EasyWork 是它的宿主/集成层。
   - **真实工具审批流（4 档）**：`read-only` / `approve-each` / `auto-edits` / `full-auto`，经 pi `tool_call` 钩子映射；危险工具经 SSE 挂起，UI 弹窗「允许 / 总是允许 / 拒绝」。
@@ -26,7 +26,7 @@
 - **多协议端点（网关）**：`/v1/chat/completions`（+stream）、`/v1/embeddings`、`/v1/models`（OpenAI 兼容）、`/v1/messages`（Anthropic 兼容）。本地模型**透传**到其 llama-server 原生端点（OpenAI + 原生 Anthropic）；云端**流式经 pi-ai**（统一鉴权，含 OAuth）。可让 Claude Code 等外部客户端直接指向。
 - **本地端口暴露**：llama-server 默认仅绑 `127.0.0.1`；可在「设置 → 本地网络」切到 `0.0.0.0` 让局域网其他服务直连（**强制设置 api-key**，未鉴权拒绝）。
 - **思维链**：`<think>` 与 gpt-oss harmony 多通道（analysis → 思考 / final → 正文）解析；**思考过程持久化**（作为 reasoning 片段落库），切换 / 重载会话仍可展开回放（不回喂模型）。
-- **桌面 UI（Agent Desk 工作台）**：冷灰 + 靛蓝设计语言（IBM Plex Sans / JetBrains Mono · 明暗双主题 · iris/teal/amber 三色 + 紧凑/舒适密度，挂 `<html>` data-*）。布局 = 标题栏 + **图标轨道模式切换（对话 / 工作区 / 收件箱）** + 分组会话列表（工作区按项目→会话，CWD 角标）+ 可拖拽对话区（头像 + READ/EDIT-diff/RUN-terminal 工具卡 + thinking + 流式 / 引用 / HTML 工件 / 图片多模态 / 审批）+ **统一右侧「工作台坞」**（对话区与工作区共用，一坞四 tab：**改动**（git 审查，按需）/ **文件**（工件 + 文件树内联预览，📂 在文件管理器打开目录）/ **终端**（看 AI 命令 + `$` 自己跑命令）/ **预览**（点来源 / 链接内联看网页、不导航走 app，⤢ 放大到整窗）） + Settings（模型 / 知识库 / Skills / MCP / 通用，Skills·MCP 行卡片开关）/ Memory 浮层。
+- **桌面 UI（Agent Desk 工作台）**：冷灰 + 靛蓝设计语言（IBM Plex Sans / JetBrains Mono · 明暗双主题 · iris/teal/amber 三色 + 紧凑/舒适密度，挂 `<html>` data-*）。布局 = 标题栏 + **图标轨道模式切换（对话 / 工作区 / 收件箱）** + 分组会话列表（工作区按项目→会话，CWD 角标）+ 可拖拽对话区（用户**强调色气泡右对齐** / AI 消息头像左对齐；THINK·SEARCH·READ·EDIT-diff·RUN-terminal **统一工具卡** + 流式 / 引用 / HTML 工件 / 图片多模态 / 审批；composer **上下文用量进度环**）+ **统一右侧「工作台坞」**（对话区与工作区共用，一坞四 tab：**改动**（git 审查，按需）/ **文件**（工件 + 文件树内联预览，📂 在文件管理器打开目录）/ **终端**（看 AI 命令 + `$` 自己跑命令）/ **预览**（点来源 / 链接内联看网页、不导航走 app，⤢ 放大到整窗）） + Settings（模型 / 知识库 / Skills / MCP / 通用，Skills·MCP 行卡片开关）/ Memory 浮层。
 
 ---
 

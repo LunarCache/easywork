@@ -97,6 +97,7 @@ const ProviderConfigSchema = z.object({
   apiKey: z.string().optional(),
   headers: z.record(z.string(), z.string()).optional(),
   models: z.array(z.string()),
+  contextWindow: z.number().int().positive().optional(),
 });
 
 /** 创建核心守护进程（Fastify server + 引擎/模型/provider 管理）。 */
@@ -294,7 +295,8 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   // ---- 引擎 / 已加载模型 ----
   app.get("/models", async () => ({
     routed: registry.routedModels(),
-    context: local.contexts(),
+    // 本地模型窗口（llama-server n_ctx）+ 云端 provider 手动配置的窗口 → UI 进度环分母。
+    context: { ...providers.contexts(), ...local.contexts() },
     engines: registry.list().map((e) => ({ id: e.id, capabilities: e.capabilities })),
     // 本地 llama-server 对外端点（发现/外部直连）+ 当前绑定 host。
     endpoints: local.endpoints(),

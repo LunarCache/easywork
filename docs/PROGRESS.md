@@ -2,6 +2,20 @@
 
 > 每完成一个里程碑更新此文件。最新在上。
 
+## 2026-06-22 — 依赖升级 + 对话区细节打磨 + 上下文窗口配置
+
+延续 Agent Desk 一轮收尾：升级内核与工具链、统一对话区卡片与消息样式、补齐上下文用量显示，并让上下文窗口可按模型确定/配置。
+
+- **依赖维护**：pi 三包 `0.79.3 → 0.79.9`（同 minor 补丁，API 形状不变、源码零改动）；清零 5 个 dev 工具链传递依赖漏洞（vite 5→7 修 HIGH、vitest 2→4 修 CRITICAL、@vitejs/plugin-react 4→5、`overrides esbuild 0.27.2`），`npm audit` 0 漏洞。
+- **思考 / web_search 统一为工具卡**：reasoning→`THINK` 卡、web_search→`SEARCH` 卡，与 READ/EDIT/RUN 同套 `cv-tool` 折叠卡（图标 + mono 大写标签 + 状态 pill + chevron + 折叠体）。
+- **消息样式**：用户消息改强调色实心气泡（去头像，`You` + 时间戳右对齐），助手名 → `AI assistant`；UiMsg 加 `at`。
+- **上下文用量进度环**：composer 内 `ContextRing`（已用占比，越界变琥珀/红），替代 header 横条。修 bug：切换会话漏重置 `usage` → 进度环串号；现切换即清空。打开历史长会话回填用量：`SessionHost.lastUsage` 读 pi 会话日志最后一条 assistant 的 usage，端点 `GET /threads/:id/usage` + SDK `threadUsage`。口径修正：`promptTokens = input + cacheRead + cacheWrite`（prompt cache 活跃时只取 input 会严重低估），实时映射与历史回填统一。
+- **网页内联预览修 bug**（并入工作台坞「预览」tab）：Tauri webview 里 `target=_blank` 会把整个 app 导航走且回不来；`MessageStream` 统一拦截来源 chip + markdown 外链 → 右侧预览。
+- **上下文窗口确定/配置**：① 本地加载默认用模型**原生最大上下文**（GGUF `context_length`，去掉 8192 封顶；Qwen3-4B 同份 ~2580 token 系统提示词占比 31%→~8%）。② 云端 provider 新增**手动上下文窗口**（`CloudProviderConfig.contextWindow`：表单输入 → 持久化 → pi compaction 阈值 + `/models` context 映射 + 进度环），缺省 32768。
+  - 诊断点：对话区「31% 占比」来自每轮固定 preamble（pi coding-agent 系统提示词 + 全部工具 schema + 记忆清单 ~2580 token），非用户输入；对话模式也加载完整编码工具集。
+- 杂项：去标题栏装饰性假交通灯点；`spike-session.mjs` 空 catch 补注释（`no-empty`，lint 归零 error）。
+- 验证：shared/sdk/core 重建、ui tsc/eslint/build、全量 **204 测试**全绿；exec/reveal/usage/providers 真机 curl 往返（含测试 provider 加删清理）+ Playwright 视觉核对（工具卡统一、用户气泡、进度环、放大铺窗、来源点击预览）。
+
 ## 2026-06-21（续）— 统一右侧「工作台坞」+ 网页内联预览 + 交互式终端
 
 把对话区与工作区右侧三套各自为政的抽屉（工件面板 / 网页预览 / 工作区 Diff·Files·Terminal）合并为**一个共享的 `SideDock`**，并按使用反馈补三项能力。后端仅新增 exec/reveal 两类端点，其余纯前端。

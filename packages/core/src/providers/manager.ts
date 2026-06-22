@@ -8,6 +8,8 @@ export interface CloudProviderConfig {
   headers?: Record<string, string>;
   /** 该 provider 暴露的模型 id 列表（用于路由 + /v1/models）。 */
   models: string[];
+  /** 手动配置的上下文窗口（token）：用于 pi compaction + UI 进度环；缺省回退 32768。 */
+  contextWindow?: number;
 }
 
 /**
@@ -45,12 +47,23 @@ export class ProviderManager {
     this.configs.delete(id);
   }
 
-  list(): { id: string; baseUrl: string; models: string[] }[] {
+  list(): { id: string; baseUrl: string; models: string[]; contextWindow?: number }[] {
     return [...this.configs.values()].map((c) => ({
       id: c.id,
       baseUrl: c.baseUrl,
       models: c.models,
+      ...(c.contextWindow ? { contextWindow: c.contextWindow } : {}),
     }));
+  }
+
+  /** 每个云端模型 → 手动配置的上下文窗口（供 /models 的 context 映射、UI 进度环）。 */
+  contexts(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const c of this.configs.values()) {
+      if (!c.contextWindow) continue;
+      for (const m of c.models) out[m] = c.contextWindow;
+    }
+    return out;
   }
 
   /** 完整配置（含 apiKey/headers），用于持久化恢复。 */
