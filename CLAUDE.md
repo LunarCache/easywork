@@ -80,4 +80,5 @@ node scripts/smoke-vision.mjs   # 视觉模型多模态问答
 
 - **pi 内核 API（可移植真相源）**：类型在 `node_modules/@earendil-works/{pi-coding-agent,pi-agent-core,pi-ai}/dist/*.d.ts` —— 写宿主代码时核对 `createAgentSession` / `AgentSession` / 事件 / 工具 / Model / extensions / auth-storage / model-registry 的形状。
   > 若本机另有 pi 源码 clone（路径因机器而异，自行定位），可读其 `packages/coding-agent/src/{core,index.ts}` 看实现；无则以上面 `node_modules` 的 `.d.ts` 为准。
-- `unsloth/` / Hermes — 早期借鉴的能力**思路**（记忆分层、RAG、混合召回）；agent loop/tool_healing 已被 pi 取代，**勿再移植**。
+
+> 注：agent loop / tool_healing / tool-registry 已由 pi 内核取代（自研实现已删除），**勿重新引入**。
