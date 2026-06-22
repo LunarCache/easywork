@@ -34,3 +34,6 @@ unsloth/
 .idea/
 *.log
 .playwright-mcp/
+
+# Node SEA 单文件 daemon 构建产物（本地/CI 生成，不入库）
+apps/daemon/dist-sea/

@@ -1321,6 +1321,13 @@ function nextNewProjectDir(repo: SqliteConversationRepo): string {
 
 /** 解析 sqlite-vec 可加载扩展路径（记忆语义召回唯一引擎）。平台无预编译二进制时返回 undefined → 召回退化为纯词法。 */
 function resolveVecExtensionPath(): string | undefined {
+  // 打包（Node SEA）后无 node_modules → getLoadablePath 解析失败。优先 EW_SQLITE_VEC，
+  // 再尝试可执行文件同目录随附的 vec0.{dylib,so,dll}（单文件二进制发布形态）。
+  const fromEnv = process.env.EW_SQLITE_VEC;
+  if (fromEnv && fs.existsSync(fromEnv)) return fromEnv;
+  const ext = process.platform === "win32" ? "vec0.dll" : process.platform === "darwin" ? "vec0.dylib" : "vec0.so";
+  const beside = fsPath.join(fsPath.dirname(process.execPath), ext);
+  if (fs.existsSync(beside)) return beside;
   try {
     const req = createRequire(import.meta.url);
     const sv = req("sqlite-vec") as { getLoadablePath?: () => string };
