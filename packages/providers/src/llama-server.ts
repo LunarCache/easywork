@@ -90,7 +90,11 @@ export class LlamaServerEngine implements InferenceEngine {
   async start(): Promise<void> {
     if (this.proc) return;
     const bin = this.opts.binaryPath ?? "llama-server";
-    this.proc = this.spawnFn(bin, this.buildArgs(), { stdio: ["ignore", "pipe", "pipe"] });
+    // llama.app 的统一 `llama` 二进制经子命令 `llama serve` 起服务（flag 与 llama-server 一致）；
+    // 经典 `llama-server` 直接调用。按文件名判断（兼容裸名 / 绝对路径 / .exe）。
+    const unified = /(^|[\\/])llama(\.exe)?$/i.test(bin);
+    const args = unified ? ["serve", ...this.buildArgs()] : this.buildArgs();
+    this.proc = this.spawnFn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
     this.proc.on("exit", () => {
       this.proc = undefined;
     });

@@ -42,6 +42,7 @@ import { listDir, readFileSafe } from "@ew/tools";
 import { KnowledgeBaseStore } from "../rag/store.js";
 import { parseFile } from "../rag/parse.js";
 import { LocalServerManager, getFreePort } from "../engine/local-server-manager.js";
+import { resolveLlamaRuntime, LLAMA_INSTALL } from "../engine/resolve-llama.js";
 import {
   dataDir as defaultDataDir,
   dbPath as defaultDbPath,
@@ -103,10 +104,11 @@ const ProviderConfigSchema = z.object({
 /** 创建核心守护进程（Fastify server + 引擎/模型/provider 管理）。 */
 export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   const token = opts.token ?? crypto.randomUUID();
-  const llamaBin = opts.llamaServerPath ?? process.env.EW_LLAMA_SERVER;
+  // 解析 llama 运行时：显式 EW_LLAMA_SERVER → llama-server → llama.app 的统一 llama（含 ~/.local/bin）。
+  const llamaRuntime = resolveLlamaRuntime(opts.llamaServerPath ?? process.env.EW_LLAMA_SERVER);
   const registry = new EngineRegistry();
-  // 本地推理：每个模型一个 llama-server 子进程（文本/视觉统一，取代 node-llama-cpp）。
-  const local = new LocalServerManager(registry, llamaBin ? { binaryPath: llamaBin } : {});
+  // 本地推理：每个模型一个 llama-server / `llama serve` 子进程（文本/视觉统一）。
+  const local = new LocalServerManager(registry, llamaRuntime ? { binaryPath: llamaRuntime.path } : {});
 
   const models = new ModelManager({
     modelsDir: opts.modelsDir ?? defaultModelsDir(),
@@ -132,7 +134,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         modelPath,
         embedding: true,
         port,
-        ...(llamaBin ? { binaryPath: llamaBin } : {}),
+        ...(llamaRuntime ? { binaryPath: llamaRuntime.path } : {}),
       });
     },
   });
@@ -356,6 +358,47 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     if (!body?.id) return reply.code(400).send({ error: "missing_id" });
     await local.unload(body.id);
     return { ok: true };
+  });
+
+  // ---- 本地推理运行时（llama-server / llama.app 的 llama）----
+  // 探测 llama 运行时是否就绪（缺失时 UI 引导经 llama.app 安装）。
+  app.get("/local/runtime", async () => {
+    const rt = resolveLlamaRuntime(opts.llamaServerPath ?? process.env.EW_LLAMA_SERVER);
+    return {
+      found: !!rt,
+      ...(rt ? { path: rt.path, kind: rt.kind } : {}),
+      install: process.platform === "win32" ? LLAMA_INSTALL.windows : LLAMA_INSTALL.unix,
+    };
+  });
+  // 经 llama.app 官方脚本安装统一 llama 二进制（→ ~/.local/bin/llama）。用户在 UI 主动触发。
+  app.post("/local/install-runtime", async (_req, reply) => {
+    const cmd = process.platform === "win32" ? LLAMA_INSTALL.windows : LLAMA_INSTALL.unix;
+    const shell = process.platform === "win32" ? ["powershell", "-NoProfile", "-Command", cmd] : ["sh", "-lc", cmd];
+    const { spawn } = await import("node:child_process");
+    const result = await new Promise<{ code: number | null; output: string }>((resolve) => {
+      const child = spawn(shell[0]!, shell.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      const onData = (b: Buffer) => {
+        out += b.toString();
+        if (out.length > 200_000) out = out.slice(-200_000);
+      };
+      child.stdout?.on("data", onData);
+      child.stderr?.on("data", onData);
+      const timer = setTimeout(() => child.kill("SIGKILL"), 300_000);
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({ code, output: out });
+      });
+      child.on("error", (e) => {
+        clearTimeout(timer);
+        resolve({ code: -1, output: `${out}\n[启动失败] ${e.message}` });
+      });
+    });
+    // 安装后重新解析并热更新 LocalServerManager 的二进制路径（下次 load 即用新装的 llama）。
+    const rt = resolveLlamaRuntime(opts.llamaServerPath ?? process.env.EW_LLAMA_SERVER);
+    if (rt) local.setBinaryPath(rt.path);
+    if (!rt) return reply.code(500).send({ ok: false, output: result.output, error: "未在 PATH / ~/.local/bin 解析到 llama 运行时" });
+    return { ok: result.code === 0 || !!rt, path: rt.path, kind: rt.kind, output: result.output };
   });
 
   // ---- 模型管理（HF 搜索 / 变体 / 下载 / 本地扫描） ----

@@ -201,6 +201,16 @@ export class EasyWorkClient {
     await this.postJSON("/models/unload", { id });
   }
 
+  /** 本地 llama 推理运行时状态（llama-server / llama.app 的 llama；缺失则 found=false）。 */
+  runtimeStatus(): Promise<{ found: boolean; path?: string; kind?: "llama-server" | "llama"; install: string }> {
+    return this.getJSON("/local/runtime");
+  }
+
+  /** 经 llama.app 官方脚本安装 llama 运行时（用户主动触发；可能耗时数十秒）。 */
+  installRuntime(): Promise<{ ok: boolean; path?: string; kind?: string; output: string; error?: string }> {
+    return this.postJSON("/local/install-runtime", {});
+  }
+
   async searchModels(query: string): Promise<HFModelSummary[]> {
     const { results } = await this.getJSON<{ results: HFModelSummary[] }>(
       `/models/search?q=${encodeURIComponent(query)}`,

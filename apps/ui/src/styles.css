@@ -814,6 +814,18 @@ details.toolcard[open] > summary .chev { transform: rotate(90deg); }
 .empty-models p { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-2); }
 .empty-models span { font-size: 12.5px; }
 
+/* 本地推理运行时（llama）状态条 */
+.rt-banner { display: flex; align-items: center; gap: 10px; border-radius: var(--r); padding: 10px 14px; margin-bottom: 16px; font-size: 13px; border: 1px solid var(--border); }
+.rt-banner.ok { background: var(--color-success-soft); border-color: var(--color-success-border); color: var(--ok); }
+.rt-banner.ok code { color: var(--ok); }
+.rt-banner.warn { background: var(--color-warning-soft, var(--accent-soft)); border-color: var(--color-warning-border, var(--border-strong)); color: var(--text); align-items: flex-start; }
+.rt-banner.warn > svg { color: var(--color-warning, #B5640A); flex: none; margin-top: 1px; }
+.rt-banner-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.rt-banner-cmd { color: var(--muted); font-size: 12px; }
+.rt-banner code { font-family: var(--font-mono); font-size: 11.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
+.rt-install { flex: none; align-self: center; font-size: 12.5px; padding: 6px 14px; border-radius: 8px; background: var(--accent); color: var(--color-text-inverse); }
+.rt-install:disabled { opacity: 0.6; cursor: default; }
+
 .model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
 .model-card { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 12px 14px; box-shadow: var(--shadow-1); transition: transform var(--ease) 0.15s, box-shadow var(--ease) 0.15s, border-color var(--ease) 0.15s; }
 .model-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); border-color: var(--border-strong); }

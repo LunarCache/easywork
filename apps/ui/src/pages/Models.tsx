@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { GGUFVariant, HFModelSummary, LocalModel } from "@ew/shared";
 import type { ProviderInfo } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
-import { BoxIcon, CheckIcon, ChevronIcon, DownloadIcon, GlobeIcon, SearchIcon, TrashIcon } from "../icons.js";
+import { AlertIcon, BoxIcon, CheckIcon, ChevronIcon, DownloadIcon, GlobeIcon, SearchIcon, TrashIcon } from "../icons.js";
 
 type ModelsTab = "local" | "cloud";
 
@@ -77,6 +77,36 @@ export function Models({ onChange }: { onChange: () => void }) {
     }
   }, []);
 
+  const [runtime, setRuntime] = useState<{
+    found: boolean;
+    path?: string;
+    kind?: "llama-server" | "llama";
+    install: string;
+  } | null>(null);
+  const [rtInstalling, setRtInstalling] = useState(false);
+
+  const refreshRuntime = useCallback(async () => {
+    try {
+      setRuntime(await getClient().runtimeStatus());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const installRuntime = async () => {
+    setRtInstalling(true);
+    setProgress("正在经 llama.app 安装本地推理运行时…（首次需下载，约几十秒）");
+    try {
+      const r = await getClient().installRuntime();
+      setProgress(r.ok ? `已安装运行时：${r.path ?? ""}` : `安装失败：${r.error ?? "见日志"}`);
+      await refreshRuntime();
+    } catch (e) {
+      setProgress(`安装失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRtInstalling(false);
+    }
+  };
+
   const refreshLocal = useCallback(async () => {
     try {
       const [models, info] = await Promise.all([getClient().localModels(), getClient().listModels()]);
@@ -89,7 +119,8 @@ export function Models({ onChange }: { onChange: () => void }) {
 
   useEffect(() => {
     void refreshLocal();
-  }, [refreshLocal]);
+    void refreshRuntime();
+  }, [refreshLocal, refreshRuntime]);
 
   // 云端 provider 仅在进入「云端 API」tab 时按需拉取（默认本地 tab 不浪费请求）。
   useEffect(() => {
@@ -244,6 +275,8 @@ export function Models({ onChange }: { onChange: () => void }) {
           onRemove={(id) => void removeProvider(id)}
         />
       ) : (
+        <>
+        <RuntimeBanner runtime={runtime} installing={rtInstalling} onInstall={() => void installRuntime()} />
         <LocalModels
           query={query}
           setQuery={setQuery}
@@ -268,7 +301,47 @@ export function Models({ onChange }: { onChange: () => void }) {
           load={(m) => void load(m)}
           unload={(m) => void unload(m)}
         />
+        </>
       )}
+    </div>
+  );
+}
+
+/** 本地推理运行时（llama-server / llama.app 的 llama）状态条：缺失则引导经 llama.app 安装。 */
+function RuntimeBanner({
+  runtime,
+  installing,
+  onInstall,
+}: {
+  runtime: { found: boolean; path?: string; kind?: string; install: string } | null;
+  installing: boolean;
+  onInstall: () => void;
+}) {
+  if (!runtime) return null;
+  if (runtime.found) {
+    return (
+      <div className="rt-banner ok">
+        <CheckIcon size={14} />
+        <span>
+          本地推理运行时已就绪：<b>{runtime.kind}</b> · <code>{runtime.path}</code>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="rt-banner warn">
+      <AlertIcon size={15} />
+      <div className="rt-banner-body">
+        <div>
+          未检测到本地推理运行时（<code>llama-server</code> / <code>llama</code>）。本地模型需要它才能运行。
+        </div>
+        <div className="rt-banner-cmd">
+          一键安装（llama.app 官方）：<code>{runtime.install}</code>
+        </div>
+      </div>
+      <button className="rt-install" disabled={installing} onClick={onInstall}>
+        {installing ? "安装中…" : "安装运行时"}
+      </button>
     </div>
   );
 }

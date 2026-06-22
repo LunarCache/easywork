@@ -69,7 +69,7 @@ export interface LocalServerManagerOptions {
 export class LocalServerManager {
   private readonly handles = new Map<string, LocalHandle>();
   private readonly makeEngine: NonNullable<LocalServerManagerOptions["makeEngine"]>;
-  private readonly binaryPath?: string;
+  private binaryPath?: string;
   private readonly maxLoaded: number;
   private bindHost: string;
   private apiKey?: string;
@@ -169,6 +169,16 @@ export class LocalServerManager {
   /** 当前 llama-server 绑定 host（127.0.0.1 / 0.0.0.0）。 */
   getBindHost(): string {
     return this.bindHost;
+  }
+
+  /** 当前 llama 运行时二进制路径（未解析到为 undefined）。 */
+  binaryPathOf(): string | undefined {
+    return this.binaryPath;
+  }
+
+  /** 更新 llama 运行时二进制路径（如经 llama.app 安装后重新解析）；下次 load 生效。 */
+  setBinaryPath(p: string | undefined): void {
+    this.binaryPath = p;
   }
 
   /** 当前 llama-server --api-key（未设为 undefined）。 */
