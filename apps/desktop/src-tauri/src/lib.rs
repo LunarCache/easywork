@@ -56,20 +56,26 @@ fn data_dir() -> String {
     format!("{home}/.easywork")
 }
 
-fn resolve_daemon_entry(app: &tauri::AppHandle) -> std::path::PathBuf {
-    // 开发：EW_DAEMON_ENTRY（由 npm 脚本设为绝对路径）。
-    if let Ok(p) = std::env::var("EW_DAEMON_ENTRY") {
-        return p.into();
-    }
-    // 打包：随附资源 daemon/cli.js。
-    if let Ok(dir) = app.path().resource_dir() {
-        let bundled = dir.join("daemon").join("cli.js");
-        if bundled.exists() {
-            return bundled;
+/// 构造启动 core daemon 的命令。
+/// - 打包：随附的单文件二进制 `daemon/easywork serve`（Node SEA，免 Node；vec0.dylib 同目录自动解析）。
+/// - 开发：`node $EW_DAEMON_ENTRY serve`（由 npm 脚本设为 cli.js 绝对路径）。
+fn build_daemon_command(app: &tauri::AppHandle) -> Command {
+    let exe_name = if cfg!(windows) { "easywork.exe" } else { "easywork" };
+    if std::env::var("EW_DAEMON_ENTRY").is_err() {
+        if let Ok(dir) = app.path().resource_dir() {
+            let bin = dir.join("daemon").join(exe_name);
+            if bin.exists() {
+                let mut cmd = Command::new(bin);
+                cmd.args(["serve", "--port", "0"]);
+                return cmd;
+            }
         }
     }
-    // 兜底：相对 src-tauri 的开发路径。
-    "../../daemon/dist/cli.js".into()
+    // 开发：用 node 跑 cli.js（EW_DAEMON_ENTRY 绝对路径，或相对兜底）。
+    let entry = std::env::var("EW_DAEMON_ENTRY").unwrap_or_else(|_| "../../daemon/dist/cli.js".into());
+    let mut cmd = Command::new("node");
+    cmd.arg(entry).args(["serve", "--port", "0"]);
+    cmd
 }
 
 pub fn run() {
@@ -79,15 +85,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![get_config, select_workspace_dir])
         .setup(|app| {
             let handle = app.handle().clone();
-            let entry = resolve_daemon_entry(&handle);
-            // 用 PATH 中的 node 运行 daemon（打包时随附 node 二进制，见 README/打包说明）。
-            let mut child = Command::new("node")
-                .arg(entry)
-                .args(["serve", "--port", "0"])
+            let mut child = build_daemon_command(&handle)
                 .env("EW_DATA_DIR", data_dir())
                 .stdout(Stdio::piped())
                 .spawn()
-                .expect("无法启动 core daemon（需要 node 在 PATH）");
+                .expect("无法启动 core daemon");
 
             let stdout = child.stdout.take().expect("daemon 无 stdout");
             let reader_handle = handle.clone();

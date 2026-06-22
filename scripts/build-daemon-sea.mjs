@@ -64,8 +64,8 @@ if (fs.existsSync(vecSrc)) {
   console.warn(`   ⚠ 未找到 ${vecSrc}（该平台向量召回将退化为纯词法）`);
 }
 
-// 清理中间产物
-for (const f of [seaCfg, blob]) fs.rmSync(f, { force: true });
+// 清理中间产物（含 21MB 的 bundle .cjs —— 已注入二进制，无需随发布）。
+for (const f of [seaCfg, blob, bundle, `${bundle}.map`]) fs.rmSync(f, { force: true });
 
 const sizeMB = (fs.statSync(exe).size / 1024 / 1024).toFixed(0);
 console.log(`\n✓ 单文件 daemon: ${exe} (${sizeMB} MB, ${platform}/${arch})  + ${vecName}`);
