@@ -5,6 +5,7 @@ import { getClient } from "../lib/client.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { SideDock } from "../components/SideDock.js";
 import { ContextRing } from "../components/ContextRing.js";
+import { ModelSelect } from "../components/ModelSelect.js";
 import {
   applyAgentEvent,
   messageText,
@@ -138,7 +139,9 @@ export function Chat({
     if (next.length) setImages((cur) => [...cur, ...next]);
   };
 
-  if (model === "" && models.length > 0) setModel(models[0]!);
+  // 模型列表变化时校正选中项：当前模型被卸载/移除 → 退回首个可用或清空（避免状态点常绿 + select 残留旧值）。
+  if (model && !models.includes(model)) setModel(models[0] ?? "");
+  else if (model === "" && models.length > 0) setModel(models[0]!);
 
   // 切换会话时加载历史（新会话 → 空）。
   useEffect(() => {
@@ -349,14 +352,7 @@ export function Chat({
       <div className="chat">
       <header className="bar">
         <span className={`mdot ${model ? "on" : ""}`} />
-        <select className="model-select" value={model} onChange={(e) => setModel(e.target.value)}>
-          {models.length === 0 && <option value="">（无可用模型，请先在“模型”页加载或配置）</option>}
-          {models.map((m) => (
-            <option key={m} value={m}>
-              {modelLabel(m)}
-            </option>
-          ))}
-        </select>
+        <ModelSelect models={models} value={model} onChange={setModel} />
         <div className="params-wrap">
           <button
             className={`params-btn ${Object.keys(sampling).length ? "on" : ""}`}

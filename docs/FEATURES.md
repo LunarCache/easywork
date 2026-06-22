@@ -4,7 +4,7 @@
 
 ## 模型
 
-- **本地**：从 HuggingFace 搜索、下载（断点续传）GGUF，经 `llama-server` 子进程运行（文本 / 视觉 / embedding）。每模型一进程，带 LRU 淘汰。加载默认用模型**原生最大上下文长度**（GGUF `context_length`，未知回退 4096）。
+- **本地**：从 HuggingFace 搜索、下载（断点续传）GGUF，经统一 `llama` 的 **router 模式**运行 —— 单个 `llama serve --models-dir` 进程按请求 `model`（= 模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰（文本 / 视觉）。加载默认用模型**原生最大上下文长度**（GGUF `context_length`，未知回退 4096）。嵌入模型（记忆 / 知识库）走**独立**的 `llama serve -m --embedding` 进程。
 - **云端**：通用 **OpenAI-兼容** provider，接 OpenAI / OpenRouter / DeepSeek / vLLM 等（「模型 → 云端 API」页管理，带常见端点预设）。可**手动配置上下文窗口**（云端无法自动探测，用于 compaction 阈值 + 进度环；缺省 32768）。
 
 ## Agent 内核 = pi-coding-agent（托管）
@@ -39,7 +39,7 @@
 
 ## 本地端口暴露
 
-llama-server 默认仅绑 `127.0.0.1`；可在「设置 → 本地网络」切到 `0.0.0.0` 让局域网其他服务直连（**强制设置 api-key**，未鉴权拒绝）。
+router（`llama serve`）默认仅绑 `127.0.0.1`；可在「设置 → 本地网络」切到 `0.0.0.0` 让局域网其他服务直连（**强制设置 api-key**，未鉴权拒绝；切换会重启 router 立即生效）。
 
 ## 桌面 UI（Agent Desk 工作台）
 
@@ -62,5 +62,5 @@ curl http://127.0.0.1:<port>/v1/chat/completions \
 
 - **OpenAI 兼容**：`/v1/chat/completions`（+stream）、`/v1/embeddings`、`/v1/models`。
 - **Anthropic 兼容**：`/v1/messages`（流式 message_start → content_block_* → message_delta → message_stop）。
-- **路由**：本地模型透传到其 llama-server 原生端点（两种协议 + tool_use）；云端经 pi-ai（流式 `streamSimple` / 非流式 `completeSimple`，统一鉴权 / OAuth），出错回退引擎。
-- `/v1/models` 含 `endpoints`（各本地模型对外 baseUrl/port，供外部直连 llama-server）。
+- **路由**：本地模型透传到统一 `llama serve` router 的端点（按 `model` 字段二次路由 + tool_use）；云端经 pi-ai（流式 `streamSimple` / 非流式 `completeSimple`，统一鉴权 / OAuth），出错回退引擎。
+- `/v1/models` 含 `endpoints`（router 对外 baseUrl/port，供外部直连）。

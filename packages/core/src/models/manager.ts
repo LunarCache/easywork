@@ -130,8 +130,13 @@ export class ModelManager {
         }
         const header = await readGGUFHeader(full).catch(() => null);
         if (header && !header.isGGUF) continue;
+        // router id = modelsDir 下的子目录名（llama serve --models-dir 的发现 id）；
+        // 不在 modelsDir 下（extraDirs）则退化为父目录名（router 模式不服务这些，仅作展示）。
+        const rel = path.relative(this.modelsDir, full);
+        const routerId = rel && !rel.startsWith("..") ? rel.split(path.sep)[0]! : path.basename(path.dirname(full));
         found.push({
           id: full,
+          routerId,
           path: full,
           fileName: e.name,
           sizeBytes: size,

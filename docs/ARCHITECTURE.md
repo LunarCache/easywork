@@ -4,14 +4,14 @@
 
 ## Core Daemon 模型
 
-一个无头的 Node **核心守护进程（`@ew/core`）拥有全部"大脑"**：托管 pi-coding-agent 内核（`SessionHost`）、推理（llama-server 进程管理 + 云端 provider）、工具 / Skills / MCP、记忆、知识库、SQLite 存储。对外暴露**本地 HTTP API + SSE**（Fastify）。Tauri 桌面壳、外部 IM 连接器、以及任意 `/v1` 客户端都是它的**瘦客户端**——同一个大脑既服务应用内聊天，也服务外部渠道，还能无头运行。
+一个无头的 Node **核心守护进程（`@ew/core`）拥有全部"大脑"**：托管 pi-coding-agent 内核（`SessionHost`）、推理（统一 `llama serve` router 进程管理 + 云端 provider）、工具 / Skills / MCP、记忆、知识库、SQLite 存储。对外暴露**本地 HTTP API + SSE**（Fastify）。Tauri 桌面壳、外部 IM 连接器、以及任意 `/v1` 客户端都是它的**瘦客户端**——同一个大脑既服务应用内聊天，也服务外部渠道，还能无头运行。
 
 ```
                  ┌──────────────────────────────────────────┐
                  │            CORE DAEMON (@ew/core)          │
                  │  pi-coding-agent 内核(SessionHost 托管)     │
                  │  ew-extensions(记忆/权限/桥接工具)          │
-                 │  llama-server host · skills · MCP · RAG     │
+                 │  llama router host · skills · MCP · RAG      │
                  │  SQLite store · /v1 网关(本地透传+云端 pi)  │
                  │  Fastify HTTP + SSE + /v1 + /v1/messages    │
                  └──────────────────────────────────────────┘
@@ -24,7 +24,7 @@
 
 - **Tauri 主进程（Rust）**：窗口 / 菜单 / 自动更新 + 以 sidecar spawn 并健康检查 daemon。读取 daemon stdout 首行的 `{baseUrl, token}`，经 `get_config` 注入 webview（连接信息对 UI 不可见）。**打包时启动随附的单文件 daemon 二进制（Node SEA，免 Node）**；开发时 `node $EW_DAEMON_ENTRY`。
 - **Core daemon**：detached Node 子进程（`easywork serve`），也可独立无头运行。
-- **本地推理**：每个加载的模型一个 `llama-server`（或 llama.app 的 `llama serve`）子进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，记忆 / 知识库向量召回用；缺失则降级纯词法）。
+- **本地推理**：统一 `llama`（llama.app）的 **router 模式** —— 1 个 `llama serve --models-dir` 进程,按请求 `model`(=模型子目录名)路由、按需 auto-load、`--models-max` LRU 淘汰。嵌入模型走独立 `llama serve -m --embedding` 进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，记忆 / 知识库向量召回用；缺失则降级纯词法）。
 
 ## Monorepo 结构（npm workspaces + Turborepo）
 
@@ -52,7 +52,7 @@ apps/
 | 关注点 | 选型 |
 |---|---|
 | Agent 内核 | `@earendil-works/pi`（pi-coding-agent）`AgentSession` 无头托管；记忆 / 工具 / 权限经扩展 + customTools 接入 |
-| 本地推理 | llama.cpp `llama-server` / `llama serve` 子进程（OpenAI + 原生 Anthropic；文本 / `--mmproj` 视觉 / `--embedding`） |
+| 本地推理 | llama.app 统一 `llama` 的 `llama serve` **router 模式**（`--models-dir` 单进程多模型路由 + 按需加载 + `--models-max` LRU）；嵌入独立 `llama serve -m --embedding` |
 | HTTP | Fastify（schema-first、原生 SSE） |
 | 契约 / 校验 | zod + zod-to-json-schema |
 | 本地 DB | `node:sqlite`（内置 DatabaseSync，零原生编译） |
@@ -67,7 +67,8 @@ apps/
 
 | 变量 | 作用 |
 |---|---|
-| `EW_LLAMA_SERVER` | 指定 `llama-server` / `llama` 可执行文件路径（缺省自动解析 PATH + `~/.local/bin` 等） |
+| `EW_LLAMA_SERVER` | 指定统一 `llama` 可执行文件路径（缺省自动解析 PATH + `~/.local/bin` 等；router 模式只认 kind=llama） |
+| `EW_MAX_LOADED_MODELS` | router `--models-max`：同时常驻模型数上限（默认 4） |
 | `EW_SQLITE_VEC` | 指定 sqlite-vec 可加载扩展路径（打包二进制用；缺省同目录 / node_modules 解析） |
 | `EW_MAX_LOADED_MODELS` | 最大常驻模型数（默认 3，超出按 LRU 淘汰） |
 | `EW_ALLOW_STDIO_MCP=1` | 允许 stdio MCP（默认禁用，会在本机执行任意命令） |

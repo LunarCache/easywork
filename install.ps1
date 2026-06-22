@@ -22,12 +22,11 @@ Invoke-WebRequest -UseBasicParsing $asset.browser_download_url -OutFile $tmp
 Write-Host "→ 启动安装程序"
 Start-Process -FilePath $tmp -Wait
 
-# 本地推理运行时（llama.cpp）：未检测到则自动经 llama.app 官方脚本安装。
+# 本地推理运行时：统一 `llama`（llama.app，router 模式必需）。未检测到则自动经官方脚本安装。
+# 注：经典 `llama-server` 不再被采用（router 模式只认统一 `llama`）。
 function Test-Llama {
-  foreach ($n in @("llama-server", "llama")) {
-    if (Get-Command $n -ErrorAction SilentlyContinue) { return $true }
-    if (Test-Path (Join-Path $env:USERPROFILE ".local\bin\$n.exe")) { return $true }
-  }
+  if (Get-Command "llama" -ErrorAction SilentlyContinue) { return $true }
+  if (Test-Path (Join-Path $env:USERPROFILE ".local\bin\llama.exe")) { return $true }
   return $false
 }
 if (Test-Llama) {

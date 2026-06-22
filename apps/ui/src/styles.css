@@ -711,9 +711,19 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .bar { padding: 13px 24px; display: flex; align-items: center; gap: 9px; }
 .mdot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .mdot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15); }
-.model-select { border: 0; background: transparent; font-family: var(--font-head); font-weight: 600; font-size: 15px; color: var(--text); padding: 4px 6px; cursor: pointer; max-width: 520px; }
-.model-select:focus { box-shadow: none; }
-.model-select:hover { background: var(--surface-2); border-radius: 8px; }
+/* —— 模型下拉（自定义弹出，取代原生 select）—— */
+.model-sel { position: relative; }
+.model-sel-btn { display: flex; align-items: center; gap: 6px; border: 0; background: transparent; font-family: var(--font-head); font-weight: 600; font-size: 15px; color: var(--text); padding: 5px 9px; border-radius: 8px; cursor: pointer; max-width: 520px; }
+.model-sel-btn:hover:not(:disabled) { background: var(--surface-2); }
+.model-sel-btn:disabled { color: var(--muted); cursor: default; font-weight: 500; font-size: 13px; }
+.model-sel-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-sel-chev { color: var(--text-tertiary); flex: none; }
+.model-pop { position: absolute; top: 40px; left: 0; min-width: 240px; max-width: 440px; max-height: 360px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow-2); padding: 5px; z-index: 40; animation: pop 0.16s var(--ease); }
+.model-pop-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border: 0; background: transparent; border-radius: 7px; cursor: pointer; color: var(--text); font-size: 13.5px; font-weight: 550; }
+.model-pop-item:hover { background: var(--color-bg-tertiary); }
+.model-pop-item.on { background: var(--accent-soft); color: var(--accent); }
+.model-pop-item.on svg { color: var(--accent); flex: none; }
+.model-pop-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-spacer { flex: 1; }
 .usage { font-family: var(--font-mono); font-size: 12px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 4px 9px; }
 /* composer 内上下文用量圆环 */

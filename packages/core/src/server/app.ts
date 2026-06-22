@@ -41,7 +41,9 @@ import { GitService } from "../git/git.js";
 import { listDir, readFileSafe } from "@ew/tools";
 import { KnowledgeBaseStore } from "../rag/store.js";
 import { parseFile } from "../rag/parse.js";
-import { LocalServerManager, getFreePort } from "../engine/local-server-manager.js";
+import { RouterServerManager } from "../engine/router-server-manager.js";
+import { getFreePort } from "../engine/net.js";
+import type { LocalBackend } from "../engine/local-backend.js";
 import { resolveLlamaRuntime, LLAMA_INSTALL } from "../engine/resolve-llama.js";
 import {
   dataDir as defaultDataDir,
@@ -55,7 +57,7 @@ import {
 export interface CoreServer {
   app: FastifyInstance;
   registry: EngineRegistry;
-  local: LocalServerManager;
+  local: LocalBackend;
   models: ModelManager;
   providers: ProviderManager;
   skills: SkillManager;
@@ -107,12 +109,27 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   // 解析 llama 运行时：显式 EW_LLAMA_SERVER → llama-server → llama.app 的统一 llama（含 ~/.local/bin）。
   const llamaRuntime = resolveLlamaRuntime(opts.llamaServerPath ?? process.env.EW_LLAMA_SERVER);
   const registry = new EngineRegistry();
-  // 本地推理：每个模型一个 llama-server / `llama serve` 子进程（文本/视觉统一）。
-  const local = new LocalServerManager(registry, llamaRuntime ? { binaryPath: llamaRuntime.path } : {});
+  const modelsDirPath = opts.modelsDir ?? defaultModelsDir();
 
   const models = new ModelManager({
-    modelsDir: opts.modelsDir ?? defaultModelsDir(),
+    modelsDir: modelsDirPath,
     extraDirs: opts.extraModelDirs,
+    ...(opts.fetch ? { fetch: opts.fetch } : {}),
+  });
+
+  // 本地推理（router 模式）：1 个 `llama serve --models-dir` 路由进程,按 model 字段路由 + 按需加载 + LRU。
+  // 嵌入模型不走此处（见下方 EmbeddingService）。需统一 `llama`（kind==="llama"）；无则提示安装。
+  const local: LocalBackend = new RouterServerManager(registry, {
+    ...(llamaRuntime?.kind === "llama" ? { binaryPath: llamaRuntime.path } : {}),
+    modelsDir: modelsDirPath,
+    modelsMax: Number(process.env.EW_MAX_LOADED_MODELS) || 4,
+    contextsProvider: async () => {
+      const out: Record<string, number> = {};
+      for (const m of await models.scanInventory()) {
+        if (m.routerId && m.contextDefault) out[m.routerId] = m.contextDefault;
+      }
+      return out;
+    },
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
   });
   const providers = new ProviderManager(registry, opts.fetch ? { fetch: opts.fetch } : {});
@@ -232,7 +249,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   }
 
   // 持久化已启用的 embedding 模型，并在启动时自动重新加载（模型文件已在磁盘 → 自动开启向量记忆）。
-  const modelsDirPath = opts.modelsDir ?? defaultModelsDir();
   const embedSettingPath = fsPath.join(opts.workspaceDir ?? defaultDataDir(), "embedding.json");
   const defaultEmbedPath = (): string =>
     fsPath.join(modelsDirPath, DEFAULT_EMBED_REPO.replace(/[^a-zA-Z0-9._-]+/g, "__"), DEFAULT_EMBED_FILE);
@@ -394,7 +410,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         resolve({ code: -1, output: `${out}\n[启动失败] ${e.message}` });
       });
     });
-    // 安装后重新解析并热更新 LocalServerManager 的二进制路径（下次 load 即用新装的 llama）。
+    // 安装后重新解析并热更新本地后端的二进制路径（下次 load 即用新装的 llama）。
     const rt = resolveLlamaRuntime(opts.llamaServerPath ?? process.env.EW_LLAMA_SERVER);
     if (rt) local.setBinaryPath(rt.path);
     if (!rt) return reply.code(500).send({ ok: false, output: result.output, error: "未在 PATH / ~/.local/bin 解析到 llama 运行时" });

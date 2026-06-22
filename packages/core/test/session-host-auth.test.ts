@@ -4,12 +4,12 @@ import path from "node:path";
 import fs from "node:fs";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { SessionHost } from "../src/agent/session-host.js";
-import type { LocalServerManager } from "../src/engine/local-server-manager.js";
+import type { LocalBackend } from "../src/engine/local-backend.js";
 import type { ProviderManager, CloudProviderConfig } from "../src/providers/manager.js";
 
 // R2：把 EasyWork 云端 provider 同步进 pi 的共享、落盘 AuthStorage，并能全量对账（增/删）。
 function makeDeps(configs: CloudProviderConfig[]) {
-  const local = { baseUrlFor: () => undefined, contexts: () => ({}) } as unknown as LocalServerManager;
+  const local = { baseUrlFor: () => undefined, contexts: () => ({}) } as unknown as LocalBackend;
   let dump = configs;
   const providers = {
     dump: () => dump,

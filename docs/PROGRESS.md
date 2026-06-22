@@ -7,7 +7,7 @@
 ### ✅ 已完成
 
 - **核心守护进程**（`@ew/core`）：Fastify HTTP + SSE，托管 pi-coding-agent 内核（`SessionHost`，按 threadId 串行化），无头可运行（`easywork serve`）。
-- **本地推理**：`llama-server` / `llama serve` 子进程管理（文本 / 视觉 / embedding），每模型一进程 + LRU 淘汰；HF 搜索 / 断点续传下载 / GGUF 头解析。
+- **本地推理（router 模式）**：统一 `llama`（llama.app）的 `llama serve --models-dir` **单路由进程**，按请求 `model`（= 模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰（文本 / 视觉）；嵌入模型走独立 `llama serve -m --embedding` 进程。经典每模型一进程的 `llama-server` 已弃用。HF 搜索 / 断点续传下载 / GGUF 头解析。
 - **云端推理**：OpenAI 兼容 provider（OpenAI / OpenRouter / DeepSeek / vLLM …），云端流式经 pi-ai（含 OAuth）。
 - **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/web_search）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
@@ -31,6 +31,18 @@
 ---
 
 ## 里程碑日志
+
+## 2026-06-22（续5）— 本地推理完整迁移到 llama.cpp Router 模式（统一三端 = llama.app 的 `llama`）
+
+把本地推理从「每模型一个 `llama serve -m` 进程 + 自研路由/LRU」**完整迁移**到 llama.cpp 的 router 模式（先查官方文档 + 本机实测确认能力，再分 10 步落地）。决策：① 完全弃用经典 `llama-server`/brew llama.cpp，三端统一 llama.app 的 `llama`；② 嵌入模型保持独立专用进程。
+
+- **核心 `RouterServerManager`**（替代 `LocalServerManager`，实现新 `LocalBackend` 接口）：起 1 个 `llama serve --models-dir <modelsDir> --models-max N --models-autoload --host --port [--api-key]` 路由进程；`syncRoutes()` 拉 `GET /v1/models`，对每个（非嵌入）模型注册一个**强制 `model=routerId` 的包装引擎**到 registry；`load`/`unload` 走 `POST /v1/models/load|unload`（/v1 + 裸路径双探），`applyNet`(0.0.0.0+key) 重启单个 router。
+- **模型身份**：router 按「子目录名」路由 ⇒ 规范 id = `routerId`（= `safeRepoDir(repoId)`，与下载建目录同变换）。`LocalModel` 加 `routerId`（`id`/`path` 仍为文件路径供下载/删除）；`routedModels()`/下拉/agent `model` 一律用 routerId；UI「运行中」按 routerId 匹配。
+- **嵌入不动**：`EmbeddingService` 仍独立 `llama serve -m --embedding`（不进 registry/router），记忆/KB 链路零改；router 列表按 arch/名称启发式过滤掉嵌入模型。
+- **弃用经典路径**：`resolve-llama` 改为优先统一 `llama`；删除 `LocalServerManager` + `local-lru`/`local-bind` 测试；install.sh/ps1 只认统一 `llama`。
+- **真机 e2e 验证**：`llama serve --models-dir` 真实跑通 spawn → load（按子目录名）→ 工具循环（read）→ `final`；上下文从 GGUF 读到 40960。新 `router-server-manager.test`（注入 spawn/fetch，4 项）+ createCore 后端选择单测。typecheck 19/19 · lint 0 error · `npm test` 201 passed。
+- **UI 修复**：① 模型卸载后 `models` 变空时校正 Chat/Workspace 的选中态（旧值残留导致状态点常绿 + select 渲染异常的潜在 bug）；② 模型下拉从原生 `<select>` 换成自定义 `ModelSelect`（弹出菜单 + accent 高亮 + ✓，与 Agent Desk 一致）。
+- 文档（README/FEATURES/ARCHITECTURE/CLAUDE）全部改为 router 模式表述。版本 0.2.0 → 0.3.0（架构变更 + 需统一 `llama`，对旧安装为破坏性）。
 
 ## 2026-06-22（续3）— CLI 补全：models rm / thread / mem / kb + 会话续接 + Ctrl-C 中断
 

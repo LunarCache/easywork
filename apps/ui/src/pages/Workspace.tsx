@@ -5,10 +5,10 @@ import { getClient } from "../lib/client.js";
 import { loadDisabledSkills } from "../lib/prefs.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { SideDock } from "../components/SideDock.js";
+import { ModelSelect } from "../components/ModelSelect.js";
 import {
   applyAgentEvent,
   messageText,
-  modelLabel,
   splitThink,
   storedToUiMsgs,
   type PendingApproval,
@@ -54,7 +54,9 @@ export function Workspace({
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  if (model === "" && models.length > 0) setModel(models[0]!);
+  // 模型列表变化时校正选中项：当前模型被卸载/移除 → 退回首个可用或清空。
+  if (model && !models.includes(model)) setModel(models[0] ?? "");
+  else if (model === "" && models.length > 0) setModel(models[0]!);
 
   const refreshWsFiles = async () => {
     try {
@@ -206,14 +208,7 @@ export function Workspace({
               <GitBranchIcon size={13} /> {branches.current || git.branch}
             </span>
           )}
-          <select className="model-select" value={model} onChange={(e) => setModel(e.target.value)}>
-            {models.length === 0 && <option value="">（无模型）</option>}
-            {models.map((m) => (
-              <option key={m} value={m}>
-                {modelLabel(m)}
-              </option>
-            ))}
-          </select>
+          <ModelSelect models={models} value={model} onChange={setModel} />
           <button
             className={`ws-review-toggle ${dockOpen ? "on" : ""}`}
             onClick={() => setDockOpen((v) => !v)}

@@ -12,15 +12,16 @@ export interface LlamaRuntime {
 }
 
 const WIN = process.platform === "win32";
-// 优先经典 llama-server（兼容既有安装/行为），回退 llama.app 的统一 llama。
+// 优先 llama.app 的统一 `llama`（router 模式所需；三端统一）；经典 `llama-server` 仅作探测兜底
+// （后端只在 kind==="llama" 时启用 router；只有 llama-server 时上层提示安装统一 llama）。
 const CANDIDATES: { name: string; kind: LlamaKind }[] = WIN
   ? [
-      { name: "llama-server.exe", kind: "llama-server" },
       { name: "llama.exe", kind: "llama" },
+      { name: "llama-server.exe", kind: "llama-server" },
     ]
   : [
-      { name: "llama-server", kind: "llama-server" },
       { name: "llama", kind: "llama" },
+      { name: "llama-server", kind: "llama-server" },
     ];
 
 /** 候选目录：PATH + llama.app 安装位置（~/.local/bin）+ 常见包管理路径（GUI 应用 PATH 往往很少）。 */
@@ -55,7 +56,7 @@ function kindOf(p: string): LlamaKind {
 }
 
 /**
- * 解析 llama 推理运行时：`EW_LLAMA_SERVER` 显式 → 候选目录里的 `llama-server` → `llama`（llama.app）。
+ * 解析 llama 推理运行时：`EW_LLAMA_SERVER` 显式 → 候选目录里的统一 `llama`（llama.app）→ 经典 `llama-server`。
  * 返回 { path, kind } 或 undefined（未安装，交由上层引导经 llama.app 安装）。
  */
 export function resolveLlamaRuntime(explicit?: string): LlamaRuntime | undefined {

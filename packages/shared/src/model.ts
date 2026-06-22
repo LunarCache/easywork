@@ -28,6 +28,8 @@ export const ModelSourceSchema = z.enum(["downloaded", "scanned", "imported"]);
 /** 本地已就绪模型。 */
 export const LocalModelSchema = z.object({
   id: z.string(),
+  /** router 模式下的模型 id = modelsDir 下的子目录名（llama serve --models-dir 的发现 id）。 */
+  routerId: z.string().optional(),
   repoId: z.string().optional(),
   path: z.string(),
   fileName: z.string(),

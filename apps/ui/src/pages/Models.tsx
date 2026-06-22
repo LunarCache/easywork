@@ -193,7 +193,7 @@ export function Models({ onChange }: { onChange: () => void }) {
   const unload = async (m: LocalModel) => {
     setBusy(m.path);
     try {
-      await getClient().unloadModel(m.path);
+      await getClient().unloadModel(m.routerId ?? m.path);
       await refreshLocal();
       onChange();
     } finally {
@@ -396,7 +396,7 @@ export function Models({ onChange }: { onChange: () => void }) {
           ) : (
             <div className="mdl-list">
               {local.map((m) => {
-                const isLoaded = loaded.includes(m.path);
+                const isLoaded = loaded.includes(m.routerId ?? m.path);
                 const isBusy = busy === m.path;
                 const kind = modelKind(m);
                 const quant = quantOf(m);

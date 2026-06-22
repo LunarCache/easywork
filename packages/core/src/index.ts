@@ -1,7 +1,9 @@
 // @ew/core — 核心守护进程库。被 @ew/daemon（CLI）与 @ew/desktop（Electron）共同消费。
 export { createCore, type CoreServer, type CreateCoreOptions } from "./server/app.js";
 export { EngineRegistry } from "./engine/registry.js";
-export { LocalServerManager, getFreePort } from "./engine/local-server-manager.js";
+export { RouterServerManager } from "./engine/router-server-manager.js";
+export { getFreePort, type LocalEndpoint } from "./engine/net.js";
+export type { LocalBackend } from "./engine/local-backend.js";
 export { dataDir, modelsDir, memoryDir, dbPath } from "./config/paths.js";
 
 // 模型管理

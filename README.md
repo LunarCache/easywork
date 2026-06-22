@@ -20,7 +20,7 @@ curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh
 
 ## 概览
 
-- **本地 / 云端模型**：HuggingFace 搜索 + 断点续传下载 GGUF，经 `llama-server` 运行（文本 / 视觉 / embedding）；或接任意 OpenAI-兼容 provider。
+- **本地 / 云端模型**：HuggingFace 搜索 + 断点续传下载 GGUF，经统一 `llama` 的 **router 模式**运行（单 `llama serve --models-dir` 进程，按 model 路由 + 按需加载 + LRU；文本 / 视觉）；或接任意 OpenAI-兼容 provider。
 - **Agent 内核**：托管 [pi-coding-agent](https://github.com/earendil-works/pi)，自带编码工具 + 自动 compaction；4 档工具审批 + 工作区路径限定；内置工具 / Skills / MCP。
 - **工作区 + 聊天**：本地项目目录读写文件 / 跑命令（git 审查），或隔离的每会话工件目录；右侧统一「工作台坞」（改动 / 文件 / 终端 / 预览）。
 - **知识库 RAG + 可插拔记忆**：sqlite-vec 语义 ⊕ 词法混合召回；记忆作用域化 + 渐进式披露 + 批量抽取。
@@ -69,7 +69,7 @@ easywork status / stop         # daemon 状态 / 停止
 
 ## 从源码开发
 
-环境：**Node ≥ 24**（内置 `node:sqlite`；推荐 26）、npm 11、`llama-server` 或 `llama`（`brew install llama.cpp` 或 `curl -LsSf https://llama.app/install.sh | sh`）。桌面需 Rust（`cargo`）。Windows 另需 Git（见 [平台说明](docs/ARCHITECTURE.md#平台说明)）。
+环境：**Node ≥ 24**（内置 `node:sqlite`；推荐 26）、npm 11、统一 **`llama`**（llama.app，router 模式必需：`curl -LsSf https://llama.app/install.sh | sh` / `irm https://llama.app/install.ps1 | iex`）。桌面需 Rust（`cargo`）。Windows 另需 Git（见 [平台说明](docs/ARCHITECTURE.md#平台说明)）。
 
 ```bash
 npm install            # 安装依赖

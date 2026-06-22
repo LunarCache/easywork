@@ -61,14 +61,13 @@ hdiutil detach "$MNT" >/dev/null 2>&1 || true
 # 未签名构建：移除 quarantine，避免 “已损坏 / 无法验证开发者” 提示。
 xattr -dr com.apple.quarantine "$DEST/EasyWork.app" 2>/dev/null || true
 
-# 本地推理运行时（llama.cpp）：未检测到则自动经 llama.app 官方脚本安装（与解析逻辑一致：
-# PATH + ~/.local/bin + 常见包管理路径）。失败不阻断——App「模型」页仍可一键重试。
+# 本地推理运行时：统一 `llama`（llama.app，router 模式必需）。未检测到则自动经官方脚本安装
+# （与解析逻辑一致：PATH + ~/.local/bin + 常见包管理路径）。失败不阻断——App「模型」页可一键重试。
+# 注：经典 `llama-server` / brew llama.cpp 不再被采用（router 模式只认统一 `llama`）。
 have_llama() {
-  for n in llama-server llama; do
-    command -v "$n" >/dev/null 2>&1 && return 0
-    for d in "$HOME/.local/bin" /opt/homebrew/bin /usr/local/bin /usr/bin; do
-      [ -x "$d/$n" ] && return 0
-    done
+  command -v llama >/dev/null 2>&1 && return 0
+  for d in "$HOME/.local/bin" /opt/homebrew/bin /usr/local/bin /usr/bin; do
+    [ -x "$d/llama" ] && return 0
   done
   return 1
 }

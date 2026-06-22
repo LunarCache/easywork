@@ -4,41 +4,41 @@ import path from "node:path";
 import fs from "node:fs";
 import type { AgentEvent, MemoryProvider, MemoryItem } from "@ew/shared";
 import { EngineRegistry } from "../src/engine/registry.js";
-import { LocalServerManager } from "../src/engine/local-server-manager.js";
+import { RouterServerManager } from "../src/engine/router-server-manager.js";
+import { resolveLlamaRuntime } from "../src/engine/resolve-llama.js";
 import { ProviderManager } from "../src/providers/manager.js";
 import { SessionHost } from "../src/agent/session-host.js";
 
-// R1 真机 e2e：SessionHost 经真实 llama-server 跑通 pi AgentSession，产出我们的 AgentEvent。
-// 重，需本地模型 + llama-server，默认跳过；EW_E2E=1 开启。
+// R1 真机 e2e：SessionHost 经真实 `llama serve` router 跑通 pi AgentSession，产出我们的 AgentEvent。
+// 重，需本地模型 + 统一 llama（router 模式），默认跳过；EW_E2E=1 开启。
 const RUN = process.env.EW_E2E === "1";
-const GGUF = path.join(os.homedir(), ".easywork/models/unsloth__Qwen3-0.6B-GGUF/Qwen3-0.6B-Q4_K_M.gguf");
+const MODELS_DIR = path.join(os.homedir(), ".easywork/models");
+const GGUF = path.join(MODELS_DIR, "unsloth__Qwen3-4B-GGUF/Qwen3-4B-Q4_K_M.gguf");
+const rt = resolveLlamaRuntime();
 
-describe.skipIf(!RUN || !fs.existsSync(GGUF))("SessionHost e2e", () => {
-  it("drives pi AgentSession via local llama-server and emits AgentEvent stream", async () => {
+describe.skipIf(!RUN || !fs.existsSync(GGUF) || rt?.kind !== "llama")("SessionHost e2e", () => {
+  it("drives pi AgentSession via local `llama serve` router and emits AgentEvent stream", async () => {
     const registry = new EngineRegistry();
-    const local = new LocalServerManager(registry);
+    const local = new RouterServerManager(registry, { binaryPath: rt!.path, modelsDir: MODELS_DIR });
     const providers = new ProviderManager(registry);
-    await local.load({ modelPath: GGUF, contextSize: 4096 });
+    const { id: modelId } = await local.load({ modelPath: GGUF, contextSize: 4096 });
 
     const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-r1-")));
     const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-r1-agent-")));
     fs.writeFileSync(path.join(cwd, "README.md"), "# Demo\nThis is a teapot project.\n");
 
-    // 记录型记忆：验证 R3 扩展钩子（context 召回 + agent_end 抽取）经真实 pi 运行时触发。
-    let recallCalls = 0;
-    let observeCalls = 0;
+    // 记录型记忆：验证记忆扩展的 `before_agent_start` 清单钩子（现设计 = memory.list）经真实 pi 运行时触发。
+    let listCalls = 0;
     const memory: MemoryProvider = {
       id: "rec",
-      recall: async () => {
-        recallCalls++;
-        return [] as MemoryItem[];
-      },
-      observe: async () => {
-        observeCalls++;
-      },
+      recall: async () => [] as MemoryItem[],
+      observe: async () => {},
       write: async () => ({}) as MemoryItem,
       edit: async () => ({}) as MemoryItem,
-      list: async () => [],
+      list: async () => {
+        listCalls++;
+        return [];
+      },
       delete: async () => {},
     };
 
@@ -56,7 +56,7 @@ describe.skipIf(!RUN || !fs.existsSync(GGUF))("SessionHost e2e", () => {
     try {
       for await (const ev of host.run({
         threadId: "t1",
-        modelId: GGUF,
+        modelId,
         text: "用 read 工具读取 README.md，然后一句话概括这个项目。",
         cwd,
         workspace: true,
@@ -73,14 +73,14 @@ describe.skipIf(!RUN || !fs.existsSync(GGUF))("SessionHost e2e", () => {
     }
 
     const types = events.map((e) => e.type);
-    console.log("R1 e2e event types:", JSON.stringify(types));
-    expect(types).toContain("final");
-    const finals = events.filter((e) => e.type === "final");
-    expect(finals.length).toBe(1);
-    // R3：context 钩子（召回）与 agent_end 钩子（抽取）均经真实 pi 运行时触发。
-    console.log("R3 hooks:", JSON.stringify({ recallCalls, observeCalls }));
-    expect(recallCalls).toBeGreaterThan(0);
-    expect(observeCalls).toBeGreaterThan(0);
+    console.log("R1 e2e event types:", JSON.stringify([...new Set(types)]));
+    // 经 `llama serve` router 跑通完整一轮：工具循环（read）+ 收尾 final。
+    expect(events.filter((e) => e.type === "final").length).toBe(1);
+    expect(types).toContain("tool-start");
+    expect(types).toContain("tool-end");
+    // 记忆扩展 before_agent_start 清单钩子（现设计 = memory.list）经真实 pi 运行时触发。
+    console.log("memory.list calls:", listCalls);
+    expect(listCalls).toBeGreaterThan(0);
     // R4：read 属放行类，不触发审批；workspace 模式整体仍正常收尾。
     console.log("R4 approvalCalls:", approvalCalls);
   }, 180_000);

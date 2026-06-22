@@ -19,7 +19,7 @@ import { GLOBAL_SCOPE } from "@ew/shared";
 import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, SamplingParams, Tool } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import type { LocalServerManager } from "../engine/local-server-manager.js";
+import type { LocalBackend } from "../engine/local-backend.js";
 import type { ProviderManager } from "../providers/manager.js";
 import type { KnowledgeBaseStore } from "../rag/store.js";
 import {
@@ -32,7 +32,7 @@ import { ExtractionScheduler } from "../memory/extraction-scheduler.js";
 
 /** 宿主依赖（从 daemon 注入）。 */
 export interface SessionHostDeps {
-  local: LocalServerManager;
+  local: LocalBackend;
   providers: ProviderManager;
   /** pi 全局配置目录（auth/models/session 落盘）。默认 ~/.easywork/pi-agent。 */
   agentDir?: string;
