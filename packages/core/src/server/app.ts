@@ -416,6 +416,19 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
 
   app.get("/models/local", async () => ({ models: await models.scanInventory() }));
 
+  // 删除本地模型（id = gguf 全路径）：先卸载（若在跑），再删文件。
+  app.post("/models/local/delete", async (req, reply) => {
+    const id = (req.body as { id?: string })?.id;
+    if (!id) return reply.code(400).send({ error: "missing_id" });
+    try {
+      await local.unload(id);
+      const res = await models.deleteLocal(id);
+      return { ok: true, removed: res.removed };
+    } catch (e) {
+      return reply.code(400).send({ ok: false, error: (e as Error).message });
+    }
+  });
+
   app.post("/models/download", async (req, reply) => {
     const parsed = GGUFVariantSchema.safeParse((req.body as { variant?: unknown })?.variant);
     if (!parsed.success) {

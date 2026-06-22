@@ -230,6 +230,11 @@ export class EasyWorkClient {
     return models;
   }
 
+  /** 删除本地模型（id = gguf 全路径）：daemon 先卸载再删文件。 */
+  async deleteLocalModel(id: string): Promise<{ removed: string[] }> {
+    return this.postJSON<{ removed: string[] }>("/models/local/delete", { id });
+  }
+
   downloadModel(
     variant: GGUFVariant,
     opts?: { hfToken?: string; signal?: AbortSignal },

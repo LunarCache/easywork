@@ -10,13 +10,18 @@ export async function pickModel(client: EasyWorkClient, explicit?: string): Prom
   const info = await client.listModels();
   const m = info.routed[0];
   if (!m) {
-    throw new Error("没有可用模型。先 `easywork models pull <hf-id>` 或在桌面端配置云端 provider。");
+    throw new Error(
+      "没有可用模型。先 `easywork models pull <hf-id>` 或在桌面端配置云端 provider。",
+    );
   }
   return m;
 }
 
 /** 把本地目录解析成一个 workspace project（已存在则复用，否则新建），返回 projectId。 */
-export async function resolveProject(client: EasyWorkClient, workspaceDir: string): Promise<string> {
+export async function resolveProject(
+  client: EasyWorkClient,
+  workspaceDir: string,
+): Promise<string> {
   const abs = fs.realpathSync(workspaceDir);
   const projects = await client.listProjects();
   const existing = projects.find((p) => {
@@ -27,7 +32,10 @@ export async function resolveProject(client: EasyWorkClient, workspaceDir: strin
     }
   });
   if (existing) return existing.id;
-  const created = await client.createProject({ name: abs.split("/").pop() || abs, workspaceDir: abs });
+  const created = await client.createProject({
+    name: abs.split("/").pop() || abs,
+    workspaceDir: abs,
+  });
   return created.id;
 }
 
@@ -52,6 +60,8 @@ export interface TurnResult {
   message: ChatMessage | null;
   /** 是否出错。 */
   error?: string;
+  /** 是否被用户 Ctrl-C 中断。 */
+  aborted?: boolean;
 }
 
 export interface TurnOptions {
@@ -90,63 +100,75 @@ export async function runTurn(client: EasyWorkClient, opts: TurnOptions): Promis
     }
   };
 
-  for await (const ev of stream as AsyncIterable<AgentEvent>) {
-    switch (ev.type) {
-      case "text":
-        closeReasoning();
-        process.stdout.write(ev.text);
-        break;
-      case "reasoning":
-        if (!reasoningOpen) {
-          process.stderr.write(c.gray("💭 "));
-          reasoningOpen = true;
-        }
-        process.stderr.write(c.gray(ev.text));
-        break;
-      case "tool-start": {
-        closeReasoning();
-        const a = shortArgs(ev.call);
-        err(`${c.cyan("⚙")} ${c.bold(ev.call.name)}${a ? c.dim(`  ${a}`) : ""}`);
-        break;
-      }
-      case "tool-progress":
-        process.stderr.write(c.dim(ev.chunk));
-        break;
-      case "tool-end": {
-        const r = resultText(ev.result.content);
-        if (ev.result.isError) err(c.red(`  ✗ ${r.slice(0, 200)}`));
-        else if (r.trim()) err(c.dim(`  ✓ ${(r.split("\n")[0] ?? "").slice(0, 120)}`));
-        break;
-      }
-      case "approval-request": {
-        closeReasoning();
-        if (opts.autoApprove) {
-          await client.approveTool(ev.id, "approve");
-          err(c.yellow(`  ↳ 自动批准 ${ev.toolName}`));
+  try {
+    for await (const ev of stream as AsyncIterable<AgentEvent>) {
+      switch (ev.type) {
+        case "text":
+          closeReasoning();
+          process.stdout.write(ev.text);
+          break;
+        case "reasoning":
+          if (!reasoningOpen) {
+            process.stderr.write(c.gray("💭 "));
+            reasoningOpen = true;
+          }
+          process.stderr.write(c.gray(ev.text));
+          break;
+        case "tool-start": {
+          closeReasoning();
+          const a = shortArgs(ev.call);
+          err(`${c.cyan("⚙")} ${c.bold(ev.call.name)}${a ? c.dim(`  ${a}`) : ""}`);
           break;
         }
-        const ans = (
-          await question(c.yellow(`  ? 批准工具 ${c.bold(ev.toolName)}? [y]es / [n]o / [a]lways: `))
-        ).toLowerCase();
-        const verdict = ans === "a" ? "approve-always" : ans === "n" ? "deny" : "approve";
-        await client.approveTool(ev.id, verdict);
-        break;
+        case "tool-progress":
+          process.stderr.write(c.dim(ev.chunk));
+          break;
+        case "tool-end": {
+          const r = resultText(ev.result.content);
+          if (ev.result.isError) err(c.red(`  ✗ ${r.slice(0, 200)}`));
+          else if (r.trim()) err(c.dim(`  ✓ ${(r.split("\n")[0] ?? "").slice(0, 120)}`));
+          break;
+        }
+        case "approval-request": {
+          closeReasoning();
+          if (opts.autoApprove) {
+            await client.approveTool(ev.id, "approve");
+            err(c.yellow(`  ↳ 自动批准 ${ev.toolName}`));
+            break;
+          }
+          const ans = (
+            await question(
+              c.yellow(`  ? 批准工具 ${c.bold(ev.toolName)}? [y]es / [n]o / [a]lways: `),
+            )
+          ).toLowerCase();
+          const verdict = ans === "a" ? "approve-always" : ans === "n" ? "deny" : "approve";
+          await client.approveTool(ev.id, verdict);
+          break;
+        }
+        case "memory-recall":
+          if (ev.count > 0) err(c.dim(`  ↳ 召回 ${ev.count} 条记忆`));
+          break;
+        case "usage":
+          if (isTTY)
+            err(c.dim(`  · tokens in=${ev.usage.promptTokens} out=${ev.usage.completionTokens}`));
+          break;
+        case "final":
+          final = ev.message;
+          break;
+        case "error":
+          closeReasoning();
+          error = ev.message;
+          err(c.red(`\n错误: ${ev.message}`));
+          break;
       }
-      case "memory-recall":
-        if (ev.count > 0) err(c.dim(`  ↳ 召回 ${ev.count} 条记忆`));
-        break;
-      case "usage":
-        if (isTTY) err(c.dim(`  · tokens in=${ev.usage.promptTokens} out=${ev.usage.completionTokens}`));
-        break;
-      case "final":
-        final = ev.message;
-        break;
-      case "error":
-        closeReasoning();
-        error = ev.message;
-        err(c.red(`\n错误: ${ev.message}`));
-        break;
     }
+  } catch (e) {
+    closeReasoning();
+    if (opts.signal?.aborted || (e as Error)?.name === "AbortError") {
+      err(c.yellow("\n^C 已中断本轮"));
+      return { message: null, aborted: true };
+    }
+    throw e;
   }
   closeReasoning();
   out(); // 收尾换行，分隔下一轮

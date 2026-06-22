@@ -19,7 +19,7 @@
 - `packages/core/src/server/app.ts` — Fastify 全部路由（`/agent/run`、`/v1`、`/models`、`/workspace/*`、`/threads/*`、`/providers`、`/local/runtime` …）。
 - `packages/core/src/engine/{local-server-manager,resolve-llama}.ts` — llama 进程管理（LRU、绑定 host、api-key）+ 运行时解析（`llama-server` 或 llama.app 的 `llama serve`）。
 - `packages/core/src/openai-compat/router.ts` + `pi-adapt.ts` — `/v1` 网关与 pi↔OpenAI/Anthropic 边界翻译。
-- `apps/daemon/src/cli.ts` + `cli/*` — `easywork` CLI（既是 `serve` daemon 入口，也是终端瘦客户端 `repl`/`run`/`models`/`status`/`stop`）。`cli/daemon.ts` 自启/发现本机 daemon；`cli/agent.ts` 渲染 SSE 事件流（助手文本→stdout、装饰→stderr）。复用 `@ew/sdk` 打 HTTP，**后端零改动**。
+- `apps/daemon/src/cli.ts` + `cli/*` — `easywork` CLI（既是 `serve` daemon 入口，也是终端瘦客户端 `repl`/`run`/`models`/`thread`/`mem`/`kb`/`status`/`stop`）。`cli/daemon.ts` 自启/发现本机 daemon；`cli/agent.ts` 渲染 SSE 事件流（助手文本→stdout、装饰→stderr）。复用 `@ew/sdk` 打 HTTP，**后端零改动**（唯一例外：`models rm` 的 `POST /models/local/delete` + `ModelManager.deleteLocal`，含受管目录硬校验）。
 - `packages/shared/src/*` — 核心契约（见下）。
 
 ## 核心契约（@ew/shared，OpenAI-shaped 为通用语言）

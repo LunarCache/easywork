@@ -17,7 +17,7 @@
 - **思考过程持久化**：reasoning 落库并跨会话回放（不回喂模型）。
 - **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（Agent Desk 工作台设计语言）；图标轨道 + 分组会话列表 + 三栏可拖拽 + 统一「工作台坞」+ 设置 / 记忆浮层。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP 持久化）。
-- **命令行（CLI）**：`easywork` 既是 daemon 入口也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n）/ `run`（一次性，支持管道 stdin）/ `models ls·pull` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。
+- **命令行（CLI）**：`easywork` 既是 daemon 入口也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性，支持管道 stdin、`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `kb ls·search·add·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。
 - **打包发布（macOS）**：daemon 打成单文件原生二进制（Node SEA，运行免 Node）；Tauri 出 dmg（Apple Silicon，内置 daemon + sqlite-vec）；`install.sh` 一键安装并自动备齐 llama 运行时（缺失经 llama.app 装）；`v*` tag 触发 GitHub Actions 构建 + 发布到 Releases。
 
 ### 🚧 待做
@@ -31,6 +31,18 @@
 ---
 
 ## 里程碑日志
+
+## 2026-06-22（续3）— CLI 补全：models rm / thread / mem / kb + 会话续接 + Ctrl-C 中断
+
+在 MVP 之上补齐管理类子命令与续接能力。除 `models rm` 需新增后端删除能力外，其余全部复用既有 SDK 方法（后端零改动）。
+
+- **`models rm <名/片段>`**：唯一需碰后端的功能。`ModelManager.deleteLocal(id)` —— 路径硬校验必须落在 modelsDir/extraDirs 内（拒绝越界，realpath 解析）；删主文件及全部分片，repo 目录无其它模型时整删（连带共享 mmproj）。`POST /models/local/delete` 先 `local.unload(id)` 再删文件；SDK `deleteLocalModel`。CLI 按名/路径片段模糊匹配 + 多义报错 + 删除确认（`-y` 跳过）。
+- **`thread ls / show <id> / rm <id>`**：会话列表 / 历史回放 / 删除（复用 `listThreads`/`threadMessages`/`deleteThread`）。
+- **`mem ls / search <词> / rm <id>`**：记忆列表（`--scope` 限定）/ 召回（带分数）/ 删除。
+- **`kb ls / search <词> / add <文件\|文本> / rm <docId>`**：知识库；`add` 文件走 base64 上传 + 轮询解析任务到完成，内联文本走 `kbIngest`。
+- **会话续接**：`run`/`repl` 加 `-t/--thread <id>`。利用「daemon 只把最后一条用户消息喂给 pi、其余由 pi 持久化会话恢复」，续接只需传 threadId + 新消息。
+- **Ctrl-C 中断本轮**：REPL 每轮一个 AbortController，SIGINT 仅 abort 当前轮（runTurn 捕获 AbortError 优雅收尾），不退出 REPL；空闲提示符下 Ctrl-C 才退出。
+- **实跑验证**（临时 `EW_DATA_DIR`）：各子命令空态/错误路径；`kb add` 内联文本端到端入库；**`models rm` 越界护栏**（`/etc/passwd`、`/tmp/x.gguf` 均 400 拒绝、诱饵文件未删）+ 正向删除（受管目录内模型删除 + 空 repo 目录连带 mmproj 清理）；typecheck + eslint 全绿；`npm test` 204 通过；无孤儿进程。
 
 ## 2026-06-22（续2）— 命令行客户端（CLI）：repl / run / models / serve / status / stop
 

@@ -48,16 +48,22 @@ curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh
 安装后 `easywork` 既是 daemon 入口，也是终端客户端 —— 无 GUI（SSH / 服务器）也能用，可脚本化。首次用会**自动在后台拉起本机 daemon**（读 `~/.easywork/daemon.json` 探活，没活就起一个）。
 
 ```bash
-easywork                       # 交互式 REPL（默认）：多轮对话 + 工具审批 y/n
+easywork                       # 交互式 REPL（默认）：多轮对话 + 工具审批 y/n（Ctrl-C 中断本轮）
 easywork run "总结这个仓库"      # 一次性问答，流式输出后退出
 cat error.log | easywork run "分析这段日志"     # 管道：stdin 作提问，stdout 只出回复
 easywork run "重构 utils.ts" -w . -y           # 在当前目录跑 agent，自动批准工具
+easywork run "继续" -t <threadId>              # 续接已有会话（repl 同样支持 -t）
+
 easywork models                # 列出已路由 + 本地模型
 easywork models pull <hf-repo> # 下载 GGUF（--quant Q4_K_M 指定量化）
+easywork models rm <名/片段>    # 删除本地模型（受管目录硬校验，先卸载再删）
+easywork thread ls / show <id> / rm <id>       # 会话历史浏览 / 查看 / 删除
+easywork mem ls / search <词> / rm <id>        # 记忆列表 / 召回 / 删除
+easywork kb  ls / search <词> / add <文件> / rm <docId>   # 知识库
 easywork status / stop         # daemon 状态 / 停止
 ```
 
-选项：`-m/--model`、`-w/--workspace <dir>`、`-y/--yes`（自动批准）。环境：`EW_BASEURL`/`EW_TOKEN` 直连远端 daemon，`EW_MODEL` 默认模型。完整用法见 `easywork --help`。
+选项：`-m/--model`、`-w/--workspace <dir>`、`-t/--thread <id>`、`-y/--yes`（自动批准 / 跳过删除确认）。环境：`EW_BASEURL`/`EW_TOKEN` 直连远端 daemon，`EW_MODEL` 默认模型。完整用法见 `easywork --help`。
 
 ---
 

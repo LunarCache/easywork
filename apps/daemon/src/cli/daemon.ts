@@ -105,7 +105,10 @@ export async function ensureDaemon(opts: EnsureOptions = {}): Promise<EasyWorkCl
 }
 
 /** 仅在已有活 daemon 时返回 client，绝不自启（status/stop 用）。 */
-export async function connectExisting(): Promise<{ client: EasyWorkClient; info: DaemonInfo } | null> {
+export async function connectExisting(): Promise<{
+  client: EasyWorkClient;
+  info: DaemonInfo;
+} | null> {
   const envBase = process.env.EW_BASEURL;
   if (envBase) {
     const baseUrl = envBase.replace(/\/$/, "");

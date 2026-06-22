@@ -8,6 +8,7 @@ export interface RunFlags {
   model?: string;
   workspace?: string;
   yes?: boolean;
+  thread?: string;
 }
 
 async function readStdin(): Promise<string> {
@@ -29,7 +30,7 @@ export async function run(promptArg: string, flags: RunFlags): Promise<void> {
   const history: ChatMessage[] = [{ role: "user", content: prompt }];
   const res = await runTurn(client, {
     model,
-    threadId: randomUUID(),
+    threadId: flags.thread || randomUUID(),
     history,
     projectId,
     autoApprove: flags.yes,
