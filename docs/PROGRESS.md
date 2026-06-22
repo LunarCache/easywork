@@ -17,6 +17,7 @@
 - **思考过程持久化**：reasoning 落库并跨会话回放（不回喂模型）。
 - **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（Agent Desk 工作台设计语言）；图标轨道 + 分组会话列表 + 三栏可拖拽 + 统一「工作台坞」+ 设置 / 记忆浮层。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP 持久化）。
+- **命令行（CLI）**：`easywork` 既是 daemon 入口也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n）/ `run`（一次性，支持管道 stdin）/ `models ls·pull` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。
 - **打包发布（macOS）**：daemon 打成单文件原生二进制（Node SEA，运行免 Node）；Tauri 出 dmg（Apple Silicon，内置 daemon + sqlite-vec）；`install.sh` 一键安装并自动备齐 llama 运行时（缺失经 llama.app 装）；`v*` tag 触发 GitHub Actions 构建 + 发布到 Releases。
 
 ### 🚧 待做
@@ -30,6 +31,16 @@
 ---
 
 ## 里程碑日志
+
+## 2026-06-22（续2）— 命令行客户端（CLI）：repl / run / models / serve / status / stop
+
+把 `easywork` 从「只有 serve 的服务端入口」扩成**真正的终端客户端**（瘦客户端定位：复用 `@ew/sdk` 打 daemon HTTP，后端零改动）。
+
+- **命令树**：`repl`（无命令 + TTY 时默认）/ `run <提问>`（一次性，流式）/ `models [ls|pull]` / `serve` / `status` / `stop` / `--help` / `--version`。手搓零依赖 dispatch（SEA 友好），拆到 `apps/daemon/src/cli/`：`env`（SEA argv 适配 + 版本注入）、`daemon`（自启/发现）、`term`（TTY/上色/问询）、`agent`（事件渲染 + runTurn + 选模型 + 项目解析）、`commands/*`。
+- **自动拉起 daemon**：`ensureDaemon()` 读 `~/.easywork/daemon.json` + `/health` 探活；死了且 autostart → detached spawn 自己 `serve`，轮询到就绪。`EW_BASEURL`/`EW_TOKEN` 可直连远端（不自启）。
+- **流式渲染约定**：助手文本走 **stdout**（管道可干净捕获），工具调用 / 思考 / 状态 / 审批等装饰走 **stderr**；`approval-request` 在 TTY 弹 y/n/a，`--yes` 自动批准。`run` 支持管道 stdin 作提问。
+- **SEA argv 适配**：SEA 单文件无脚本路径、真实参数从 `argv[1]` 起 → 构建期 `__EW_SEA__` define 区分 slice(1)/slice(2)；`__EW_VERSION__` 从根 package.json 注入，`--version` 在二进制里也准。
+- **实跑验证**（临时 `EW_DATA_DIR` 免污染真实数据）：`--version`/`--help`；`models` 触发自启→列空→退出 0；`status` 显示地址/pid/模型；`stop` SIGTERM→`status` 转「未运行」；`run`/管道 stdin 在无模型时优雅报错退 1；typecheck + eslint 全绿，无孤儿进程。
 
 ## 2026-06-22（续）— 打包发布阶段：llama 运行时整合 + 单文件 daemon + macOS dmg + 一键安装
 

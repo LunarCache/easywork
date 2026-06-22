@@ -1,68 +1,140 @@
-import fs from "node:fs";
-import path from "node:path";
-import { createCore, dataDir } from "@ew/core";
+import { VERSION, userArgv } from "./cli/env.js";
+import { c, die, err, isTTY, out } from "./cli/term.js";
+import { serve } from "./cli/commands/serve.js";
+import { status, stop } from "./cli/commands/status.js";
+import { modelsList, modelsPull } from "./cli/commands/models.js";
+import { run } from "./cli/commands/run.js";
+import { repl } from "./cli/commands/repl.js";
 
-interface Args {
-  command: string;
-  port?: number;
-  host?: string;
-  token?: string;
+interface Parsed {
+  positionals: string[];
+  flags: Record<string, string | boolean>;
 }
 
-function parseArgs(argv: string[]): Args {
-  const args: Args = { command: argv[0] ?? "serve" };
-  for (let i = 1; i < argv.length; i++) {
+const ALIASES: Record<string, string> = {
+  m: "model",
+  H: "host",
+  p: "port",
+  w: "workspace",
+  y: "yes",
+  h: "help",
+  v: "version",
+};
+const BOOLEAN = new Set(["yes", "help", "version"]);
+
+function parse(argv: string[]): Parsed {
+  const positionals: string[] = [];
+  const flags: Record<string, string | boolean> = {};
+  for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--port" || a === "-p") args.port = Number(argv[++i]);
-    else if (a === "--host" || a === "-H") args.host = argv[++i];
-    else if (a === "--token") args.token = argv[++i];
-  }
-  return args;
-}
-
-async function serve(args: Args): Promise<void> {
-  const token = args.token ?? process.env.EW_TOKEN;
-  const core = createCore(token ? { token } : {});
-  const { port, host } = await core.start({
-    port: args.port ?? (Number(process.env.EW_PORT) || 0),
-    host: args.host ?? process.env.EW_HOST,
-  });
-
-  // 把 endpoint + token 写到数据目录，供 Electron / 客户端发现。
-  const infoPath = path.join(dataDir(), "daemon.json");
-  const info = { baseUrl: `http://${host}:${port}`, token: core.token, pid: process.pid };
-  fs.writeFileSync(infoPath, JSON.stringify(info, null, 2));
-
-  // stdout 第一行打印 JSON，便于父进程（supervisor）解析。
-  process.stdout.write(`${JSON.stringify(info)}\n`);
-  console.error(`[easywork] core daemon listening on ${info.baseUrl}`);
-  console.error(`[easywork] token: ${core.token}`);
-  console.error(`[easywork] info written to ${infoPath}`);
-
-  const shutdown = async () => {
-    console.error("[easywork] shutting down...");
-    await core.stop();
-    try {
-      fs.unlinkSync(infoPath);
-    } catch {
-      /* ignore */
+    if (a === undefined) continue;
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      const name = ALIASES[key] ?? key;
+      if (BOOLEAN.has(name)) flags[name] = true;
+      else flags[name] = argv[++i] ?? "";
+    } else if (a.startsWith("-") && a.length > 1) {
+      const key = a.slice(1);
+      const name = ALIASES[key] ?? key;
+      if (BOOLEAN.has(name)) flags[name] = true;
+      else flags[name] = argv[++i] ?? "";
+    } else {
+      positionals.push(a);
     }
-    process.exit(0);
-  };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  }
+  return { positionals, flags };
 }
+
+function num(v: string | boolean | undefined): number | undefined {
+  return typeof v === "string" && v ? Number(v) : undefined;
+}
+function str(v: string | boolean | undefined): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+const HELP = `${c.bold("easywork")} — 本地 AI 工作台 CLI  ${c.dim(`v${VERSION}`)}
+
+${c.bold("用法")}  easywork <命令> [参数] [选项]
+
+${c.bold("命令")}
+  ${c.cyan("repl")}                     交互式多轮对话（无命令 + 终端时的默认）
+  ${c.cyan("run")} <提问>               一次性问答，流式输出后退出（支持管道 stdin）
+  ${c.cyan("models")} [ls]              列出已路由 + 本地模型
+  ${c.cyan("models pull")} <hf-repo>    下载 GGUF 模型（--quant 指定量化）
+  ${c.cyan("serve")}                    前台启动 core daemon
+  ${c.cyan("status")}                   查看 daemon 状态（地址 / pid / 模型）
+  ${c.cyan("stop")}                     停止本机 daemon
+
+${c.bold("选项")}
+  -m, --model <id>         指定模型（默认 EW_MODEL 或第一个已路由模型）
+  -w, --workspace <dir>    在该项目目录里跑 agent（读写文件 / 跑命令）
+  -y, --yes                自动批准所有工具调用（脚本用）
+      --quant <q>          models pull 的量化（如 Q4_K_M）
+  -p, --port / -H, --host / --token   serve 用
+  -h, --help / -v, --version
+
+${c.bold("环境")}
+  EW_BASEURL / EW_TOKEN    直连远端 daemon（设了则不自动拉起本机 daemon）
+  EW_MODEL                 默认模型
+
+${c.dim("无活动 daemon 时，run/repl/models/status 之外的命令会自动在后台拉起一个。")}`;
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
-  switch (args.command) {
+  const { positionals, flags } = parse(userArgv());
+  const command = positionals[0];
+
+  if (flags.version) {
+    out(VERSION);
+    return;
+  }
+  if (flags.help && !command) {
+    out(HELP);
+    return;
+  }
+
+  switch (command) {
+    case undefined:
+      if (isTTY) await repl({ model: str(flags.model), workspace: str(flags.workspace), yes: !!flags.yes });
+      else out(HELP);
+      break;
+    case "help":
+      out(HELP);
+      break;
     case "serve":
-      await serve(args);
+      await serve({ port: num(flags.port), host: str(flags.host), token: str(flags.token) });
+      break;
+    case "status":
+      await status();
+      break;
+    case "stop":
+      await stop();
+      break;
+    case "models": {
+      const sub = positionals[1] ?? "ls";
+      if (sub === "ls" || sub === "list") await modelsList();
+      else if (sub === "pull" || sub === "download") await modelsPull(positionals[2], str(flags.quant));
+      else die(`未知 models 子命令: ${sub}（支持 ls / pull）`);
+      break;
+    }
+    case "run":
+      await run(positionals.slice(1).join(" "), {
+        model: str(flags.model),
+        workspace: str(flags.workspace),
+        yes: !!flags.yes,
+      });
+      break;
+    case "repl":
+    case "chat":
+      await repl({ model: str(flags.model), workspace: str(flags.workspace), yes: !!flags.yes });
       break;
     default:
-      console.error(`未知命令: ${args.command}\n用法: easywork serve [--port N] [--host H] [--token T]`);
+      err(c.red(`未知命令: ${command}`));
+      err(`运行 ${c.cyan("easywork --help")} 查看用法`);
       process.exit(1);
   }
 }
 
-void main();
+main().catch((e: unknown) => {
+  err(c.red(`错误: ${e instanceof Error ? e.message : String(e)}`));
+  process.exit(1);
+});

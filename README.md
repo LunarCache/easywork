@@ -43,6 +43,24 @@ curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh
 
 ---
 
+## 命令行（CLI）
+
+安装后 `easywork` 既是 daemon 入口，也是终端客户端 —— 无 GUI（SSH / 服务器）也能用，可脚本化。首次用会**自动在后台拉起本机 daemon**（读 `~/.easywork/daemon.json` 探活，没活就起一个）。
+
+```bash
+easywork                       # 交互式 REPL（默认）：多轮对话 + 工具审批 y/n
+easywork run "总结这个仓库"      # 一次性问答，流式输出后退出
+cat error.log | easywork run "分析这段日志"     # 管道：stdin 作提问，stdout 只出回复
+easywork run "重构 utils.ts" -w . -y           # 在当前目录跑 agent，自动批准工具
+easywork models                # 列出已路由 + 本地模型
+easywork models pull <hf-repo> # 下载 GGUF（--quant Q4_K_M 指定量化）
+easywork status / stop         # daemon 状态 / 停止
+```
+
+选项：`-m/--model`、`-w/--workspace <dir>`、`-y/--yes`（自动批准）。环境：`EW_BASEURL`/`EW_TOKEN` 直连远端 daemon，`EW_MODEL` 默认模型。完整用法见 `easywork --help`。
+
+---
+
 ## 从源码开发
 
 环境：**Node ≥ 20**（推荐 26）、npm 11、`llama-server` 或 `llama`（`brew install llama.cpp` 或 `curl -LsSf https://llama.app/install.sh | sh`）。桌面需 Rust（`cargo`）。Windows 另需 Git（见 [平台说明](docs/ARCHITECTURE.md#平台说明)）。

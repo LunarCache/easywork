@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
 import { defineConfig } from "tsup";
+
+const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
 
 // 单文件二进制（Node SEA）用：把 cli + 全部依赖（@ew/*、pi、其余 npm）内联成一个自包含 JS。
 // 仅 node: 内置由 Node 提供；sqlite-vec 是原生可加载扩展，运行时经 EW_SQLITE_VEC 定位（见 resolveVecExtensionPath）。
@@ -21,6 +24,8 @@ export default defineConfig({
       ...options.define,
       "import.meta.url": "importMetaUrl",
       "import.meta.dirname": "importMetaDirname",
+      __EW_VERSION__: JSON.stringify(version),
+      __EW_SEA__: "true",
     };
   },
   banner: {
