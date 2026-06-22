@@ -21,7 +21,7 @@ const srv = spawn(bin, ["-m", GGUF, "--host", "127.0.0.1", "--port", String(PORT
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitReady(t = 60000) {
   const t0 = Date.now();
-  while (Date.now() - t0 < t) { try { if ((await fetch(`http://127.0.0.1:${PORT}/v1/models`)).ok) return true; } catch {} await sleep(500); }
+  while (Date.now() - t0 < t) { try { if ((await fetch(`http://127.0.0.1:${PORT}/v1/models`)).ok) return true; } catch { /* 服务未就绪，忽略并重试 */ } await sleep(500); }
   return false;
 }
 
