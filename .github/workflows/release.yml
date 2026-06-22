@@ -1,7 +1,8 @@
 name: release
 
-# 打 tag（v*）触发：macOS 双架构构建 dmg，发布到主仓公开 Releases。
-# 初版未签名（ad-hoc）；后续接入 Apple 证书/公证再补。
+# 打 tag（v*）触发：macOS (Apple Silicon) 构建 dmg，发布到主仓公开 Releases。
+# 初版未签名（ad-hoc）；Intel(x64) / Windows / Linux + Apple 证书/公证后续接入。
+# （x64 暂移除：GitHub macos-13 Intel runner 紧缺、排队过久，且 Intel Mac 占比已低。）
 on:
   push:
     tags: ["v*"]
@@ -18,8 +19,6 @@ jobs:
         include:
           - runner: macos-14 # Apple Silicon
             arch: aarch64
-          - runner: macos-13 # Intel
-            arch: x64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4

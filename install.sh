@@ -26,7 +26,11 @@ echo "→ 查询最新版本…"
 API="https://api.github.com/repos/$REPO/releases/latest"
 URL="$(curl -fsSL "$API" | grep -oE "https://[^\"]+_${DMG_ARCH}\\.dmg" | head -1)"
 if [ -z "$URL" ]; then
-  echo "未找到 ${DMG_ARCH} 架构的 dmg（该架构可能尚未发布）。见 https://github.com/$REPO/releases"
+  if [ "$DMG_ARCH" = "x64" ]; then
+    echo "目前仅发布 Apple Silicon 版（Intel / x64 暂未提供）。"
+  else
+    echo "未找到 ${DMG_ARCH} 架构的 dmg。见 https://github.com/$REPO/releases"
+  fi
   exit 1
 fi
 
