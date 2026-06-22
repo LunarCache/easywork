@@ -1,26 +1,40 @@
 import { useCallback, useEffect, useState } from "react";
 import type { McpServerConfig } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { WrenchIcon, TrashIcon, RefreshIcon } from "../icons.js";
+import { TrashIcon, RefreshIcon, PlusIcon, ArrowLeftIcon } from "../icons.js";
 
 type Kind = "stdio" | "http";
+type Probe = { ok: boolean; toolCount: number; error?: string };
 
 export function Mcp() {
   const [servers, setServers] = useState<McpServerConfig[]>([]);
-  const [kind, setKind] = useState<Kind>("stdio");
+  const [probe, setProbe] = useState<Record<string, Probe | "busy">>({});
+  const [view, setView] = useState<"list" | "add">("list");
+  const [kind, setKind] = useState<Kind>("http");
   const [form, setForm] = useState({ id: "", command: "", args: "", url: "", headers: "" });
-  const [note, setNote] = useState("");
   const [importText, setImportText] = useState("");
-  const [probing, setProbing] = useState<string | null>(null);
-  const [probeResult, setProbeResult] = useState<Record<string, { ok: boolean; toolCount: number; error?: string }>>({});
+  const [note, setNote] = useState("");
+
+  const probeOne = useCallback(async (s: McpServerConfig) => {
+    setProbe((m) => ({ ...m, [s.id]: "busy" }));
+    try {
+      const r = await getClient().probeMcpServer(s);
+      setProbe((m) => ({ ...m, [s.id]: r }));
+    } catch (e) {
+      setProbe((m) => ({ ...m, [s.id]: { ok: false, toolCount: 0, error: e instanceof Error ? e.message : String(e) } }));
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
-      setServers(await getClient().listMcpServers());
+      const list = await getClient().listMcpServers();
+      setServers(list);
+      // 自动探测每个服务器的连接状态 + 工具数（并行）。
+      list.forEach((s) => void probeOne(s));
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [probeOne]);
 
   useEffect(() => {
     void refresh();
@@ -55,8 +69,8 @@ export function Mcp() {
     const cfg = buildConfig();
     if (!cfg) return;
     await getClient().upsertMcpServer(cfg);
-    setNote(`已添加 MCP 服务器 ${cfg.id}`);
     setForm({ id: "", command: "", args: "", url: "", headers: "" });
+    setView("list");
     await refresh();
   };
 
@@ -65,14 +79,12 @@ export function Mcp() {
     await refresh();
   };
 
-  // 启用/禁用服务器（enabled 翻转）：写回后端 → 下次会话重建工具集时生效。
-  const toggleEnabled = async (s: McpServerConfig) => {
+  const toggleEnabled = async (s: McpServerConfig, e: React.MouseEvent) => {
+    e.stopPropagation();
     await getClient().upsertMcpServer({ ...s, enabled: s.enabled === false });
-    setNote(`已${s.enabled === false ? "启用" : "禁用"} ${s.displayName || s.id}`);
     await refresh();
   };
 
-  // 导入标准 mcpServers JSON（Claude/Cursor 通用格式）。
   const importJson = async () => {
     let parsed: { mcpServers?: Record<string, Record<string, unknown>> };
     try {
@@ -120,53 +132,31 @@ export function Mcp() {
     }
     setNote(`已导入 ${n} 个 MCP 服务器`);
     setImportText("");
+    setView("list");
     await refresh();
   };
 
-  const probe = async (cfg: McpServerConfig) => {
-    setProbing(cfg.id);
-    try {
-      const r = await getClient().probeMcpServer(cfg);
-      setProbeResult((m) => ({ ...m, [cfg.id]: r }));
-    } catch (e) {
-      setProbeResult((m) => ({ ...m, [cfg.id]: { ok: false, toolCount: 0, error: e instanceof Error ? e.message : String(e) } }));
-    } finally {
-      setProbing(null);
-    }
-  };
-
-  return (
-    <div className="page">
-      <div className="page-head">
-        <span className="ico">
-          <WrenchIcon size={20} />
-        </span>
-        <div>
-          <h2>MCP 服务器</h2>
-          <p className="lead">接入 Model Context Protocol 工具（stdio 本地命令 / HTTP）。工具以 mcp__&lt;server&gt;__&lt;tool&gt; 暴露给模型。</p>
-        </div>
-      </div>
-      {note && <div className="note">{note}</div>}
-
-      <section>
-        <div className="sec-head">
-          <span className="ico violet">
-            <WrenchIcon size={18} />
-          </span>
-          <div>
-            <h3>添加服务器</h3>
-            <p className="hint">stdio 默认禁用，需设置环境变量 EW_ALLOW_STDIO_MCP=1 后启用。</p>
-          </div>
-        </div>
-        <div className="seg">
-          <button className={kind === "stdio" ? "on" : ""} onClick={() => setKind("stdio")}>
-            stdio（本地命令）
+  // 添加 / 导入 子视图。
+  if (view === "add") {
+    return (
+      <div className="page mcp-page">
+        <div className="skill-detail-head">
+          <button className="files-back" onClick={() => setView("list")}>
+            <ArrowLeftIcon size={15} /> 返回
           </button>
+          <span className="skill-detail-name">添加 MCP 服务器</span>
+        </div>
+        {note && <div className="note">{note}</div>}
+
+        <div className="seg" style={{ marginBottom: 10 }}>
           <button className={kind === "http" ? "on" : ""} onClick={() => setKind("http")}>
             HTTP
           </button>
+          <button className={kind === "stdio" ? "on" : ""} onClick={() => setKind("stdio")}>
+            stdio（本地命令）
+          </button>
         </div>
-        <div className="form" style={{ marginTop: 10 }}>
+        <div className="form">
           <input placeholder="id（如 filesystem）" value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} />
           {kind === "stdio" ? (
             <>
@@ -174,7 +164,7 @@ export function Mcp() {
               <input placeholder="args（空格分隔）" value={form.args} onChange={(e) => setForm({ ...form, args: e.target.value })} />
             </>
           ) : (
-            <input placeholder="URL（https://…/mcp）" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+            <input placeholder="URL（https://…/mcp 或 /sse）" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
           )}
           <button onClick={() => void add()}>添加</button>
         </div>
@@ -187,18 +177,9 @@ export function Mcp() {
             onChange={(e) => setForm({ ...form, headers: e.target.value })}
           />
         )}
-      </section>
+        <p className="hint" style={{ marginTop: 6 }}>stdio 默认禁用，需设 EW_ALLOW_STDIO_MCP=1 后启用。</p>
 
-      <section>
-        <div className="sec-head">
-          <span className="ico violet">
-            <WrenchIcon size={18} />
-          </span>
-          <div>
-            <h3>导入 mcpServers JSON</h3>
-            <p className="hint">粘贴 Claude / Cursor 通用的 {`{ "mcpServers": { … } }`} 配置，批量导入。</p>
-          </div>
-        </div>
+        <h3 style={{ fontSize: 13, margin: "22px 0 8px" }}>或粘贴 mcpServers JSON 批量导入</h3>
         <textarea
           placeholder={'{\n  "mcpServers": {\n    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"] },\n    "remote": { "url": "https://example.com/mcp" }\n  }\n}'}
           rows={6}
@@ -209,70 +190,73 @@ export function Mcp() {
         <button className="btn" style={{ marginTop: 8 }} onClick={() => void importJson()} disabled={!importText.trim()}>
           导入
         </button>
-      </section>
+      </div>
+    );
+  }
 
-      <section>
-        <div className="sec-head">
-          <span className="ico blue">
-            <WrenchIcon size={18} />
-          </span>
-          <div>
-            <h3>已配置（{servers.length}）</h3>
-          </div>
+  return (
+    <div className="page mcp-page">
+      <div className="skills-head">
+        <p className="skills-lead">接入 Model Context Protocol 工具服务器（stdio / HTTP），以 mcp__&lt;server&gt;__&lt;tool&gt; 暴露给模型。</p>
+        <span className="bar-spacer" />
+        <button className="set-add" onClick={() => setView("add")}>
+          <PlusIcon size={14} /> 添加服务器
+        </button>
+      </div>
+      {note && <div className="note">{note}</div>}
+
+      {servers.length === 0 ? (
+        <div className="empty-models">
+          <p>还没有 MCP 服务器</p>
+          <span>点右上「添加服务器」配置 stdio / HTTP，或粘贴 mcpServers JSON 批量导入。</span>
         </div>
-        {servers.length === 0 && (
-          <div className="empty-models">
-            <WrenchIcon size={26} />
-            <p>还没有 MCP 服务器</p>
-            <span>用上方表单添加 stdio / HTTP 服务器，或粘贴 mcpServers JSON 批量导入。</span>
-          </div>
-        )}
-        <div className="set-list">
+      ) : (
+        <div className="mcp-list">
           {servers.map((s) => {
-            const pr = probeResult[s.id];
+            const pr = probe[s.id];
+            const busy = pr === "busy";
+            const res = pr && pr !== "busy" ? pr : null;
+            const ok = !!res?.ok;
+            const err = !!res && !res.ok;
             const on = s.enabled !== false;
             const detail =
-              s.transport.kind === "stdio"
-                ? `${s.transport.command} ${s.transport.args.join(" ")}`
-                : s.transport.url;
+              s.transport.kind === "stdio" ? `${s.transport.command} ${s.transport.args.join(" ")}` : s.transport.url;
+            const status = busy ? "连接中…" : ok ? "已连接" : err ? "连接失败" : "未探测";
             return (
-              <div key={s.id} className="set-row">
-                <span className="set-row-ico">
-                  <WrenchIcon size={16} />
-                </span>
-                <div className="set-row-body">
-                  <div className="set-row-name">
+              <div key={s.id} className="mcp-card">
+                <span className={`mcp-dot ${ok ? "ok" : err ? "err" : "busy"}`} />
+                <div className="mcp-card-body">
+                  <div className="mcp-card-name">
                     <span className="mono">{s.displayName || s.id}</span>
-                    <span className="set-pill">{s.transport.kind}</span>
-                    {pr && (
-                      <span className={`mcp-probe ${pr.ok ? "ok" : "err"}`}>
-                        {pr.ok ? `${pr.toolCount} 工具` : pr.error ?? "连接失败"}
-                      </span>
-                    )}
+                    {ok && res && <span className="set-pill">{res.toolCount} 工具</span>}
+                    <span className="set-pill ghost">{s.transport.kind}</span>
                   </div>
-                  <div className="set-row-desc mono" title={detail}>
+                  <div className="mcp-card-detail mono" title={detail}>
                     {detail}
                   </div>
                 </div>
-                <button className="set-row-btn" title="测试连接" disabled={probing === s.id} onClick={() => void probe(s)}>
-                  <RefreshIcon size={14} className={probing === s.id ? "spin" : ""} />
+                <button className="mcp-icon-btn" title="重新探测" onClick={() => void probeOne(s)}>
+                  <RefreshIcon size={13} className={busy ? "spin" : ""} />
                 </button>
+                <button className="mcp-icon-btn danger" title="删除" onClick={() => void remove(s.id)}>
+                  <TrashIcon size={13} />
+                </button>
+                <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} title={err ? (res?.error ?? "") : ""}>
+                  {status}
+                </span>
                 <button
                   className={`set-toggle ${on ? "on" : ""}`}
                   title={on ? "已启用（点击禁用）" : "已禁用（点击启用）"}
                   aria-pressed={on}
-                  onClick={() => void toggleEnabled(s)}
+                  onClick={(e) => void toggleEnabled(s, e)}
                 >
                   <span />
-                </button>
-                <button className="set-row-btn danger" title="删除" onClick={() => void remove(s.id)}>
-                  <TrashIcon size={14} />
                 </button>
               </div>
             );
           })}
         </div>
-      </section>
+      )}
     </div>
   );
 }

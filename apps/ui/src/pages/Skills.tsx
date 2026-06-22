@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Skill } from "@ew/shared";
 import { getClient } from "../lib/client.js";
 import { loadDisabledSkills, saveDisabledSkills } from "../lib/prefs.js";
-import { SparkIcon, FolderIcon, PlusIcon } from "../icons.js";
+import { SparkIcon, FolderIcon, PlusIcon, ArrowLeftIcon } from "../icons.js";
 
 export function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -10,6 +10,7 @@ export function Skills() {
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState("");
   const [disabled, setDisabled] = useState<string[]>(() => loadDisabledSkills());
+  const [detail, setDetail] = useState<{ skill: Skill; body: string | null } | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -48,7 +49,8 @@ export function Skills() {
     }
   };
 
-  const toggle = (name: string) => {
+  const toggle = (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     setDisabled((cur) => {
       const next = cur.includes(name) ? cur.filter((n) => n !== name) : [...cur, name];
       saveDisabledSkills(next);
@@ -56,21 +58,48 @@ export function Skills() {
     });
   };
 
-  return (
-    <div className="page">
-      <div className="set-head">
-        <div>
-          <h3>Skills</h3>
-          <p>放入技能目录的 SKILL.md 自动发现；关掉的技能不再提供给模型（新会话生效）。</p>
-        </div>
-        <div style={{ display: "flex", gap: 8, flex: "none" }}>
+  const openDetail = async (s: Skill) => {
+    setDetail({ skill: s, body: null });
+    try {
+      const r = await getClient().skillBody(s.id);
+      setDetail({ skill: s, body: r.body });
+    } catch {
+      setDetail({ skill: s, body: "（无法读取 SKILL.md）" });
+    }
+  };
+
+  // 详情：SKILL.md 正文。
+  if (detail) {
+    const fm = detail.skill.frontmatter;
+    return (
+      <div className="page skills-page">
+        <div className="skill-detail-head">
+          <button className="files-back" onClick={() => setDetail(null)}>
+            <ArrowLeftIcon size={15} /> 返回
+          </button>
+          <span className="skill-detail-name">{fm.name}</span>
+          <span className="bar-spacer" />
           <button className="set-add" onClick={() => void openDir()}>
             <FolderIcon size={14} /> 打开目录
           </button>
-          <button className="set-add" onClick={() => void newTemplate()}>
-            <PlusIcon size={14} /> 新建 SKILL.md
-          </button>
         </div>
+        {fm.description && <p className="skill-detail-desc">{fm.description}</p>}
+        <pre className="skill-detail-body">{detail.body ?? "加载中…"}</pre>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page skills-page">
+      <div className="skills-head">
+        <p className="skills-lead">任务中 Agent 可调用的能力（来自技能目录的 SKILL.md，点卡片查看详情）。</p>
+        <span className="bar-spacer" />
+        <button className="set-add" onClick={() => void openDir()}>
+          <FolderIcon size={14} /> 打开目录
+        </button>
+        <button className="set-add" onClick={() => void newTemplate()}>
+          <PlusIcon size={14} /> 新建技能
+        </button>
       </div>
       {note && <div className="note">{note}</div>}
 
@@ -82,22 +111,22 @@ export function Skills() {
         </div>
       )}
 
-      <div className="set-list">
+      <div className="skill-list">
         {skills.map((s) => {
           const name = s.frontmatter.name;
           const on = !disabled.includes(name);
           return (
-            <div key={s.id} className="set-row">
-              <span className="set-row-ico">
-                <SparkIcon size={17} />
+            <div key={s.id} className="skill-card" onClick={() => void openDetail(s)}>
+              <span className="skill-ico">
+                <SparkIcon size={18} />
               </span>
-              <div className="set-row-body">
-                <div className="set-row-name">
+              <div className="skill-body">
+                <div className="skill-name">
                   {name}
                   {s.frontmatter.version && <span className="set-pill">v{s.frontmatter.version}</span>}
                   {s.scripts.length > 0 && <span className="set-pill">{s.scripts.length} 脚本</span>}
                 </div>
-                <div className="set-row-desc" title={s.frontmatter.description || s.frontmatter.whenToUse}>
+                <div className="skill-desc">
                   {s.frontmatter.description || s.frontmatter.whenToUse || "（无描述）"}
                 </div>
               </div>
@@ -105,7 +134,7 @@ export function Skills() {
                 className={`set-toggle ${on ? "on" : ""}`}
                 title={on ? "已启用（点击关闭）" : "已关闭（点击启用）"}
                 aria-pressed={on}
-                onClick={() => toggle(name)}
+                onClick={(e) => toggle(name, e)}
               >
                 <span />
               </button>

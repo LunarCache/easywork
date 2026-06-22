@@ -24,6 +24,7 @@ export {
   Mic as MicIcon,
   Plus as PlusBtnIcon,
   Database as KbIcon,
+  BookOpen as BookIcon,
   FileText as FileIcon,
   UploadCloud as UploadIcon,
   Loader as LoaderIcon,

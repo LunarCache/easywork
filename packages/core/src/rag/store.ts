@@ -173,6 +173,27 @@ export class KnowledgeBaseStore {
     return rows.map((r) => ({ kbId: r.kb_id, docs: r.docs, chunks: r.chunks }));
   }
 
+  /** 取某文档的正文（按 chunk_index 拼接全部分块）+ 元数据，供 UI 预览。无则 null。 */
+  docContent(
+    docId: string,
+  ): { id: string; kbId: string; source: string; createdAt: string; chunks: number; text: string } | null {
+    const doc = this.db.prepare(`SELECT id, kb_id, source, created_at FROM kb_docs WHERE id = ?`).get(docId) as
+      | { id: string; kb_id: string; source: string; created_at: string }
+      | undefined;
+    if (!doc) return null;
+    const rows = this.db
+      .prepare(`SELECT text FROM kb_chunks WHERE doc_id = ? ORDER BY chunk_index`)
+      .all(docId) as unknown as { text: string }[];
+    return {
+      id: doc.id,
+      kbId: doc.kb_id,
+      source: doc.source,
+      createdAt: doc.created_at,
+      chunks: rows.length,
+      text: rows.map((r) => r.text).join("\n\n"),
+    };
+  }
+
   deleteDoc(docId: string): void {
     if (this.vec) {
       const rows = this.db

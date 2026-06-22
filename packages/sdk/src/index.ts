@@ -495,6 +495,11 @@ export class EasyWorkClient {
     return this.getJSON<{ skills: Skill[]; dir: string }>("/skills");
   }
 
+  /** 读取某技能的 SKILL.md 正文（详情查看）。 */
+  async skillBody(id: string): Promise<{ body: string; bodyPath: string }> {
+    return this.getJSON(`/skills/${encodeURIComponent(id)}/body`);
+  }
+
   /** 在系统文件管理器打开技能目录。 */
   async openSkillsDir(): Promise<{ ok: boolean; dir: string }> {
     return this.postJSON("/skills/open", {});
@@ -523,6 +528,11 @@ export class EasyWorkClient {
 
   async probeMcpServer(config: McpServerConfig): Promise<{ ok: boolean; toolCount: number; error?: string }> {
     return this.postJSON("/mcp/probe", config);
+  }
+
+  /** 手动写入一条记忆（教 Agent 记住）。layer 决定归类。 */
+  async writeMemory(input: { scope?: string; layer: string; text: string; sessionId?: string }): Promise<void> {
+    await this.postJSON("/memory", input);
   }
 
   async editMemory(id: string, text: string): Promise<void> {
@@ -594,6 +604,13 @@ export class EasyWorkClient {
     }[];
   }> {
     return this.getJSON("/kb/jobs");
+  }
+
+  /** 单文档正文（拼接全部分块）+ 元数据，供预览。 */
+  async kbDocContent(
+    id: string,
+  ): Promise<{ doc: { id: string; kbId: string; source: string; createdAt: string; chunks: number; text: string } }> {
+    return this.getJSON(`/kb/docs/${encodeURIComponent(id)}`);
   }
 
   async kbDeleteDoc(id: string): Promise<void> {

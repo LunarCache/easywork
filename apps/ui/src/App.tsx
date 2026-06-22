@@ -7,14 +7,19 @@ import { Chat } from "./pages/Chat.js";
 import { Workspace } from "./pages/Workspace.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { Titlebar } from "./components/Titlebar.js";
-import { IconRail, type Mode } from "./components/IconRail.js";
+import { IconRail, type Mode, type Tool } from "./components/IconRail.js";
 import { SessionList } from "./components/SessionList.js";
-import { SettingsOverlay, type SettingsTab } from "./components/SettingsOverlay.js";
+import { PageOverlay } from "./components/PageOverlay.js";
+import { KnowledgeBaseOverlay } from "./components/KnowledgeBaseOverlay.js";
 import { MemoryOverlay } from "./components/MemoryOverlay.js";
+import { Models } from "./pages/Models.js";
+import { Skills } from "./pages/Skills.js";
+import { Mcp } from "./pages/Mcp.js";
+import { Settings } from "./pages/Settings.js";
 import { FolderTreeIcon, InboxIcon } from "./icons.js";
 
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
-type Overlay = null | "settings" | "memory";
+type Overlay = null | Tool | "settings";
 interface ThreadItem {
   id: string;
   title: string;
@@ -31,7 +36,6 @@ const loadSessionWidth = (): number => {
 export function App() {
   const [mode, setMode] = useState<Mode>("chat");
   const [overlay, setOverlay] = useState<Overlay>(null);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("models");
   const [models, setModels] = useState<string[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
 
@@ -228,8 +232,7 @@ export function App() {
         <IconRail
           mode={mode}
           setMode={changeMode}
-          onMemory={() => setOverlay("memory")}
-          onSettings={() => setOverlay("settings")}
+          onOpen={(t) => setOverlay(t)}
           status={status}
           statusText={statusText}
         />
@@ -293,17 +296,28 @@ export function App() {
         </main>
       </div>
 
-      {overlay === "settings" && (
-        <SettingsOverlay
-          tab={settingsTab}
-          setTab={setSettingsTab}
-          onClose={() => setOverlay(null)}
-          onModelsChange={check}
-          theme={theme}
-          onThemeChange={changeTheme}
-        />
+      {overlay === "models" && (
+        <PageOverlay title="模型" onClose={() => setOverlay(null)}>
+          <Models onChange={check} />
+        </PageOverlay>
+      )}
+      {overlay === "kb" && <KnowledgeBaseOverlay onClose={() => setOverlay(null)} />}
+      {overlay === "skills" && (
+        <PageOverlay title="Skills" onClose={() => setOverlay(null)}>
+          <Skills />
+        </PageOverlay>
+      )}
+      {overlay === "mcp" && (
+        <PageOverlay title="MCP" onClose={() => setOverlay(null)}>
+          <Mcp />
+        </PageOverlay>
       )}
       {overlay === "memory" && <MemoryOverlay onClose={() => setOverlay(null)} />}
+      {overlay === "settings" && (
+        <PageOverlay title="设置" onClose={() => setOverlay(null)}>
+          <Settings theme={theme} onThemeChange={changeTheme} />
+        </PageOverlay>
+      )}
     </div>
   );
 }

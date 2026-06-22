@@ -712,6 +712,12 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     const kbId = (req.query as { kbId?: string }).kbId;
     return { docs: kb.listDocs(kbId), chunks: kb.count(kbId) };
   });
+  // 单文档正文（按 chunk 拼接）+ 元数据，供 UI 预览。
+  app.get("/kb/docs/:id", async (req, reply) => {
+    const doc = kb.docContent((req.params as { id: string }).id);
+    if (!doc) return reply.code(404).send({ error: "not_found" });
+    return { doc };
+  });
   app.post("/kb/docs", async (req, reply) => {
     const parsed = KbIngestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -789,6 +795,18 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   app.get("/skills", async () => {
     await skills.discover().catch(() => {});
     return { skills: skills.list(), dir: skillsDir };
+  });
+  // 读取某技能的 SKILL.md 正文（懒加载；用于详情查看）。
+  app.get("/skills/:id/body", async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const skill = skills.list().find((s) => s.id === id);
+    if (!skill) return reply.code(404).send({ error: "not_found" });
+    try {
+      const body = fs.readFileSync(skill.bodyPath, "utf8");
+      return { body, bodyPath: skill.bodyPath };
+    } catch (e) {
+      return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
+    }
   });
   // 在系统文件管理器中打开技能目录（本机桌面用）。
   app.post("/skills/open", async (_req, reply) => {
