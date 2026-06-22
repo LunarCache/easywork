@@ -19,8 +19,8 @@ const SENTINEL = "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2";
 
 const run = (cmd, opts = {}) => execSync(cmd, { stdio: "inherit", cwd: root, ...opts });
 
-console.log("① 构建 @ew/core（被内联）");
-run("npm run build --workspace @ew/core");
+console.log("① 构建全部 @ew/* 包（SEA bundle 全内联，需各包 dist 存在；turbo 按依赖图构建）");
+run("npm run build");
 
 console.log("② tsup 全内联 CJS bundle");
 run("npx tsup --config tsup.sea.config.ts", { cwd: path.join(root, "apps/daemon") });

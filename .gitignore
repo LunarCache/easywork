@@ -22,7 +22,8 @@ release/
 .env
 .env.*
 !.env.example
-models/
+# 仅忽略 repo 根的模型数据目录（早前 `models/` 误伤了源码 packages/core/src/models/，致其漏入库）。
+/models/
 *.gguf
 
 # Reference repo (Unsloth, 仅作思路借鉴，不纳入本仓库)
