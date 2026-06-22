@@ -76,8 +76,8 @@ node scripts/smoke-local.mjs    # 下小模型 + 本地文本推理
 node scripts/smoke-vision.mjs   # 视觉模型多模态问答
 ```
 
-## 参考文件（只读，勿改这些目录）
+## 参考文件（只读，勿改）
 
-- `~/workspace/github/pi/packages/coding-agent/src/{core,index.ts}` — pi 内核源码（`createAgentSession`、`AgentSession`、tools、extensions、auth-storage、model-registry），agent 内核的真相源。
-- pi 类型在 `node_modules/@earendil-works/{pi-coding-agent,pi-agent-core,pi-ai}/dist/*.d.ts`（写宿主代码时核对事件/工具/Model 形状）。
+- **pi 内核 API（可移植真相源）**：类型在 `node_modules/@earendil-works/{pi-coding-agent,pi-agent-core,pi-ai}/dist/*.d.ts` —— 写宿主代码时核对 `createAgentSession` / `AgentSession` / 事件 / 工具 / Model / extensions / auth-storage / model-registry 的形状。
+  > 若本机另有 pi 源码 clone（路径因机器而异，自行定位），可读其 `packages/coding-agent/src/{core,index.ts}` 看实现；无则以上面 `node_modules` 的 `.d.ts` 为准。
 - `unsloth/` / Hermes — 早期借鉴的能力**思路**（记忆分层、RAG、混合召回）；agent loop/tool_healing 已被 pi 取代，**勿再移植**。
