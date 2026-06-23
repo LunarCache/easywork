@@ -94,11 +94,11 @@ export function Skills() {
       <div className="skills-head">
         <p className="skills-lead">任务中 Agent 可调用的能力（来自技能目录的 SKILL.md，点卡片查看详情）。</p>
         <span className="bar-spacer" />
-        <button className="set-add" onClick={() => void openDir()}>
-          <FolderIcon size={14} /> 打开目录
+        <button className="set-add icon" title="打开技能目录" onClick={() => void openDir()}>
+          <FolderIcon size={16} />
         </button>
-        <button className="set-add" onClick={() => void newTemplate()}>
-          <PlusIcon size={14} /> 新建技能
+        <button className="set-add icon" title="新建技能" onClick={() => void newTemplate()}>
+          <PlusIcon size={16} />
         </button>
       </div>
       {note && <div className="note">{note}</div>}

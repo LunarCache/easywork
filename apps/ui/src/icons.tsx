@@ -16,6 +16,7 @@ export {
   Copy as CopyIcon,
   SquarePen as NewChatIcon,
   PanelLeft as PanelIcon,
+  PanelRight as PanelRightIcon,
   Lightbulb as ThinkIcon,
   Globe as GlobeIcon,
   Code2 as CodeIcon,

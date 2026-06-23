@@ -360,12 +360,12 @@ export function Models({ onChange }: { onChange: () => void }) {
         </div>
         <span className="bar-spacer" />
         {tab === "local" ? (
-          <button className="set-add" onClick={() => setView("search")}>
-            <SearchIcon size={14} /> 下载模型
+          <button className="set-add icon" title="下载模型" onClick={() => setView("search")}>
+            <SearchIcon size={16} />
           </button>
         ) : (
-          <button className="set-add" onClick={() => setView("add-provider")}>
-            <PlusIcon size={14} /> 添加 Provider
+          <button className="set-add icon" title="添加 Provider" onClick={() => setView("add-provider")}>
+            <PlusIcon size={16} />
           </button>
         )}
       </div>

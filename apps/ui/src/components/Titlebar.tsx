@@ -1,5 +1,5 @@
 import type { ThemePrefs, Accent, Appearance } from "../lib/prefs.js";
-import { GearIcon, SunIcon, MoonIcon, MonitorIcon, DensityIcon, GitBranchIcon } from "../icons.js";
+import { GearIcon, SunIcon, MoonIcon, MonitorIcon, GitBranchIcon } from "../icons.js";
 
 const ACCENTS: { id: Accent; label: string; color: string }[] = [
   { id: "iris", label: "靛蓝", color: "#5256E0" },
@@ -24,7 +24,7 @@ export function Titlebar({
 }) {
   const AppIcon = APPEARANCE_ICON[theme.appearance];
   return (
-    <div className="ad-titlebar">
+    <div className="ad-titlebar" data-tauri-drag-region>
       <span className="ad-tb-brand">
         Easy<b>Work</b>
       </span>
@@ -47,13 +47,6 @@ export function Titlebar({
         ))}
       </div>
       <span className="ad-tb-sep" />
-      <button
-        className="ad-tb-btn"
-        title={`密度：${theme.density === "compact" ? "紧凑" : "舒适"}`}
-        onClick={() => onThemeChange({ ...theme, density: theme.density === "compact" ? "comfortable" : "compact" })}
-      >
-        <DensityIcon size={15} />
-      </button>
       <button
         className="ad-tb-btn"
         title={`主题：${theme.appearance === "light" ? "浅色" : theme.appearance === "dark" ? "深色" : "跟随系统"}`}

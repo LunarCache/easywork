@@ -7,7 +7,6 @@ import {
   type AgentPrefs,
   type Appearance,
   type Accent,
-  type Density,
   type ThemePrefs,
 } from "../lib/prefs.js";
 import { SlidersIcon, BrainIcon, GlobeIcon, SunIcon, MoonIcon, MonitorIcon, PaletteIcon, AlertIcon } from "../icons.js";
@@ -21,10 +20,6 @@ const ACCENTS: { id: Accent; label: string; color: string }[] = [
   { id: "iris", label: "靛蓝", color: "#5256E0" },
   { id: "teal", label: "青绿", color: "#0F857A" },
   { id: "amber", label: "琥珀", color: "#B5640A" },
-];
-const DENSITIES: { id: Density; label: string }[] = [
-  { id: "compact", label: "紧凑" },
-  { id: "comfortable", label: "舒适" },
 ];
 /** 生成一个随机 api-key（暴露 0.0.0.0 时用）。 */
 function genApiKey(): string {
@@ -99,7 +94,6 @@ export function Settings({
         </span>
         <div>
           <h2>设置</h2>
-          <p className="lead">外观、Agent 循环与本地网络。云端 API 已移到「模型」页；知识库 / Skills / MCP / 记忆 各成独立页面。</p>
         </div>
       </div>
       {note && <div className="note">{note}</div>}
@@ -111,7 +105,6 @@ export function Settings({
           </span>
           <div>
             <h3>外观</h3>
-            <p className="hint">明暗模式 · 主题色 · 密度（仅影响本机界面，立即生效）</p>
           </div>
         </div>
         <div className="appearance-row">
@@ -145,20 +138,6 @@ export function Settings({
               ))}
             </div>
           </div>
-          <div className="appearance-block">
-            <span>密度</span>
-            <div className="seg">
-              {DENSITIES.map(({ id, label }) => (
-                <button
-                  key={id}
-                  className={theme.density === id ? "on" : ""}
-                  onClick={() => onThemeChange({ ...theme, density: id })}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </section>
 
@@ -169,7 +148,6 @@ export function Settings({
           </span>
           <div>
             <h3>Agent 循环</h3>
-            <p className="hint">工具调用循环的安全上限。（采样参数在聊天界面按模型设置）</p>
           </div>
         </div>
         <div className="params-grid">
@@ -186,8 +164,7 @@ export function Settings({
             <GlobeIcon size={18} />
           </span>
           <div>
-            <h3>本地网络（暴露 llama-server）</h3>
-            <p className="hint">本地模型经 /v1 由本进程提供；也可让 llama-server 端口被本机/局域网其他服务直接调用。</p>
+            <h3>本地网络</h3>
           </div>
         </div>
         <div className="seg">

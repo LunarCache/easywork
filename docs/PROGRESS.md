@@ -32,6 +32,14 @@
 
 ## 里程碑日志
 
+## 2026-06-23 — 桌面窗口外观（macOS Overlay）+ 知识库集合 + UI 一致性收口
+
+- **窗口系统按钮内嵌**：桌面端改用 Tauri `titleBarStyle: Overlay` + `hiddenTitle` + `trafficLightPosition`，macOS 原生红绿灯交通灯直接嵌进应用标题栏（与 EasyWork 字标垂直对齐 y=20），不再外包一层系统标题栏；`.is-desktop` 给标题栏留 88px 左内边距避让交通灯。
+- **知识库新建集合**：知识库浮层「集合」标题栏加「+ 新建集合」入口（本地暂存空集合，上传第一篇文档后由后端 `kbList` 接管）；上传按钮 title 标明目标集合，消除「文件进了哪个分类」歧义。
+- **UI 一致性收口**：Models / Skills / MCP 三页头部动作按钮统一为**图标 + tooltip**（打开目录 / 新建 / 下载模型 / 添加 Provider / 添加服务器）；浮层统一收窄 700px、按内容自适应高度；工作台坞图标换 PanelRight。
+- **设置精简**：移除已失效的密度调节（紧凑/舒适）+ 各分区冗余说明文字，外观区改单列，减少空白。
+- 自绘 `ModelSelect` 下拉替换原生 `<select>`（承接续5）。UI build 绿、lint 0 error。
+
 ## 2026-06-22（续5）— 本地推理完整迁移到 llama.cpp Router 模式（统一三端 = llama.app 的 `llama`）
 
 把本地推理从「每模型一个 `llama serve -m` 进程 + 自研路由/LRU」**完整迁移**到 llama.cpp 的 router 模式（先查官方文档 + 本机实测确认能力，再分 10 步落地）。决策：① 完全弃用经典 `llama-server`/brew llama.cpp，三端统一 llama.app 的 `llama`；② 嵌入模型保持独立专用进程。

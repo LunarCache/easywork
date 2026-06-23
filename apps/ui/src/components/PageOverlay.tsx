@@ -13,7 +13,7 @@ export function PageOverlay({
 }) {
   return (
     <div className="ad-overlay" onClick={onClose}>
-      <div className="ad-overlay-card" onClick={(e) => e.stopPropagation()}>
+      <div className="ad-overlay-card pg-overlay" onClick={(e) => e.stopPropagation()}>
         <div className="ad-ov-head">
           <span className="ad-ov-title">{title}</span>
           <span className="ad-spacer" />

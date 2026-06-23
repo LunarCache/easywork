@@ -199,8 +199,8 @@ export function Mcp() {
       <div className="skills-head">
         <p className="skills-lead">接入 Model Context Protocol 工具服务器（stdio / HTTP），以 mcp__&lt;server&gt;__&lt;tool&gt; 暴露给模型。</p>
         <span className="bar-spacer" />
-        <button className="set-add" onClick={() => setView("add")}>
-          <PlusIcon size={14} /> 添加服务器
+        <button className="set-add icon" title="添加服务器" onClick={() => setView("add")}>
+          <PlusIcon size={16} />
         </button>
       </div>
       {note && <div className="note">{note}</div>}

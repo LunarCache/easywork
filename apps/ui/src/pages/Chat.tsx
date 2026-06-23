@@ -31,7 +31,7 @@ import {
   BrainIcon,
   ChevronIcon,
   CodeIcon,
-  FileCodeIcon,
+  PanelRightIcon,
   FileIcon,
   GlobeIcon,
   MicIcon,
@@ -415,7 +415,7 @@ export function Chat({
           onClick={() => setDockOpen((v) => !v)}
           title="工作台：文件 / 终端 / 预览"
         >
-          <FileCodeIcon size={14} /> 工作台
+          <PanelRightIcon size={14} /> 工作台
           {files.length > 0 && <span className="rev-count">{files.length}</span>}
         </button>
       </header>

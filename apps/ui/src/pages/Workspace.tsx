@@ -15,7 +15,7 @@ import {
   type StoredMsg,
   type UiMsg,
 } from "../lib/agent-stream.js";
-import { ArrowUpIcon, DiffIcon, GitBranchIcon, TerminalIcon, WrenchIcon } from "../icons.js";
+import { ArrowUpIcon, PanelRightIcon, GitBranchIcon, TerminalIcon, WrenchIcon } from "../icons.js";
 
 const APPROVAL_LABELS: Record<ApprovalMode, string> = {
   "read-only": "只读",
@@ -214,7 +214,7 @@ export function Workspace({
             onClick={() => setDockOpen((v) => !v)}
             title="工作台：改动 / 文件 / 终端 / 预览"
           >
-            <DiffIcon size={14} /> 工作台
+            <PanelRightIcon size={14} /> 工作台
             {git.files.length > 0 && <span className="rev-count">{git.files.length}</span>}
             {(totalAdds > 0 || totalDels > 0) && (
               <span className="ws-stat">

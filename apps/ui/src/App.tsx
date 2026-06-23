@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Project } from "@ew/shared";
 import { currentConfig, getClient, initRuntimeConfig } from "./lib/client.js";
 import { applyTheme, loadThemePrefs, saveThemePrefs, type ThemePrefs } from "./lib/prefs.js";
-import { pickWorkspaceDir } from "./lib/desktop.js";
+import { pickWorkspaceDir, isDesktop } from "./lib/desktop.js";
 import { Chat } from "./pages/Chat.js";
 import { Workspace } from "./pages/Workspace.js";
 import { FilesPage } from "./pages/FilesPage.js";
@@ -221,7 +221,7 @@ export function App() {
   const project = projects.find((p) => p.id === projectId);
 
   return (
-    <div className="ad-app">
+    <div className={`ad-app ${isDesktop() ? "is-desktop" : ""}`}>
       <Titlebar
         theme={theme}
         onThemeChange={changeTheme}

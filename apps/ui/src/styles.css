@@ -405,10 +405,12 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .ad-app { height: 100vh; width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg-primary); color: var(--text); }
 
 /* —— 标题栏 —— */
-.ad-titlebar { height: 40px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: var(--color-bg-secondary); border-bottom: 1px solid var(--border); }
+.ad-titlebar { height: 40px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: var(--color-bg-secondary); border-bottom: 1px solid var(--border); user-select: none; }
 .ad-tb-sep { width: 1px; height: 16px; background: var(--border); flex: none; }
 .ad-tb-brand { font-weight: 600; font-size: 13px; letter-spacing: -0.01em; }
 .ad-tb-brand b { color: var(--accent); }
+/* macOS titleBarStyle=Overlay：原生交通灯悬浮在左上 → 标题栏左侧让位（仅桌面）。 */
+.is-desktop .ad-titlebar { padding-left: 88px; }
 .ad-branch { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 11px; color: var(--text-2); background: var(--color-bg-tertiary); border: 1px solid var(--border); padding: 2px 7px; border-radius: 5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ad-branch svg { flex: none; }
 .ad-spacer { flex: 1; }
@@ -520,6 +522,8 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 /* —— 浮层（设置 / 记忆）—— */
 .ad-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(8, 9, 12, 0.55); display: flex; align-items: center; justify-content: center; padding: 24px; animation: fade 0.14s var(--ease); }
 .ad-overlay-card { width: 1000px; max-width: 94vw; height: 660px; max-height: 92vh; display: flex; flex-direction: column; background: var(--color-bg-secondary); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-lg); overflow: hidden; }
+/* PageOverlay（模型/Skills/MCP/设置）：收窄 + 按内容自适应高度，减少右侧/底部空白；超高则滚动。 */
+.ad-overlay-card.pg-overlay { width: 700px; height: auto; min-height: 300px; max-height: 88vh; }
 .ad-ov-head { height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--border); }
 .ad-ov-title { font-size: 14px; font-weight: 600; }
 .ad-ov-close { width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border); background: var(--color-bg-card); color: var(--text-2); display: flex; align-items: center; justify-content: center; cursor: pointer; }
@@ -532,7 +536,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .ad-ov-nav-btn.on { background: var(--accent-soft); color: var(--accent); }
 .ad-ov-content { flex: 1; min-width: 0; overflow-y: auto; background: var(--color-bg-primary); }
 /* 浮层内复用既有页面：取消页面自身滚动，由 .ad-ov-content 统一滚动。 */
-.ad-ov-content .page { overflow: visible; height: auto; padding: 22px 28px 40px; }
+.ad-ov-content .page { overflow: visible; height: auto; padding: 20px 28px 24px; }
 @keyframes fade { from { opacity: 0; } }
 
 /* —— 设置浮层内把复用页面收敛成 Agent Desk 设置面板观感 ——
@@ -541,7 +545,8 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .ad-ov-content .page-head .ico { display: none; }
 .ad-ov-content .page-head h2 { font-size: 15px; }
 .ad-ov-content .page-head .lead { font-size: 12px; color: var(--text-2); margin-top: 3px; }
-.ad-ov-content section { background: transparent; border: none; box-shadow: none; padding: 0; margin-bottom: 26px; max-width: none; }
+.ad-ov-content section { background: transparent; border: none; box-shadow: none; padding: 0; margin-bottom: 18px; max-width: none; }
+.ad-ov-content section:last-child { margin-bottom: 0; }
 .ad-ov-content .sec-head { gap: 0; margin-bottom: 12px; align-items: flex-start; }
 .ad-ov-content .sec-head .ico { display: none; }
 .ad-ov-content .sec-head h3 { font-size: 14px; }
@@ -575,7 +580,9 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .kb-ov-upload:hover { filter: brightness(1.06); }
 .kb-ov-body { flex: 1; display: flex; min-height: 0; }
 .kb-ov-colls { width: 210px; flex: none; padding: 14px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
-.kb-ov-colls-h { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); padding: 4px 10px 8px; }
+.kb-ov-colls-h { display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); padding: 4px 4px 8px 10px; }
+.kb-ov-coll-add { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: none; border-radius: 6px; background: transparent; color: var(--text-tertiary); cursor: pointer; }
+.kb-ov-coll-add:hover { background: var(--color-bg-tertiary); color: var(--text); }
 .kb-ov-coll { display: flex; align-items: center; gap: 8px; padding: 8px 11px; border: none; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 550; cursor: pointer; }
 .kb-ov-coll:hover { background: var(--color-bg-tertiary); color: var(--text); }
 .kb-ov-coll.on { background: var(--accent-soft); color: var(--accent); }
@@ -693,9 +700,11 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .set-add.primary { background: var(--accent); border-color: var(--accent); color: var(--color-text-inverse, #fff); }
 .set-add.primary:hover { background: var(--accent); filter: brightness(1.06); }
 .set-add:disabled { opacity: 0.55; cursor: default; }
-.set-add { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--color-bg-card); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 600; }
+.set-add { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--color-bg-card); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; flex: none; }
 .set-add:hover { background: var(--color-bg-tertiary); }
 .set-add svg { flex: none; }
+/* 纯图标变体（窄头部用）：正方形、图标居中、无文字。 */
+.set-add.icon { width: 30px; padding: 0; justify-content: center; }
 .set-pill { font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--text-2); background: var(--color-bg-tertiary); border: 1px solid var(--border); padding: 0 6px; border-radius: 5px; }
 /* 开关（toggle switch） */
 .set-toggle { width: 36px; height: 20px; border-radius: 20px; border: none; cursor: pointer; background: var(--border-strong); position: relative; flex: none; transition: background 0.15s var(--ease); padding: 0; }
@@ -930,7 +939,7 @@ details.toolcard[open] > summary .chev { transform: rotate(90deg); }
 /* ================================================================
    外观设置（明暗模式）
    ================================================================ */
-.appearance-row { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.appearance-row { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
 .appearance-block { display: flex; flex-direction: column; gap: 8px; }
 .appearance-block > span { font-size: 12px; color: var(--text-2); font-weight: 600; }
 .swatches { display: flex; gap: 10px; }

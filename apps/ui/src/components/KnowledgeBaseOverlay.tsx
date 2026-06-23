@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getClient } from "../lib/client.js";
-import { BookIcon, UploadIcon, TrashIcon, XIcon, LoaderIcon } from "../icons.js";
+import { BookIcon, UploadIcon, TrashIcon, XIcon, LoaderIcon, PlusIcon } from "../icons.js";
 
 interface KbDoc {
   id: string;
@@ -81,6 +81,8 @@ export function KnowledgeBaseOverlay({ onClose }: { onClose: () => void }) {
   const [content, setContent] = useState<DocContent | null>(null);
   const [jobs, setJobs] = useState<KbJob[]>([]);
   const [polling, setPolling] = useState(false);
+  // 本地新建但尚无文档的集合（上传第一篇文档后由后端 kbList 接管）。
+  const [extraKbs, setExtraKbs] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -153,7 +155,22 @@ export function KnowledgeBaseOverlay({ onClose }: { onClose: () => void }) {
     await refresh();
   };
 
+  const newColl = () => {
+    const name = window.prompt("新建集合名称（英文 / 数字 / 连字符）", "");
+    const id = name?.trim();
+    if (!id) return;
+    if (!kbs.some((k) => k.kbId === id)) setExtraKbs((cur) => (cur.includes(id) ? cur : [...cur, id]));
+    setActive(id);
+    setSel(null);
+    setContent(null);
+  };
+
   const activeJobs = jobs.filter((j) => ["queued", "parsing", "embedding"].includes(j.status));
+  // 合并后端集合 + 本地新建（尚无文档）的集合。
+  const allKbs = [
+    ...kbs,
+    ...extraKbs.filter((e) => !kbs.some((k) => k.kbId === e)).map((kbId) => ({ kbId, docs: 0, chunks: 0 })),
+  ];
 
   return (
     <div className="ad-overlay" onClick={onClose}>
@@ -167,7 +184,11 @@ export function KnowledgeBaseOverlay({ onClose }: { onClose: () => void }) {
             <span className="kb-ov-sub">{totalChunks} 片段已索引</span>
           </div>
           <span className="ad-spacer" />
-          <button className="kb-ov-upload" onClick={() => fileRef.current?.click()}>
+          <button
+            className="kb-ov-upload"
+            title={`上传到集合「${active ?? "default"}」`}
+            onClick={() => fileRef.current?.click()}
+          >
             <UploadIcon size={15} /> 上传
           </button>
           <button className="ad-ov-close" title="关闭" onClick={onClose}>
@@ -188,12 +209,17 @@ export function KnowledgeBaseOverlay({ onClose }: { onClose: () => void }) {
         <div className="kb-ov-body">
           {/* 集合导航 */}
           <div className="kb-ov-colls">
-            <div className="kb-ov-colls-h">集合</div>
+            <div className="kb-ov-colls-h">
+              <span>集合</span>
+              <button className="kb-ov-coll-add" title="新建集合" onClick={newColl}>
+                <PlusIcon size={14} />
+              </button>
+            </div>
             <button className={`kb-ov-coll ${!active ? "on" : ""}`} onClick={() => setActive(undefined)}>
               <span className="kb-ov-coll-name">全部文档</span>
               <span className="kb-ov-coll-n">{kbs.reduce((n, k) => n + k.docs, 0)}</span>
             </button>
-            {kbs.map((k) => (
+            {allKbs.map((k) => (
               <button
                 key={k.kbId}
                 className={`kb-ov-coll ${active === k.kbId ? "on" : ""}`}
