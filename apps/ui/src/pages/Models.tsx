@@ -75,6 +75,9 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [local, setLocal] = useState<LocalModel[]>([]);
   const [loaded, setLoaded] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  // 嵌入（向量记忆）模型独立进程，状态与 router 分离。
+  const [embed, setEmbed] = useState<{ ready: boolean; modelId?: string; dim: number } | null>(null);
+  const [embedBusy, setEmbedBusy] = useState(false);
 
   // 运行时
   const [runtime, setRuntime] = useState<{ found: boolean; path?: string; kind?: string; install: string } | null>(null);
@@ -87,9 +90,14 @@ export function Models({ onChange }: { onChange: () => void }) {
 
   const refreshLocal = useCallback(async () => {
     try {
-      const [models, info] = await Promise.all([getClient().localModels(), getClient().listModels()]);
+      const [models, info, emb] = await Promise.all([
+        getClient().localModels(),
+        getClient().listModels(),
+        getClient().embeddingStatus().catch(() => null),
+      ]);
       setLocal(models);
       setLoaded(info.routed);
+      setEmbed(emb);
     } catch {
       /* ignore */
     }
@@ -198,6 +206,21 @@ export function Models({ onChange }: { onChange: () => void }) {
       onChange();
     } finally {
       setBusy(null);
+    }
+  };
+  // 启用某个嵌入模型为向量记忆引擎（独立进程，不进 router）。
+  const enableEmbed = async (m: LocalModel) => {
+    setEmbedBusy(true);
+    setProgress(`启用向量记忆：${m.fileName}…（启动嵌入进程 + 重建索引）`);
+    try {
+      const r = await getClient().enableEmbedding({ modelPath: m.path });
+      setEmbed(r);
+      setProgress(`向量记忆已启用（${r.dim} 维，重建索引 ${r.reindexed} 条）`);
+      await refreshLocal();
+    } catch (e) {
+      setProgress(`启用失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setEmbedBusy(false);
     }
   };
 
@@ -396,9 +419,11 @@ export function Models({ onChange }: { onChange: () => void }) {
           ) : (
             <div className="mdl-list">
               {local.map((m) => {
-                const isLoaded = loaded.includes(m.routerId ?? m.path);
-                const isBusy = busy === m.path;
                 const kind = modelKind(m);
+                const isEmbed = kind === "embed";
+                const embedReady = isEmbed && !!embed?.ready && embed.modelId === m.path;
+                const isLoaded = isEmbed ? embedReady : loaded.includes(m.routerId ?? m.path);
+                const isBusy = busy === m.path;
                 const quant = quantOf(m);
                 return (
                   <div key={m.id} className="mdl-card">
@@ -424,7 +449,17 @@ export function Models({ onChange }: { onChange: () => void }) {
                         <span>{fmtSize(m.sizeBytes)}</span>
                       </div>
                     </div>
-                    {isLoaded ? (
+                    {isEmbed ? (
+                      embedReady ? (
+                        <button className="set-add" disabled title="向量记忆已启用">
+                          已启用
+                        </button>
+                      ) : (
+                        <button className="set-add primary" disabled={embedBusy} onClick={() => void enableEmbed(m)}>
+                          {embedBusy ? "启用中…" : "启用向量"}
+                        </button>
+                      )
+                    ) : isLoaded ? (
                       <button className="set-add" disabled={isBusy} onClick={() => void unload(m)}>
                         {isBusy ? "卸载中…" : "卸载"}
                       </button>

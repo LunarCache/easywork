@@ -9,7 +9,9 @@ import {
   type Accent,
   type ThemePrefs,
 } from "../lib/prefs.js";
-import { SlidersIcon, BrainIcon, GlobeIcon, SunIcon, MoonIcon, MonitorIcon, PaletteIcon, AlertIcon } from "../icons.js";
+import { SlidersIcon, BrainIcon, GlobeIcon, SunIcon, MoonIcon, MonitorIcon, PaletteIcon, AlertIcon, KbIcon } from "../icons.js";
+
+type EmbedStatus = { ready: boolean; modelId?: string; dim: number };
 
 const APPEARANCES: { id: Appearance; label: string; Icon: typeof SunIcon }[] = [
   { id: "light", label: "浅色", Icon: SunIcon },
@@ -38,6 +40,8 @@ export function Settings({
   const [net, setNet] = useState<LocalNetInfo | null>(null);
   const [netBusy, setNetBusy] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [embed, setEmbed] = useState<EmbedStatus | null>(null);
+  const [embedBusy, setEmbedBusy] = useState(false);
 
   const setAgentPref = (key: keyof AgentPrefs, raw: string) => {
     const v = raw.trim() === "" ? undefined : Number(raw);
@@ -53,7 +57,27 @@ export function Settings({
     } catch {
       /* ignore */
     }
+    try {
+      setEmbed(await getClient().embeddingStatus());
+    } catch {
+      /* ignore */
+    }
   }, []);
+
+  const enableEmbed = async () => {
+    if (embedBusy) return;
+    setEmbedBusy(true);
+    setNote("正在启用向量记忆：下载嵌入模型 + 重建索引，可能耗时…");
+    try {
+      const r = await getClient().enableEmbedding();
+      setEmbed(r);
+      setNote(`向量记忆已启用：${r.dim} 维（重建索引 ${r.reindexed} 条）`);
+    } catch (e) {
+      setNote(`启用失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setEmbedBusy(false);
+    }
+  };
 
   const changeBind = async (host: "127.0.0.1" | "0.0.0.0") => {
     if (netBusy || net?.bindHost === host) return;
@@ -156,6 +180,35 @@ export function Settings({
             <input type="number" step="1" min="1" max="100" placeholder="默认 25" value={agentPrefs.maxIterations ?? ""} onChange={(e) => setAgentPref("maxIterations", e.target.value)} />
           </label>
         </div>
+      </section>
+
+      <section>
+        <div className="sec-head">
+          <span className="ico violet">
+            <KbIcon size={18} />
+          </span>
+          <div>
+            <h3>向量记忆</h3>
+          </div>
+        </div>
+        {embed?.ready ? (
+          <div className="form-col">
+            <div className="sub">
+              <span className="mcp-dot ok" style={{ verticalAlign: "0px", marginRight: 6 }} />
+              已启用 · <code>{embed.modelId?.split("/").pop() ?? "嵌入模型"}</code> · {embed.dim} 维
+            </div>
+            <p className="hint">记忆与知识库走 sqlite-vec 语义 ⊕ 词法混合召回。可在「模型」页管理嵌入模型。</p>
+          </div>
+        ) : (
+          <div className="form-col">
+            <p className="hint">
+              未启用：记忆与知识库当前仅用词法（关键词）召回。启用将下载本地 CPU 嵌入模型（nomic-embed，约 80MB）并重建索引。
+            </p>
+            <button className="set-add primary" disabled={embedBusy} onClick={() => void enableEmbed()}>
+              {embedBusy ? "启用中…（下载 + 重建索引）" : "启用向量记忆"}
+            </button>
+          </div>
+        )}
       </section>
 
       <section>
