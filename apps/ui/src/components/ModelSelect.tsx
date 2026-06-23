@@ -7,10 +7,13 @@ export function ModelSelect({
   models,
   value,
   onChange,
+  up,
 }: {
   models: string[];
   value: string;
   onChange: (m: string) => void;
+  /** 弹出菜单向上展开（用于贴底的 composer）。 */
+  up?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const empty = models.length === 0;
@@ -30,7 +33,7 @@ export function ModelSelect({
       {open && !empty && (
         <>
           <div className="menu-backdrop" onClick={() => setOpen(false)} />
-          <div className="model-pop">
+          <div className={`model-pop ${up ? "up" : ""}`}>
             {models.map((m) => (
               <button
                 key={m}

@@ -1,62 +1,85 @@
-import type { ThemePrefs, Accent, Appearance } from "../lib/prefs.js";
-import { GearIcon, SunIcon, MoonIcon, MonitorIcon, GitBranchIcon } from "../icons.js";
+import {
+  PanelIcon,
+  PanelRightIcon,
+  PanelRightCloseIcon,
+  ArrowLeftIcon,
+  ChevronIcon,
+  FolderClosedIcon,
+  GitBranchIcon,
+} from "../icons.js";
 
-const ACCENTS: { id: Accent; label: string; color: string }[] = [
-  { id: "iris", label: "靛蓝", color: "#5256E0" },
-  { id: "teal", label: "青绿", color: "#0F857A" },
-  { id: "amber", label: "琥珀", color: "#B5640A" },
-];
-
-const APPEARANCE_ICON = { light: SunIcon, dark: MoonIcon, system: MonitorIcon } as const;
-const NEXT_APPEARANCE: Record<Appearance, Appearance> = { light: "dark", dark: "system", system: "light" };
-
-/** Agent Desk 顶部标题栏：交通灯点 + 品牌 + [work]分支 + accent 三点 + 密度/主题/设置。 */
+/**
+ * 顶部标题栏（dark-only · "Agent Tasks" 两段式，46px）：
+ * - 段 A：宽 = 实时侧栏宽（带 1px 右边框；侧栏收起→auto 无边框）；macOS 原生红绿灯让位 + 侧栏开关 / 后退 / 前进。
+ * - 段 B：面包屑（任务标题 + 工作区 pill + 分支 pill）+ 弹簧 + 工作台开关（动态图标，开/关不同）。
+ */
 export function Titlebar({
-  theme,
-  onThemeChange,
-  onOpenSettings,
+  sidebarOpen,
+  sidebarWidth,
+  onToggleSidebar,
+  taskTitle,
+  projectName,
   branch,
+  isDesktop,
+  showDock,
+  dockOpen,
+  onToggleDock,
 }: {
-  theme: ThemePrefs;
-  onThemeChange: (next: ThemePrefs) => void;
-  onOpenSettings: () => void;
+  sidebarOpen: boolean;
+  sidebarWidth: number;
+  onToggleSidebar: () => void;
+  taskTitle: string;
+  projectName?: string;
   branch?: string;
+  isDesktop: boolean;
+  showDock: boolean;
+  dockOpen: boolean;
+  onToggleDock: () => void;
 }) {
-  const AppIcon = APPEARANCE_ICON[theme.appearance];
   return (
     <div className="ad-titlebar" data-tauri-drag-region>
-      <span className="ad-tb-brand">
-        Easy<b>Work</b>
-      </span>
-      {branch && (
-        <span className="ad-branch" title={branch}>
-          <GitBranchIcon size={11} /> {branch}
-        </span>
-      )}
-      <span className="ad-spacer" />
-      <div className="ad-accents">
-        {ACCENTS.map((a) => (
-          <button
-            key={a.id}
-            className={`ad-acc-dot ${theme.accent === a.id ? "on" : ""}`}
-            style={{ background: a.color }}
-            title={a.label}
-            aria-label={a.label}
-            onClick={() => onThemeChange({ ...theme, accent: a.id })}
-          />
-        ))}
-      </div>
-      <span className="ad-tb-sep" />
-      <button
-        className="ad-tb-btn"
-        title={`主题：${theme.appearance === "light" ? "浅色" : theme.appearance === "dark" ? "深色" : "跟随系统"}`}
-        onClick={() => onThemeChange({ ...theme, appearance: NEXT_APPEARANCE[theme.appearance] })}
+      <div
+        className={`ad-tb-seg-a ${sidebarOpen ? "bordered" : ""} ${isDesktop ? "desktop" : ""}`}
+        style={sidebarOpen ? { width: sidebarWidth } : undefined}
       >
-        <AppIcon size={15} />
-      </button>
-      <button className="ad-tb-btn" title="设置" onClick={onOpenSettings}>
-        <GearIcon size={15} />
-      </button>
+        <button className="ad-tb-nav" title="折叠/展开侧栏" onClick={onToggleSidebar}>
+          <PanelIcon size={16} />
+        </button>
+        <button className="ad-tb-nav muted" title="后退" disabled>
+          <ArrowLeftIcon size={16} />
+        </button>
+        <button className="ad-tb-nav muted" title="前进" disabled>
+          <ChevronIcon size={16} />
+        </button>
+      </div>
+
+      <div className="ad-tb-seg-b">
+        <span className="ad-tb-task" title={taskTitle}>
+          {taskTitle || "新任务"}
+        </span>
+        {projectName && (
+          <span className="ad-tb-pill" title={projectName}>
+            <FolderClosedIcon size={13} />
+            <span className="mono">{projectName}</span>
+          </span>
+        )}
+        {branch && (
+          <span className="ad-tb-pill" title={branch}>
+            <GitBranchIcon size={13} />
+            <span className="mono">{branch}</span>
+          </span>
+        )}
+        <span className="ad-spacer" />
+        {showDock && (
+          <button
+            className={`ad-tb-dock ${dockOpen ? "on" : ""}`}
+            title={dockOpen ? "关闭工作台" : "打开工作台（文件 / 浏览器 / 终端）"}
+            onClick={onToggleDock}
+          >
+            {dockOpen ? <PanelRightCloseIcon size={17} /> : <PanelRightIcon size={17} />}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

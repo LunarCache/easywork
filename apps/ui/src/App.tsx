@@ -7,19 +7,14 @@ import { Chat } from "./pages/Chat.js";
 import { Workspace } from "./pages/Workspace.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { Titlebar } from "./components/Titlebar.js";
-import { IconRail, type Mode, type Tool } from "./components/IconRail.js";
-import { SessionList } from "./components/SessionList.js";
+import { Sidebar, type Mode } from "./components/Sidebar.js";
 import { PageOverlay } from "./components/PageOverlay.js";
-import { KnowledgeBaseOverlay } from "./components/KnowledgeBaseOverlay.js";
-import { MemoryOverlay } from "./components/MemoryOverlay.js";
-import { Models } from "./pages/Models.js";
-import { Skills } from "./pages/Skills.js";
-import { Mcp } from "./pages/Mcp.js";
+import { PluginsView } from "./pages/PluginsView.js";
 import { Settings } from "./pages/Settings.js";
 import { FolderTreeIcon, InboxIcon } from "./icons.js";
 
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
-type Overlay = null | Tool | "settings";
+type Overlay = "settings" | null;
 interface ThreadItem {
   id: string;
   title: string;
@@ -47,10 +42,13 @@ export function App() {
   const [workThreadId, setWorkThreadId] = useState<string>("");
   const [theme, setTheme] = useState<ThemePrefs>(loadThemePrefs);
   const [sessionWidth, setSessionWidth] = useState<number>(loadSessionWidth);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [dockOpen, setDockOpen] = useState(false);
+  const [workBranch, setWorkBranch] = useState<string | undefined>(undefined);
   // 点项目「查看文件」→ 主区切到该项目的文件浏览页（替代对话，左上角「返回任务」回退）。
   const [filesProjectId, setFilesProjectId] = useState<string | null>(null);
 
-  // 外观：应用到 <html>；系统模式下跟随系统明暗变化。
+  // 外观：应用到 <html>；跟随系统时监听 OS 明暗变化实时切换。
   useEffect(() => {
     applyTheme(theme);
     if (theme.appearance !== "system" || typeof matchMedia !== "function") return;
@@ -59,6 +57,12 @@ export function App() {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, [theme]);
+
+  // 切换模式 / 会话 / 工作区时收起工作台面板（dockOpen 是 App 级共享态，避免跨会话「带着」开着的面板）+ 清空分支（由新 Workspace 重新上报）。
+  useEffect(() => {
+    setDockOpen(false);
+    setWorkBranch(undefined);
+  }, [mode, threadId, workThreadId, projectId]);
 
   const changeTheme = useCallback((next: ThemePrefs) => {
     setTheme(next);
@@ -219,49 +223,73 @@ export function App() {
   };
 
   const project = projects.find((p) => p.id === projectId);
+  const activeId = mode === "work" ? workThreadId : threadId;
+  const activeTitle = threads.find((t) => t.id === activeId)?.title?.trim();
+  const taskTitle =
+    mode === "plugins"
+      ? "插件"
+      : mode === "inbox"
+        ? "收件箱"
+        : activeTitle || (mode === "work" ? project?.name ?? "新任务" : "新任务");
 
   return (
-    <div className={`ad-app ${isDesktop() ? "is-desktop" : ""}`}>
+    <div className={`ad-app ${isDesktop() ? "is-desktop" : ""} ${sidebarOpen ? "" : "side-collapsed"}`}>
       <Titlebar
-        theme={theme}
-        onThemeChange={changeTheme}
-        onOpenSettings={() => setOverlay("settings")}
-        {...(mode === "work" && project ? { branch: project.name } : {})}
+        sidebarOpen={sidebarOpen}
+        sidebarWidth={sessionWidth}
+        onToggleSidebar={() => setSidebarOpen((o) => !o)}
+        taskTitle={taskTitle}
+        isDesktop={isDesktop()}
+        showDock={mode === "chat" || mode === "work"}
+        dockOpen={dockOpen}
+        onToggleDock={() => setDockOpen((v) => !v)}
+        {...(mode === "work" && project ? { projectName: project.name } : {})}
+        {...(mode === "work" && workBranch ? { branch: workBranch } : {})}
       />
       <div className="ad-body">
-        <IconRail
-          mode={mode}
-          setMode={changeMode}
-          onOpen={(t) => setOverlay(t)}
-          status={status}
-          statusText={statusText}
-        />
-        <div className="ad-sessions-wrap" style={{ width: sessionWidth }}>
-          <SessionList
-            mode={mode}
-            threads={threads}
-            projects={projects}
-            threadId={threadId}
-            projectId={projectId}
-            workThreadId={workThreadId}
-            onNewChat={newChat}
-            onNewWorkspace={() => void newWorkspace()}
-            onSelectThread={selectThread}
-            onSelectProject={selectProject}
-            onSelectWorkThread={selectWorkThread}
-            onNewWorkThread={newWorkThread}
-            onDelThread={(id, e) => void delThread(id, e)}
-            onDelProject={(id, e) => void delProject(id, e)}
-            onOpenFiles={openProjectFiles}
-          />
-        </div>
-        <div className="ad-resizer" title="拖动调整宽度" onMouseDown={onResizeStart}>
-          <span />
-        </div>
+        {sidebarOpen && (
+          <>
+            <div className="ad-sessions-wrap" style={{ width: sessionWidth }}>
+              <Sidebar
+                threads={threads}
+                projects={projects}
+                mode={mode}
+                threadId={threadId}
+                projectId={projectId}
+                workThreadId={workThreadId}
+                status={status}
+                statusText={statusText}
+                onNewChat={newChat}
+                onNewWorkspace={() => void newWorkspace()}
+                onSelectThread={selectThread}
+                onSelectProject={selectProject}
+                onSelectWorkThread={selectWorkThread}
+                onNewWorkThread={newWorkThread}
+                onDelThread={(id, e) => void delThread(id, e)}
+                onDelProject={(id, e) => void delProject(id, e)}
+                onOpenFiles={openProjectFiles}
+                onOpenPlugins={() => changeMode("plugins")}
+                onOpenInbox={() => changeMode("inbox")}
+                onOpenSettings={() => setOverlay("settings")}
+              />
+            </div>
+            <div className="ad-resizer" title="拖动调整宽度" onMouseDown={onResizeStart}>
+              <span />
+            </div>
+          </>
+        )}
 
         <main className="ad-main">
           {mode === "chat" && (
-            <Chat key={threadId} models={models} contexts={contexts} threadId={threadId} onSaved={refreshThreads} />
+            <Chat
+              key={threadId}
+              models={models}
+              contexts={contexts}
+              threadId={threadId}
+              onSaved={refreshThreads}
+              dockOpen={dockOpen}
+              setDockOpen={setDockOpen}
+            />
           )}
           {mode === "work" &&
             (project && filesProjectId === project.id ? (
@@ -274,6 +302,9 @@ export function App() {
                 threadId={workThreadId || latestWorkThread(project.id)}
                 onChanged={refreshProjects}
                 onThreadsChanged={refreshThreads}
+                onBranchChange={setWorkBranch}
+                dockOpen={dockOpen}
+                setDockOpen={setDockOpen}
               />
             ) : (
               <div className="empty">
@@ -293,26 +324,10 @@ export function App() {
               <p>连接 Telegram / 企业微信 / 飞书等 IM 渠道后，外部对话会汇入这里，由同一个大脑处理。</p>
             </div>
           )}
+          {mode === "plugins" && <PluginsView onModelsChange={check} />}
         </main>
       </div>
 
-      {overlay === "models" && (
-        <PageOverlay title="模型" onClose={() => setOverlay(null)}>
-          <Models onChange={check} />
-        </PageOverlay>
-      )}
-      {overlay === "kb" && <KnowledgeBaseOverlay onClose={() => setOverlay(null)} />}
-      {overlay === "skills" && (
-        <PageOverlay title="Skills" onClose={() => setOverlay(null)}>
-          <Skills />
-        </PageOverlay>
-      )}
-      {overlay === "mcp" && (
-        <PageOverlay title="MCP" onClose={() => setOverlay(null)}>
-          <Mcp />
-        </PageOverlay>
-      )}
-      {overlay === "memory" && <MemoryOverlay onClose={() => setOverlay(null)} />}
       {overlay === "settings" && (
         <PageOverlay title="设置" onClose={() => setOverlay(null)}>
           <Settings theme={theme} onThemeChange={changeTheme} />

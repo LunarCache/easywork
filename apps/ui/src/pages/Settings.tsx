@@ -9,7 +9,17 @@ import {
   type Accent,
   type ThemePrefs,
 } from "../lib/prefs.js";
-import { SlidersIcon, BrainIcon, GlobeIcon, SunIcon, MoonIcon, MonitorIcon, PaletteIcon, AlertIcon, KbIcon } from "../icons.js";
+import {
+  SlidersIcon,
+  BrainIcon,
+  GlobeIcon,
+  PaletteIcon,
+  AlertIcon,
+  KbIcon,
+  SunIcon,
+  MoonIcon,
+  MonitorIcon,
+} from "../icons.js";
 
 type EmbedStatus = { ready: boolean; modelId?: string; dim: number };
 
@@ -19,9 +29,9 @@ const APPEARANCES: { id: Appearance; label: string; Icon: typeof SunIcon }[] = [
   { id: "system", label: "跟随系统", Icon: MonitorIcon },
 ];
 const ACCENTS: { id: Accent; label: string; color: string }[] = [
-  { id: "iris", label: "靛蓝", color: "#5256E0" },
-  { id: "teal", label: "青绿", color: "#0F857A" },
-  { id: "amber", label: "琥珀", color: "#B5640A" },
+  { id: "blue", label: "蓝", color: "#3B82F6" },
+  { id: "iris", label: "鸢尾", color: "#7C84FF" },
+  { id: "violet", label: "紫", color: "#A06CF5" },
 ];
 /** 生成一个随机 api-key（暴露 0.0.0.0 时用）。 */
 function genApiKey(): string {

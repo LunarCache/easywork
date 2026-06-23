@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import type { ExecResult, GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { CopyButton } from "./MessageStream.js";
+import { fileType } from "../lib/filetype.js";
 import type { UiMsg } from "../lib/agent-stream.js";
 import {
+  ArrowLeftIcon,
   ChevronIcon,
   CommitIcon,
   CopyIcon,
@@ -11,12 +13,12 @@ import {
   DownloadIcon,
   EnterIcon,
   FileIcon,
-  FileCodeIcon,
   FolderIcon,
   GlobeIcon,
   MaximizeIcon,
   MinimizeIcon,
   RefreshIcon,
+  TerminalIcon,
   UndoIcon,
   UploadIcon,
   XIcon,
@@ -39,9 +41,9 @@ export interface GitContext {
 
 type Tab = "diff" | "files" | "terminal" | "preview";
 
-const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|json|css|scss|html?|md|py|rs|go|java|c|h|cpp|sh|yml|yaml|toml|xml|sql)$/i;
 function fileIconFor(p: string) {
-  return CODE_EXT.test(p) ? <FileCodeIcon size={14} /> : <FileIcon size={14} />;
+  const ft = fileType(p);
+  return <ft.Icon size={14} style={{ color: ft.color }} />;
 }
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -74,6 +76,7 @@ export function SideDock({
   previewUrl,
   onClearPreview,
   git,
+  target,
 }: {
   open: boolean;
   onClose: () => void;
@@ -87,14 +90,25 @@ export function SideDock({
   previewUrl: string | null;
   onClearPreview: () => void;
   git?: GitContext;
+  /** 外部请求查看某文件的改动（点「文件改动」卡）：跳到 改动(工作区)/文件(对话) 视图。 */
+  target?: { path: string; nonce: number } | null;
 }) {
-  const [tab, setTab] = useState<Tab>(git ? "diff" : "files");
+  // view = null 时显示启动菜单（文件/浏览器/终端/改动 大行）；选中后显示对应内容。
+  const [view, setView] = useState<Tab | null>(null);
   const [maxed, setMaxed] = useState(false);
   const [termHistory, setTermHistory] = useState<TermEntry[]>([]);
+  const repo = !!git?.status.repo;
 
-  // 点消息里的链接/来源 → 自动切到「预览」tab（开关由父组件负责）。
+  // 「文件改动」卡点击 → git 仓库跳到 diff；否则跳到「文件」视图（FilesTab 按 nonce 定位文件）。
+  // 仅依赖 target.nonce（每次点击都是新 nonce），不依赖整个 git 字面量（Workspace 每渲染重建会误触发）。
   useEffect(() => {
-    if (previewUrl) setTab("preview");
+    if (!target) return;
+    setView(repo ? "diff" : "files");
+  }, [target?.nonce, repo]);
+
+  // 点消息里的链接/来源 → 自动进「浏览器」（开关由父组件负责）。
+  useEffect(() => {
+    if (previewUrl) setView("preview");
   }, [previewUrl]);
 
   const runCommand = async (c: string) => {
@@ -111,29 +125,21 @@ export function SideDock({
     });
   };
 
-  const tabs: { key: Tab; label: string; badge?: number }[] = [
-    ...(git ? [{ key: "diff" as Tab, label: "改动", badge: git.status.files.length }] : []),
-    { key: "files", label: "文件", badge: files.length || undefined },
-    { key: "terminal", label: "终端" },
-    { key: "preview", label: "预览" },
-  ];
+  const gitAdds = git ? git.status.files.reduce((s, f) => s + f.adds, 0) : 0;
+  const gitDels = git ? git.status.files.reduce((s, f) => s + f.dels, 0) : 0;
+  const VIEW_LABEL: Record<Tab, string> = { diff: "改动", files: "文件", terminal: "终端", preview: "浏览器" };
 
   return (
     <aside className={`side-dock ${open ? "open" : ""} ${maxed ? "max" : ""}`}>
-      <div className="sd-tabs">
-        {tabs.map((t) => (
-          <button key={t.key} className={`sd-tab ${tab === t.key ? "on" : ""}`} onClick={() => setTab(t.key)}>
-            {t.label}
-            {t.badge ? <span className="rev-count">{t.badge}</span> : null}
-          </button>
-        ))}
-        <span className="bar-spacer" />
-        {tab === "diff" && git && (
-          <button className="fv-btn" title="刷新" onClick={() => void git.onRefresh()}>
-            <RefreshIcon size={13} />
+      <div className="sd-top">
+        {view !== null && (
+          <button className="fv-btn" title="返回" onClick={() => setView(null)}>
+            <ArrowLeftIcon size={15} />
           </button>
         )}
-        {tab === "files" && (
+        <span className="sd-top-title">{view !== null ? VIEW_LABEL[view] : "工作台"}</span>
+        <span className="bar-spacer" />
+        {view === "files" && (
           <>
             <button className="fv-btn" title="在文件管理器中打开目录" onClick={onRevealDir}>
               <FolderIcon size={14} />
@@ -142,6 +148,11 @@ export function SideDock({
               <RefreshIcon size={13} />
             </button>
           </>
+        )}
+        {view === "diff" && git && (
+          <button className="fv-btn" title="刷新" onClick={() => void git.onRefresh()}>
+            <RefreshIcon size={13} />
+          </button>
         )}
         <button className="fv-btn" title={maxed ? "还原" : "放大到窗口"} onClick={() => setMaxed((v) => !v)}>
           {maxed ? <MinimizeIcon size={13} /> : <MaximizeIcon size={13} />}
@@ -152,10 +163,40 @@ export function SideDock({
       </div>
 
       <div className="sd-body">
-        {tab === "diff" && git && <DiffTab git={git} />}
-        {tab === "files" && <FilesTab files={files} readFile={readFile} emptyHint={filesEmpty} />}
-        {tab === "terminal" && <TerminalTab msgs={msgs} history={termHistory} onRun={runCommand} />}
-        {tab === "preview" && <PreviewTab url={previewUrl} onClear={onClearPreview} />}
+        {view === null && (
+          <div className="sd-launch">
+            {git && git.status.repo && (
+              <button className="sd-launch-row" onClick={() => setView("diff")}>
+                <FileIcon size={18} className="sd-launch-ico" />
+                <span className="sd-launch-label">改动</span>
+                <span className="sd-launch-stat mono">
+                  <span className="add">+{gitAdds}</span> <span className="del">−{gitDels}</span>
+                </span>
+              </button>
+            )}
+            <button className="sd-launch-row" onClick={() => setView("files")}>
+              <FolderIcon size={18} className="sd-launch-ico" />
+              <span className="sd-launch-label">文件</span>
+              {files.length > 0 && <span className="rev-count">{files.length}</span>}
+              <span className="sd-launch-kbd">⌘P</span>
+            </button>
+            <button className="sd-launch-row" onClick={() => setView("preview")}>
+              <GlobeIcon size={18} className="sd-launch-ico" />
+              <span className="sd-launch-label">浏览器</span>
+              <span className="sd-launch-kbd">⌘T</span>
+            </button>
+            <button className="sd-launch-row" onClick={() => setView("terminal")}>
+              <TerminalIcon size={18} className="sd-launch-ico" />
+              <span className="sd-launch-label">终端</span>
+            </button>
+          </div>
+        )}
+        {view === "diff" && git && <DiffTab git={git} />}
+        {view === "files" && (
+          <FilesTab files={files} readFile={readFile} emptyHint={filesEmpty} openTarget={repo ? null : target} />
+        )}
+        {view === "terminal" && <TerminalTab msgs={msgs} history={termHistory} onRun={runCommand} />}
+        {view === "preview" && <PreviewTab url={previewUrl} onClear={onClearPreview} />}
       </div>
     </aside>
   );
@@ -166,14 +207,18 @@ function FilesTab({
   files,
   readFile,
   emptyHint,
+  openTarget,
 }: {
   files: WsEntry[];
   readFile: (path: string) => Promise<FilePreview>;
   emptyHint: ReactNode;
+  /** 外部请求打开的文件（点「文件改动」卡时定位预览）；nonce 让连点同一文件也触发。 */
+  openTarget?: { path: string; nonce: number } | null;
 }) {
   const [sel, setSel] = useState<string | null>(null);
   const [data, setData] = useState<FilePreview | null>(null);
   const [mode, setMode] = useState<"code" | "preview">("code");
+  const handledRef = useRef<number | null>(null);
 
   // 选中文件刷新后消失（被删/改名）→ 收起预览。
   useEffect(() => {
@@ -182,6 +227,23 @@ function FilesTab({
       setData(null);
     }
   }, [files, sel]);
+
+  // 外部请求打开某文件（文件改动卡）→ 选中并预览。按 nonce 去重（防文件列表轮询重复触发；连点同一文件 nonce 变 → 重新打开）。
+  useEffect(() => {
+    if (!openTarget || handledRef.current === openTarget.nonce) return;
+    // 路径优先精确匹配；不中（相对/绝对形式不一）则退化到 basename 匹配，避免静默无反应。
+    const want = openTarget.path;
+    const base = want.split(/[/\\]/).pop();
+    const hit = files.find((f) => f.path === want) ?? files.find((f) => f.path.split(/[/\\]/).pop() === base);
+    if (!hit) return;
+    handledRef.current = openTarget.nonce;
+    setSel(hit.path);
+    setData(null);
+    setMode(/\.html?$/i.test(hit.path) ? "preview" : "code");
+    readFile(hit.path)
+      .then(setData)
+      .catch(() => setData({ size: 0 }));
+  }, [openTarget, files, readFile]);
 
   const openFile = async (p: string) => {
     if (sel === p) {

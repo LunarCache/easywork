@@ -22,10 +22,10 @@ curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh
 
 - **本地 / 云端模型**：HuggingFace 搜索 + 断点续传下载 GGUF，经统一 `llama` 的 **router 模式**运行（单 `llama serve --models-dir` 进程，按 model 路由 + 按需加载 + LRU；文本 / 视觉）；或接任意 OpenAI-兼容 provider。
 - **Agent 内核**：托管 [pi-coding-agent](https://github.com/earendil-works/pi)，自带编码工具 + 自动 compaction；4 档工具审批 + 工作区路径限定；内置工具 / Skills / MCP。
-- **工作区 + 聊天**：本地项目目录读写文件 / 跑命令（git 审查），或隔离的每会话工件目录；右侧统一「工作台坞」（改动 / 文件 / 终端 / 预览）。
+- **工作区 + 聊天**：本地项目目录读写文件 / 跑命令（git 审查），或隔离的每会话工件目录；右侧常驻「工作台」面板（启动菜单：改动 / 文件 / 浏览器 / 终端）。
 - **知识库 RAG + 可插拔记忆**：sqlite-vec 语义 ⊕ 词法混合召回；记忆作用域化 + 渐进式披露 + 批量抽取。
 - **多协议网关**：`/v1`（OpenAI）+ `/v1/messages`（Anthropic），可让 Claude Code 等外部客户端直接指向。
-- **桌面 UI**：Tauri 2 + React 的 Agent Desk 工作台（明暗 + 三色 accent + 密度）。
+- **桌面 UI**：Tauri 2 + React 的 "Agent Tasks" 深色工作台（IDE/终端味 · 强调色 blue/iris/violet · 展开式侧栏 + 插件页 + 行内工具调用）。
 
 > 详见 [功能与设计 →](docs/FEATURES.md)
 

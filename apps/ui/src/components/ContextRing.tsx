@@ -1,8 +1,8 @@
-/** 上下文用量百分比圆环（composer 内，靠近 Send）：环显示已用占比，中心数字为百分比。 */
+/** 上下文用量圆环（composer 内，靠近 Send）：仅环显示已用占比，百分比在 title 提示里。 */
 export function ContextRing({ pct, title }: { pct: number; title?: string }) {
   const p = Math.max(0, Math.min(100, pct));
-  const size = 26;
-  const stroke = 2.5;
+  const size = 20;
+  const stroke = 2;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   // 用量偏高时环转为告警色（>85% 红、>65% 琥珀，否则强调色）。
@@ -25,7 +25,6 @@ export function ContextRing({ pct, title }: { pct: number; title?: string }) {
             transform={`rotate(-90 ${size / 2} ${size / 2})`}
           />
         </svg>
-        <span className="ctx-ring-num">{Math.round(p)}</span>
       </span>
     </span>
   );

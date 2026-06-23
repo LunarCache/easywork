@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getClient } from "../lib/client.js";
+import { fileType } from "../lib/filetype.js";
 import { BookIcon, UploadIcon, TrashIcon, XIcon, LoaderIcon, PlusIcon } from "../icons.js";
 
 interface KbDoc {
@@ -44,22 +45,8 @@ const STATUS_LABEL: Record<string, string> = {
   error: "失败",
 };
 
-/** 文件类型角标（颜色按扩展名，呼应参考设计的 MD/PDF/XLS/TXT 彩色徽章）。 */
-function fileBadge(source: string): { label: string; color: string } {
-  const ext = (source.split(".").pop() || "").toLowerCase();
-  const map: Record<string, { label: string; color: string }> = {
-    md: { label: "MD", color: "#3B6FE0" },
-    markdown: { label: "MD", color: "#3B6FE0" },
-    pdf: { label: "PDF", color: "#E0524F" },
-    xls: { label: "XLS", color: "#1E9E58" },
-    xlsx: { label: "XLS", color: "#1E9E58" },
-    csv: { label: "CSV", color: "#1E9E58" },
-    txt: { label: "TXT", color: "#8A919C" },
-    json: { label: "JSON", color: "#B5640A" },
-    html: { label: "HTML", color: "#B5640A" },
-  };
-  return map[ext] ?? { label: ext ? ext.slice(0, 4).toUpperCase() : "DOC", color: "#6B7280" };
-}
+/** 文件类型角标 = 统一文件类型体系（见 lib/filetype）。 */
+const fileBadge = fileType;
 
 function relTime(iso: string): string {
   const t = Date.parse(iso);
@@ -72,7 +59,7 @@ function relTime(iso: string): string {
 }
 
 /** 知识库浮层：集合导航 + 文档列表 + 文档预览 + 上传。 */
-export function KnowledgeBaseOverlay({ onClose }: { onClose: () => void }) {
+export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => void; embedded?: boolean }) {
   const [kbs, setKbs] = useState<{ kbId: string; docs: number; chunks: number }[]>([]);
   const [docs, setDocs] = useState<KbDoc[]>([]);
   const [totalChunks, setTotalChunks] = useState(0);
@@ -173,8 +160,8 @@ export function KnowledgeBaseOverlay({ onClose }: { onClose: () => void }) {
   ];
 
   return (
-    <div className="ad-overlay" onClick={onClose}>
-      <div className="ad-overlay-card kb-ov-card" onClick={(e) => e.stopPropagation()}>
+    <div className={embedded ? "ad-page-embed" : "ad-overlay"} onClick={embedded ? undefined : onClose}>
+      <div className={`ad-overlay-card kb-ov-card ${embedded ? "embed" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="ad-ov-head kb-ov-head">
           <span className="kb-ov-ico">
             <BookIcon size={18} />
@@ -191,9 +178,11 @@ export function KnowledgeBaseOverlay({ onClose }: { onClose: () => void }) {
           >
             <UploadIcon size={15} /> 上传
           </button>
-          <button className="ad-ov-close" title="关闭" onClick={onClose}>
-            <XIcon size={15} />
-          </button>
+          {!embedded && (
+            <button className="ad-ov-close" title="关闭" onClick={onClose}>
+              <XIcon size={15} />
+            </button>
+          )}
           <input
             ref={fileRef}
             type="file"

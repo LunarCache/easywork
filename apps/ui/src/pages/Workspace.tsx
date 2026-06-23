@@ -14,15 +14,28 @@ import {
   type PendingApproval,
   type StoredMsg,
   type UiMsg,
+  type UiImage,
 } from "../lib/agent-stream.js";
-import { ArrowUpIcon, PanelRightIcon, GitBranchIcon, TerminalIcon, WrenchIcon } from "../icons.js";
+import {
+  ArrowUpIcon,
+  TerminalIcon,
+  WrenchIcon,
+  ShieldIcon,
+  ChevronDownIcon,
+  CheckIcon,
+  PlusBtnIcon,
+  XIcon,
+} from "../icons.js";
 
-const APPROVAL_LABELS: Record<ApprovalMode, string> = {
-  "read-only": "只读",
-  "approve-each": "逐次询问",
-  "auto-edits": "自动改文件",
-  "full-auto": "全自动",
-};
+const APPROVAL_OPTS: { id: ApprovalMode; label: string; desc: string }[] = [
+  { id: "read-only", label: "Read only", desc: "No file writes or commands" },
+  { id: "approve-each", label: "Ask each change", desc: "Approve every edit & command" },
+  { id: "auto-edits", label: "Auto-edit files", desc: "Edits auto, commands ask" },
+  { id: "full-auto", label: "Full auto", desc: "Edits & commands run automatically" },
+];
+const APPROVAL_LABEL: Record<ApprovalMode, string> = Object.fromEntries(
+  APPROVAL_OPTS.map((o) => [o.id, o.label]),
+) as Record<ApprovalMode, string>;
 
 export function Workspace({
   project,
@@ -30,6 +43,9 @@ export function Workspace({
   threadId,
   onChanged,
   onThreadsChanged,
+  onBranchChange,
+  dockOpen,
+  setDockOpen,
 }: {
   project: Project;
   models: string[];
@@ -38,21 +54,42 @@ export function Workspace({
   onChanged: () => void;
   /** 本轮结束后通知 App 刷新会话列表（标题/排序）。 */
   onThreadsChanged: () => void;
+  /** 当前 git 分支变化 → 上报给 App（用于标题栏面包屑分支 pill）；非 git 仓库报 undefined。 */
+  onBranchChange?: (branch?: string) => void;
+  dockOpen: boolean;
+  setDockOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const [model, setModel] = useState(models[0] ?? "");
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>(project.approvalMode ?? "approve-each");
+  const [permOpen, setPermOpen] = useState(false);
   const [msgs, setMsgs] = useState<UiMsg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [git, setGit] = useState<GitStatus>({ repo: false, files: [] });
-  const [branches, setBranches] = useState<{ current: string; all: string[] }>({ current: "", all: [] });
   const [remote, setRemote] = useState<GitRemoteInfo>({ hasRemote: false, hasUpstream: false, ahead: 0, behind: 0 });
-  const [dockOpen, setDockOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [dockTarget, setDockTarget] = useState<{ path: string; nonce: number } | null>(null);
   const [wsFiles, setWsFiles] = useState<WsEntry[]>([]);
+  const [images, setImages] = useState<UiImage[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const onPickImages = async (files: FileList | null) => {
+    if (!files) return;
+    const next: UiImage[] = [];
+    for (const f of Array.from(files)) {
+      if (!f.type.startsWith("image/")) continue;
+      const dataUrl = await new Promise<string>((resolve) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result));
+        r.readAsDataURL(f);
+      });
+      next.push({ mimeType: f.type, data: dataUrl.replace(/^data:[^;]+;base64,/, "") });
+    }
+    if (next.length) setImages((cur) => [...cur, ...next]);
+  };
 
   // 模型列表变化时校正选中项：当前模型被卸载/移除 → 退回首个可用或清空。
   if (model && !models.includes(model)) setModel(models[0] ?? "");
@@ -78,10 +115,11 @@ export function Workspace({
         getClient().gitRemote(project.id),
       ]);
       setGit(s);
-      setBranches(b);
       setRemote(rm);
+      onBranchChange?.(s.repo ? b.current || s.branch || undefined : undefined);
     } catch {
       setGit({ repo: false, files: [] });
+      onBranchChange?.(undefined);
     }
   };
 
@@ -129,17 +167,27 @@ export function Workspace({
 
   const send = async () => {
     const text = input.trim();
-    if (!text || !model || busy) return;
+    if ((!text && images.length === 0) || !model || busy) return;
+    const sentImages = images;
     setInput("");
+    setImages([]);
     setBusy(true);
     const history: ChatMessage[] = msgs.map((m) => ({
       role: m.role,
       content: m.role === "assistant" ? splitThink(m.raw).answer : m.raw,
     }));
-    history.push({ role: "user", content: text });
+    // 含图片时用多模态 content parts（走视觉模型）。
+    const userContent: ChatMessage["content"] =
+      sentImages.length > 0
+        ? [
+            ...(text ? [{ type: "text" as const, text }] : []),
+            ...sentImages.map((im) => ({ type: "image" as const, mimeType: im.mimeType, data: im.data })),
+          ]
+        : text;
+    history.push({ role: "user", content: userContent });
     setMsgs((m) => [
       ...m,
-      { role: "user", raw: text, reasoning: "", tools: [], at: Date.now() },
+      { role: "user", raw: text, reasoning: "", tools: [], at: Date.now(), ...(sentImages.length ? { images: sentImages } : {}) },
       { role: "assistant", raw: "", reasoning: "", tools: [] },
     ]);
     const apply = (fn: (m: UiMsg) => UiMsg) =>
@@ -191,37 +239,12 @@ export function Workspace({
     }
   };
 
-  const totalAdds = git.files.reduce((n, f) => n + f.adds, 0);
-  const totalDels = git.files.reduce((n, f) => n + f.dels, 0);
-
   return (
     <div className="workspace">
       <div className="ws-main">
         <header className="bar ws-bar">
-          <span className="ws-title" title={project.workspaceDir}>
-            {project.name}
-          </span>
-          <span className="ws-sub">{project.workspaceDir}</span>
-          <span className="bar-spacer" />
-          {git.repo && (
-            <span className="ws-branch" title="当前分支">
-              <GitBranchIcon size={13} /> {branches.current || git.branch}
-            </span>
-          )}
           <ModelSelect models={models} value={model} onChange={setModel} />
-          <button
-            className={`ws-review-toggle ${dockOpen ? "on" : ""}`}
-            onClick={() => setDockOpen((v) => !v)}
-            title="工作台：改动 / 文件 / 终端 / 预览"
-          >
-            <PanelRightIcon size={14} /> 工作台
-            {git.files.length > 0 && <span className="rev-count">{git.files.length}</span>}
-            {(totalAdds > 0 || totalDels > 0) && (
-              <span className="ws-stat">
-                <span className="add">+{totalAdds}</span> <span className="del">-{totalDels}</span>
-              </span>
-            )}
-          </button>
+          <span className="bar-spacer" />
         </header>
 
         <div className="messages" ref={scrollRef}>
@@ -245,11 +268,38 @@ export function Workspace({
               setPreviewUrl(u);
               setDockOpen(true);
             }}
+            onOpenFile={(p) => {
+              setDockOpen(true);
+              setDockTarget({ path: p, nonce: Date.now() });
+            }}
           />
         </div>
 
         <footer className="composer">
           <div className="composer-box">
+            {images.length > 0 && (
+              <div className="composer-images">
+                {images.map((im, j) => (
+                  <div key={j} className="cimg">
+                    <img src={`data:${im.mimeType};base64,${im.data}`} alt="" />
+                    <button onClick={() => setImages((cur) => cur.filter((_, k) => k !== j))}>
+                      <XIcon size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: "none" }}
+              onChange={(e) => {
+                void onPickImages(e.target.files);
+                e.target.value = "";
+              }}
+            />
             <textarea
               value={input}
               rows={1}
@@ -263,18 +313,39 @@ export function Workspace({
               }}
             />
             <div className="composer-bar">
-              <select
-                className="perm-select"
-                value={approvalMode}
-                onChange={(e) => void setMode(e.target.value as ApprovalMode)}
-                title="审批策略"
-              >
-                {(Object.keys(APPROVAL_LABELS) as ApprovalMode[]).map((m) => (
-                  <option key={m} value={m}>
-                    {APPROVAL_LABELS[m]}
-                  </option>
-                ))}
-              </select>
+              <button className="cbtn" title="上传图片（需视觉模型）" onClick={() => fileRef.current?.click()}>
+                <PlusBtnIcon size={18} />
+              </button>
+              <div className="perm-wrap">
+                <button className="perm-pill" onClick={() => setPermOpen((v) => !v)} title="Approval policy">
+                  <ShieldIcon size={15} />
+                  <span>{APPROVAL_LABEL[approvalMode]}</span>
+                  <ChevronDownIcon size={13} className="perm-chev" />
+                </button>
+                {permOpen && (
+                  <>
+                    <div className="menu-backdrop" onClick={() => setPermOpen(false)} />
+                    <div className="perm-menu up">
+                      {APPROVAL_OPTS.map((o) => (
+                        <button
+                          key={o.id}
+                          className={`perm-item ${approvalMode === o.id ? "on" : ""}`}
+                          onClick={() => {
+                            void setMode(o.id);
+                            setPermOpen(false);
+                          }}
+                        >
+                          <div className="perm-item-main">
+                            <span className="perm-item-label">{o.label}</span>
+                            <span className="perm-item-desc">{o.desc}</span>
+                          </div>
+                          {approvalMode === o.id && <CheckIcon size={15} className="perm-item-check" />}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
               <span className="cspacer" />
               <button className="csend" onClick={() => void send()} disabled={busy || !model} title="发送">
                 <ArrowUpIcon size={18} />
@@ -296,6 +367,7 @@ export function Workspace({
         exec={(c) => getClient().wsExec(project.id, c)}
         previewUrl={previewUrl}
         onClearPreview={() => setPreviewUrl(null)}
+        target={dockTarget}
         git={{ projectId: project.id, status: git, remote, onRefresh: refreshGit }}
       />
 

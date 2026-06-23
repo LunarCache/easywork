@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactElement } from "react";
 import type { WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
-import { ChevronIcon, FileIcon, FolderClosedIcon, FolderIcon } from "../icons.js";
+import { fileType } from "../lib/filetype.js";
+import { ChevronIcon, FolderClosedIcon, FolderIcon } from "../icons.js";
 
 /**
  * 项目目录懒加载树：每展开一层向 daemon 取 `wsList(pid, dir, 1)`，按需深入。
@@ -87,7 +88,10 @@ export function ProjectFileTree({
             onClick={() => onOpenFile(e.path)}
             title={e.path}
           >
-            <FileIcon size={12} className="ad-ft-ico" />
+            {(() => {
+              const ft = fileType(e.path);
+              return <ft.Icon size={12} className="ad-ft-ico" style={{ color: ft.color }} />;
+            })()}
             <span className="ad-ft-name">{name}</span>
           </button>,
         );

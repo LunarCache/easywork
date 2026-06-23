@@ -32,6 +32,19 @@
 
 ## 里程碑日志
 
+## 2026-06-23（续）— 前端整体重构为 "Agent Tasks" 深色设计（dark-only）
+
+把桌面 UI 从「冷灰 + 靛蓝、明暗双主题」整体重构为 claude.ai/design 产出的 IDE/终端味 **Agent Tasks** 深色设计（经 DesignSync 连接器读取设计稿 + Qwen3-4B 真机会话逐屏验证）。后端零改动，纯 `apps/ui` + 一处 `tauri.conf`。
+
+- **Token / 主题**：`styles.css` 以 Design Spec 深色 token 为默认（`--bg #0D0E12`…）+ 浅色 `[data-theme=light]` 覆盖（明暗双主题 + 跟随系统）；新增 `[data-accent=blue|iris|violet]`，旧 `--color-*`/`--surface`/`--accent` 别名重定向 → 存量组件随主题自动切换；移除 teal/amber/density。标题栏升 46px。
+- **外壳**：两段式 `Titlebar`（段 A 侧栏宽 + nav，段 B 面包屑 + 工作台动态开关，状态由 App 提升）；展开式 `Sidebar`（新对话/打开工作区/收件箱/插件 + 项目/对话分区 + 设置 + 状态点）合并并删除 `IconRail` + `SessionList`。
+- **插件页** `PluginsView`：点「插件」在主区打开标签页，模型/知识库/Skills/MCP/记忆 内嵌渲染（KB/记忆浮层加 `embedded` 去遮罩）。
+- **对话**：AI 无头像纯 prose、用户 `acc-weak` 软气泡；**行内工具调用**（思考/编辑〔类型角标 +/-〕/运行/读取/搜索，点击展开）；**文件改动汇总卡**（`aggregateEdits` + `editStat`/`diffStat`/`lineDiffStat`，无 unified diff 时从 before/after 或 args 兜底算行数）+ 点击跳转工作台对应文件 diff。
+- **工作台面板**：滑入 dock 改**常驻列** + **启动菜单**（改动/文件/浏览器/终端 大行）；toggle 上移标题栏（`dockOpen`/`dockTarget` 提升到 App）。
+- **composer**：模型选择 + 用量环 + 参数移入底栏（弹出向上）；`+` 菜单收纳 思考/联网/知识库 开关 → 保持单行、优雅换行。
+- **文件类型体系** `lib/filetype.ts`：扩展名 → 角标文字 + 品牌色 + lucide 图标，工具行/知识库/文件树统一；全局图标描边 1.8。
+- typecheck 19/19 · lint 0 error · `npm run build` 绿。文档（FEATURES）同步。版本拟 0.3.0 → 0.4.0（大 UI 架构变更）。
+
 ## 2026-06-23 — 桌面窗口外观（macOS Overlay）+ 知识库集合 + UI 一致性收口
 
 - **窗口系统按钮内嵌**：桌面端改用 Tauri `titleBarStyle: Overlay` + `hiddenTitle` + `trafficLightPosition`，macOS 原生红绿灯交通灯直接嵌进应用标题栏（与 EasyWork 字标垂直对齐 y=20），不再外包一层系统标题栏；`.is-desktop` 给标题栏留 88px 左内边距避让交通灯。

@@ -1,6 +1,6 @@
 {
   "name": "easywork",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "license": "MIT",
   "description": "本地 AI 工作台 — 下载并运行本地模型，Agent 工具(Skills/MCP)，IM + 记忆",

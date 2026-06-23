@@ -38,7 +38,7 @@ function relTime(iso: string): string {
 }
 
 /** 记忆浮层：教 Agent 记住 + 按层分组浏览/删除（作用域切换：全局 / 各工作区）。 */
-export function MemoryOverlay({ onClose }: { onClose: () => void }) {
+export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; embedded?: boolean }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [scope, setScope] = useState<string>(GLOBAL_SCOPE);
   const [items, setItems] = useState<MemItem[]>([]);
@@ -116,8 +116,8 @@ export function MemoryOverlay({ onClose }: { onClose: () => void }) {
     .filter((g) => g.items.length > 0);
 
   return (
-    <div className="ad-overlay" onClick={onClose}>
-      <div className="ad-overlay-card mem-ov-card" onClick={(e) => e.stopPropagation()}>
+    <div className={embedded ? "ad-page-embed" : "ad-overlay"} onClick={embedded ? undefined : onClose}>
+      <div className={`ad-overlay-card mem-ov-card ${embedded ? "embed" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="ad-ov-head mem-ov-head">
           <span className="mem-ov-ico">
             <BrainIcon size={18} />
@@ -127,9 +127,11 @@ export function MemoryOverlay({ onClose }: { onClose: () => void }) {
             <span className="mem-ov-sub">Agent 跨会话记住的内容</span>
           </div>
           <span className="ad-spacer" />
-          <button className="ad-ov-close" title="关闭" onClick={onClose}>
-            <XIcon size={15} />
-          </button>
+          {!embedded && (
+            <button className="ad-ov-close" title="关闭" onClick={onClose}>
+              <XIcon size={15} />
+            </button>
+          )}
         </div>
 
         <div className="mem-ov-body">

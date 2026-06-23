@@ -79,19 +79,21 @@ export function saveDisabledSkills(names: string[]): void {
   }
 }
 
-// ---------- 外观（Agent Desk：明暗 + accent + 密度），持久化到 localStorage ----------
+// ---------- 外观（"Agent Tasks"：明暗 + 跟随系统 + 强调色），持久化到 localStorage ----------
 
+/** 明暗：浅色 / 深色 / 跟随系统。 */
 export type Appearance = "light" | "dark" | "system";
-export type Accent = "iris" | "teal" | "amber";
-export type Density = "compact" | "comfortable";
+/** 强调色（唯一彩色）—— 见 styles.css [data-accent]。 */
+export type Accent = "blue" | "iris" | "violet";
 export interface ThemePrefs {
   appearance: Appearance;
   accent: Accent;
-  density: Density;
 }
 
 const THEME_KEY = "ew.theme";
-const THEME_DEFAULT: ThemePrefs = { appearance: "system", accent: "iris", density: "compact" };
+const THEME_DEFAULT: ThemePrefs = { appearance: "dark", accent: "blue" };
+const APPEARANCES: readonly Appearance[] = ["light", "dark", "system"];
+const ACCENTS: readonly Accent[] = ["blue", "iris", "violet"];
 
 export function loadThemePrefs(): ThemePrefs {
   try {
@@ -99,9 +101,8 @@ export function loadThemePrefs(): ThemePrefs {
     if (!raw) return { ...THEME_DEFAULT };
     const p = JSON.parse(raw) as Partial<ThemePrefs>;
     return {
-      appearance: p.appearance ?? THEME_DEFAULT.appearance,
-      accent: p.accent ?? THEME_DEFAULT.accent,
-      density: p.density ?? THEME_DEFAULT.density,
+      appearance: p.appearance && APPEARANCES.includes(p.appearance) ? p.appearance : THEME_DEFAULT.appearance,
+      accent: p.accent && ACCENTS.includes(p.accent) ? p.accent : THEME_DEFAULT.accent,
     };
   } catch {
     return { ...THEME_DEFAULT };
@@ -116,7 +117,7 @@ export function saveThemePrefs(p: ThemePrefs): void {
   }
 }
 
-/** 把外观偏好应用到 <html>：明暗 data-theme、accent data-accent、密度 data-density。 */
+/** 把外观偏好应用到 <html>：明暗 data-theme（跟随系统时按 prefers-color-scheme）+ 强调色 data-accent。 */
 export function applyTheme(p: ThemePrefs): void {
   const root = document.documentElement;
   const prefersDark =
@@ -124,7 +125,6 @@ export function applyTheme(p: ThemePrefs): void {
   const dark = p.appearance === "dark" || (p.appearance === "system" && prefersDark);
   root.setAttribute("data-theme", dark ? "dark" : "light");
   root.setAttribute("data-accent", p.accent);
-  root.setAttribute("data-density", p.density);
 }
 
 /** 采样对象 → runAgent 的 sampling 字段（仅含已设置项）。 */
