@@ -32,6 +32,20 @@
 
 ## 里程碑日志
 
+## 2026-06-23（续2）— 功能审查修复（多模态 / 审批竞态 / UI 逻辑收口）
+
+对前端重构后的各部分做功能审查（多 agent 并行评审 + 逐项读码核实），修复确认的逻辑错误与疏漏，后端最小改动打通图片多模态：
+
+- **图片多模态彻底打通（严重）**：Agent 聊天的图片上传此前三层静默丢弃（`messageText` 剥文本 / `session.prompt(text)` 不传图 / 本地模型 `input:["text"]`），模型从未收到图。修复：`EwAgentRunInput.images` + `session.prompt(text,{images})` 透传 + 本地/云端模型 `input` 标记 image-capable（pi 仅在实际附图时下发，纯文本路径不变）；`app.ts` 从本轮用户消息抽 image parts。多轮历史的图由 pi 按 threadId 自持上下文随之生效。
+- **Workspace 审批档位「切档即发送」竞态**：`setMode` 记录在途 PATCH，`send()` 前 `await`（服务端按 `project.approvalMode` 把守，避免用旧档位）。
+- **SideDock 视图被后台 git 刷新打断**：`repo` 经 ref 读，effect 只依赖 `target.nonce`，git 状态刷新不再把用户从终端/预览拽回 diff。
+- **统计修正**：files-changed 汇总卡过滤 `+0 −0` 幽灵行；`str_replace` 的 +/- 改 `lineDiffStat` 行级 diff（不再「改 1 行报 +N −N」虚高）。
+- **filetype** 整名匹配 dotfile/无扩展名（`.gitignore`→GIT 等），消除 `GITI`/`MAKE` 乱码徽章。
+- **PluginsView** 改 lazy keep-alive，知识库上传/索引进度轮询不再因切 Tab 中断。
+- **侧栏/外壳**：⌘N 绑全局 keydown（原死快捷键）；空工作区/文件页隐藏工作台开关；删当前工作区会话切到下一个剩余会话；首屏选项目补拉会话定位最近会话。
+- **记忆/知识库**：`MemoryOverlay` 接上 `editMemory`（行内编辑）+ `clearMemoryScope`（清空作用域）；KB 新建集合名规范化为合法 kbId + 空名拒绝 + 重名直接选中。
+- 测试 201 通过 · typecheck 19/19 · lint 0 error · UI build 绿。
+
 ## 2026-06-23（续）— 前端整体重构为 "Agent Tasks" 深色设计（dark-only）
 
 把桌面 UI 从「冷灰 + 靛蓝、明暗双主题」整体重构为 claude.ai/design 产出的 IDE/终端味 **Agent Tasks** 深色设计（经 DesignSync 连接器读取设计稿 + Qwen3-4B 真机会话逐屏验证）。后端零改动，纯 `apps/ui` + 一处 `tauri.conf`。
