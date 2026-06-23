@@ -590,11 +590,22 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     const recorded: ReturnType<ToolTurnRecorder["push"]> = [];
 
     const userText = lastUser?.role === "user" ? messageText(lastUser.content) : "";
+    // 多模态：从本轮用户消息抽出图片片段（base64）→ 透传给 pi（视觉模型 mmproj）。
+    // 仅取当前轮；历史轮的图片由 pi 会话上下文自持（按 threadId resume）。
+    const userImages =
+      lastUser?.role === "user" && Array.isArray(lastUser.content)
+        ? lastUser.content.flatMap((p) =>
+            p.type === "image" && typeof p.data === "string"
+              ? [{ type: "image" as const, data: p.data, mimeType: p.mimeType }]
+              : [],
+          )
+        : [];
     try {
       for await (const ev of sessionHost.run({
         threadId,
         modelId: parsed.data.model,
         text: userText,
+        ...(userImages.length ? { images: userImages } : {}),
         cwd: runWorkspaceDir,
         // 工作区模式：按项目审批档位。对话模式：auto-edits —— 写在工作区内放行（escapesCwd 限定），
         // bash 经审批（可产出网页/构建等 artifacts，但每条命令需用户确认）。

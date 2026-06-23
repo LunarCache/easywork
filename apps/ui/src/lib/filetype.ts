@@ -70,9 +70,26 @@ for (const s of SPECS) {
 
 const FALLBACK_COLOR = "#6B7280";
 
+// 整名匹配（dotfile / 无扩展名配置文件）：不能按「最后一个点后」当扩展名，否则 .gitignore → "GITI"。
+const BY_NAME: Record<string, FileTypeInfo> = {
+  dockerfile: { label: "DOCK", color: "#2496ED", Icon: FileCodeIcon },
+  ".dockerignore": { label: "DOCK", color: "#2496ED", Icon: FileIcon },
+  makefile: { label: "MK", color: "#4EAA25", Icon: FileTerminalIcon },
+  ".gitignore": { label: "GIT", color: "#F05133", Icon: FileIcon },
+  ".gitattributes": { label: "GIT", color: "#F05133", Icon: FileIcon },
+  ".npmrc": { label: "NPM", color: "#CB3837", Icon: FileIcon },
+  license: { label: "LIC", color: "#8A919C", Icon: FileIcon },
+};
+
 /** 解析文件路径 → 文件类型信息（未知扩展名回退到大写扩展名 + 通用文件图标）。 */
 export function fileType(path: string): FileTypeInfo {
   const name = path.split(/[/\\]/).pop() || path;
-  const ext = (name.split(".").pop() || "").toLowerCase();
-  return BY_EXT[ext] ?? { label: ext ? ext.slice(0, 4).toUpperCase() : "DOC", color: FALLBACK_COLOR, Icon: FileIcon };
+  const lower = name.toLowerCase();
+  if (BY_NAME[lower]) return BY_NAME[lower];
+  if (lower === ".env" || lower.startsWith(".env.")) return { label: "ENV", color: "#9C4221", Icon: FileCodeIcon };
+  // dotfile（.bashrc）或无扩展名（Makefile）：name 里没有「非首位的点」→ 不当扩展名处理，回退通用文件。
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return { label: "FILE", color: FALLBACK_COLOR, Icon: FileIcon };
+  const ext = name.slice(dot + 1).toLowerCase();
+  return BY_EXT[ext] ?? { label: ext.slice(0, 4).toUpperCase() || "FILE", color: FALLBACK_COLOR, Icon: FileIcon };
 }

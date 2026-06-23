@@ -155,14 +155,17 @@ export function Workspace({
   // 卸载（切换工作区会因 key 重挂载）时中断在途的 agent 流。
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const setMode = async (m: ApprovalMode) => {
+  // 审批档位变更的在途 PATCH：send() 前 await，避免「切档即发送」用到旧档位（服务端按 project 读取）。
+  const pendingMode = useRef<Promise<unknown> | null>(null);
+  const setMode = (m: ApprovalMode) => {
     setApprovalMode(m);
-    try {
-      await getClient().updateProject(project.id, { approvalMode: m });
-      onChanged();
-    } catch {
-      /* ignore */
-    }
+    const p = getClient()
+      .updateProject(project.id, { approvalMode: m })
+      .then(() => onChanged())
+      .catch(() => {
+        /* ignore */
+      });
+    pendingMode.current = p;
   };
 
   const send = async () => {
@@ -200,6 +203,8 @@ export function Workspace({
     abortRef.current = ac;
     const excludeSkills = loadDisabledSkills();
     const MUTATING = new Set(["fs_write", "fs_edit", "run_command"]);
+    // 确保审批档位的在途 PATCH 已落库，再发起本轮（服务端按 project.approvalMode 把守危险工具）。
+    if (pendingMode.current) await pendingMode.current.catch(() => {});
     try {
       for await (const ev of getClient().runAgent(
         { threadId, model, history, projectId: project.id, ...(excludeSkills.length ? { excludeSkills } : {}) },

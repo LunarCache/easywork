@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Project } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { BrainIcon, TrashIcon, XIcon, ChatIcon, FolderClosedIcon } from "../icons.js";
+import { BrainIcon, TrashIcon, XIcon, ChatIcon, FolderClosedIcon, EditIcon, CheckIcon } from "../icons.js";
 
 interface MemItem {
   id: string;
@@ -95,6 +95,32 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
     await refresh();
   };
 
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const saveEdit = async () => {
+    if (!editing) return;
+    const text = editing.text.trim();
+    const id = editing.id;
+    setEditing(null);
+    if (!text) return;
+    try {
+      await getClient().editMemory(id, text);
+      await refresh();
+    } catch (e) {
+      setNote(`修改失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const clearScope = async () => {
+    if (!confirm(`清空「${scopeName}」作用域的全部记忆？此操作不可撤销（含由对话自动抽取的事实）。`)) return;
+    try {
+      const { removed } = await getClient().clearMemoryScope(scope);
+      setNote(`已清空 ${removed} 条记忆。`);
+      await refresh();
+    } catch (e) {
+      setNote(`清空失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   const enableEmbedding = async () => {
     setEmbBusy(true);
     setNote("正在下载/加载本地 embedding 模型（nomic，~84MB，CPU）并重建索引…");
@@ -180,11 +206,33 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                     <div key={m.id} className="mem-ov-item">
                       <span className="mem-ov-dot" />
                       <div className="mem-ov-item-body">
-                        <div className="mem-ov-item-text">{m.text}</div>
+                        {editing?.id === m.id ? (
+                          <input
+                            className="mem-ov-edit"
+                            autoFocus
+                            value={editing.text}
+                            onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") void saveEdit();
+                              else if (e.key === "Escape") setEditing(null);
+                            }}
+                          />
+                        ) : (
+                          <div className="mem-ov-item-text">{m.text}</div>
+                        )}
                         <div className="mem-ov-item-meta">
                           {m.sessionId ? "本会话" : scopeName} · {relTime(m.updatedAt)}
                         </div>
                       </div>
+                      {editing?.id === m.id ? (
+                        <button className="mem-ov-del show" title="保存" onClick={() => void saveEdit()}>
+                          <CheckIcon size={14} />
+                        </button>
+                      ) : (
+                        <button className="mem-ov-del" title="编辑" onClick={() => setEditing({ id: m.id, text: m.text })}>
+                          <EditIcon size={14} />
+                        </button>
+                      )}
                       <button className="mem-ov-del" title="删除" onClick={() => void del(m.id)}>
                         <TrashIcon size={14} />
                       </button>
@@ -202,6 +250,11 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
             {!emb?.ready && (
               <button onClick={() => void enableEmbedding()} disabled={embBusy}>
                 {embBusy ? "处理中…" : "启用向量召回"}
+              </button>
+            )}
+            {items.length > 0 && (
+              <button className="mem-ov-clear" onClick={() => void clearScope()}>
+                清空此作用域
               </button>
             )}
           </div>

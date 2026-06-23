@@ -14,7 +14,7 @@ import {
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
 import { streamSimple, completeSimple } from "@earendil-works/pi-ai";
-import type { Model, Api, Context as PiContext, AssistantMessageEventStream, AssistantMessage } from "@earendil-works/pi-ai";
+import type { Model, Api, Context as PiContext, AssistantMessageEventStream, AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import { GLOBAL_SCOPE } from "@ew/shared";
 import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, SamplingParams, Tool } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
@@ -54,6 +54,8 @@ export interface EwAgentRunInput {
   modelId: string;
   /** 本轮新用户输入（pi 在会话内自持历史，故只发增量）。 */
   text: string;
+  /** 本轮新用户输入附带的图片（多模态；走视觉模型的 mmproj）。 */
+  images?: ImageContent[];
   /** 工作区根目录（pi 工具的 cwd）。 */
   cwd: string;
   /** 是否工作区模式（启用 bash/edit/write + 审批；否则聊天模式收窄工具）。默认 false。 */
@@ -161,7 +163,9 @@ export class SessionHost {
           id,
           name: id,
           reasoning: false,
-          input: ["text"] as ("text" | "image")[],
+          // 允许图片输入：pi 仅在用户实际附带图片时才下发；文本对话不受影响。
+          // 非视觉模型若收到图片由后端引擎报错（属用户误操作），不影响纯文本路径。
+          input: ["text", "image"] as ("text" | "image")[],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: cfg.contextWindow ?? 32768,
           maxTokens: 4096,
@@ -193,7 +197,7 @@ export class SessionHost {
         provider: "local",
         baseUrl: localBase,
         reasoning: false,
-        input: ["text"],
+        input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: ctx && ctx > 0 ? ctx : 8192,
         maxTokens: 4096,
@@ -212,7 +216,7 @@ export class SessionHost {
         provider: cfg.id,
         baseUrl: cfg.baseUrl,
         reasoning: false,
-        input: ["text"],
+        input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: cfg.contextWindow ?? 32768,
         maxTokens: 4096,
@@ -496,7 +500,9 @@ export class SessionHost {
     // 思考开关（Qwen3 约定）：注入 /think 或 /no_think 给模型；不改持久化的原始用户消息。
     const directive = input.think === true ? " /think" : input.think === false ? " /no_think" : "";
     const promptText = directive ? `${input.text}${directive}` : input.text;
-    const promptDone = session.prompt(promptText).catch((err: unknown) => {
+    const promptDone = session
+      .prompt(promptText, input.images?.length ? { images: input.images } : undefined)
+      .catch((err: unknown) => {
       failed = err instanceof Error ? err.message : String(err);
       done = true;
       wake();

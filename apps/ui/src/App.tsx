@@ -149,6 +149,18 @@ export function App() {
     setThreadId(crypto.randomUUID());
     setMode("chat");
   };
+  // ⌘N / Ctrl-N：新建对话（侧栏标注的快捷键）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        newChat();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // newChat 仅调用稳定的 setState，无需进依赖。
+  }, []);
   const selectThread = (id: string) => {
     setFilesProjectId(null);
     setThreadId(id);
@@ -156,11 +168,23 @@ export function App() {
   };
   // 某工作区的最近会话 id（threads 按 updatedAt desc）；无则用默认 ws-<id> 线程。
   const latestWorkThread = (pid: string) => threads.find((t) => t.projectId === pid)?.id ?? `ws-${pid}`;
-  const selectProject = (id: string) => {
+  const selectProject = async (id: string) => {
     setFilesProjectId(null);
     setProjectId(id);
-    setWorkThreadId(latestWorkThread(id));
     setMode("work");
+    let tid = latestWorkThread(id);
+    // 首屏 threads 尚未加载时 latestWorkThread 退化为合成 id（侧栏不高亮 + 不续接最近会话）；
+    // 此时补拉一次会话列表再定位该项目最近会话。
+    if (tid === `ws-${id}` && threads.length === 0) {
+      try {
+        const ts = await getClient().listThreads();
+        setThreads(ts);
+        tid = ts.find((t) => t.projectId === id)?.id ?? tid;
+      } catch {
+        /* ignore：用合成默认线程 */
+      }
+    }
+    setWorkThreadId(tid);
   };
   const selectWorkThread = (pid: string, tid: string) => {
     setFilesProjectId(null);
@@ -192,7 +216,11 @@ export function App() {
     if (!confirm(`删除对话「${t?.title || "新会话"}」？此操作不可撤销（删除会话记录及由其抽取的记忆事实）。`)) return;
     await getClient().deleteThread(id);
     if (id === threadId) newChat();
-    if (id === workThreadId) setWorkThreadId(`ws-${projectId ?? ""}`);
+    if (id === workThreadId) {
+      // 删除当前工作区会话 → 切到该项目下一个剩余会话（无则用合成默认线程）。
+      const next = threads.find((t) => t.projectId === projectId && t.id !== id)?.id ?? `ws-${projectId ?? ""}`;
+      setWorkThreadId(next);
+    }
     void refreshThreads();
   };
 
@@ -223,6 +251,8 @@ export function App() {
   };
 
   const project = projects.find((p) => p.id === projectId);
+  // 工作台面板仅在「对话」或「有项目且不在文件浏览页」的工作区会话里可用（空态/文件页无 dock，开关无意义）。
+  const inWorkChat = mode === "work" && !!project && filesProjectId !== project.id;
   const activeId = mode === "work" ? workThreadId : threadId;
   const activeTitle = threads.find((t) => t.id === activeId)?.title?.trim();
   const taskTitle =
@@ -240,7 +270,7 @@ export function App() {
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
         taskTitle={taskTitle}
         isDesktop={isDesktop()}
-        showDock={mode === "chat" || mode === "work"}
+        showDock={mode === "chat" || inWorkChat}
         dockOpen={dockOpen}
         onToggleDock={() => setDockOpen((v) => !v)}
         {...(mode === "work" && project ? { projectName: project.name } : {})}
@@ -262,7 +292,7 @@ export function App() {
                 onNewChat={newChat}
                 onNewWorkspace={() => void newWorkspace()}
                 onSelectThread={selectThread}
-                onSelectProject={selectProject}
+                onSelectProject={(id) => void selectProject(id)}
                 onSelectWorkThread={selectWorkThread}
                 onNewWorkThread={newWorkThread}
                 onDelThread={(id, e) => void delThread(id, e)}

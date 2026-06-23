@@ -155,7 +155,8 @@ export function aggregateEdits(blocks: { kind: string; tool?: UiTool }[]): FileC
     const prev = map.get(path) ?? { adds: 0, dels: 0 };
     map.set(path, { adds: prev.adds + adds, dels: prev.dels + dels });
   }
-  return [...map.entries()].map(([path, s]) => ({ path, ...s }));
+  // 过滤掉无可计量改动的条目（如无 diff 载荷且参数键未识别的工具）——避免汇总卡出现 +0 −0 幽灵行。
+  return [...map.entries()].map(([path, s]) => ({ path, ...s })).filter((e) => e.adds || e.dels);
 }
 
 /** 编辑工具的 +/-：优先 diff 载荷；缺失时从 args 兜底（write 的 content / str_replace 的 old/new）。 */
@@ -172,6 +173,15 @@ function editStat(t: UiTool): { adds: number; dels: number } {
     };
     const oldStr = pick("old_str", "old_string", "oldText", "old");
     const newStr = pick("new_str", "new_string", "newText", "new", "content", "text", "contents");
+    // str_replace（old+new 都有）：按行 diff 计 +/-，避免「改 1 行报 +N −N」式虚高；
+    // write（仅 new/content）：整块新增。
+    if (oldStr != null && newStr != null) {
+      const before = oldStr ? oldStr.replace(/\n$/, "").split("\n") : [];
+      const after = newStr ? newStr.replace(/\n$/, "").split("\n") : [];
+      if (before.length === 0) return { adds: after.length, dels: 0 };
+      if (after.length === 0) return { adds: 0, dels: before.length };
+      return lineDiffStat(before, after);
+    }
     if (oldStr != null || newStr != null) return { adds: countLines(newStr), dels: countLines(oldStr) };
   } catch {
     /* args 非 JSON：忽略 */

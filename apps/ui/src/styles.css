@@ -485,8 +485,11 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .plugins-tab:hover { background: var(--bg-hover); color: var(--tx-0); }
 .plugins-tab.on { background: var(--bg-hover); color: var(--tx-0); }
 .plugins-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* 已访问标签保持挂载（keep-alive），非当前页 display:none 隐藏 */
+.plugins-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.plugins-pane.hidden { display: none; }
 /* 内嵌的管理页（Models/Skills/MCP 的 .page）铺满并各自滚动 */
-.plugins-body > .page { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 28px 24px; }
+.plugins-pane > .page { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 28px 24px; }
 /* 内嵌的 KB/记忆浮层：去掉遮罩、卡片铺满 */
 .ad-page-embed { flex: 1; min-height: 0; display: flex; }
 .ad-overlay-card.embed { width: 100%; height: 100%; max-width: none; max-height: none; border: none; border-radius: 0; box-shadow: none; }
@@ -639,7 +642,10 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mem-ov-item-meta { font-size: 11.5px; color: var(--text-tertiary); margin-top: 5px; font-family: var(--font-mono); }
 .mem-ov-del { flex: none; display: grid; place-items: center; padding: 5px; border-radius: 6px; color: var(--muted); opacity: 0; background: transparent; border: none; cursor: pointer; }
 .mem-ov-item:hover .mem-ov-del { opacity: 1; }
+.mem-ov-del.show { opacity: 1; }
 .mem-ov-del:hover { background: var(--color-danger-soft); color: var(--err); }
+.mem-ov-edit { width: 100%; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--accent); background: var(--color-bg-card); color: var(--text); font-size: 13.5px; line-height: 1.5; font-family: var(--font); }
+.mem-ov-clear { color: var(--err) !important; border-color: var(--color-danger-soft) !important; }
 .mem-ov-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text-tertiary); text-align: center; padding: 50px 20px; }
 .mem-ov-empty p { font-size: 13px; color: var(--text-2); }
 .mem-ov-empty span { font-size: 12px; }

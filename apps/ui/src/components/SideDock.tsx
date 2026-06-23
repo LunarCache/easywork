@@ -98,13 +98,16 @@ export function SideDock({
   const [maxed, setMaxed] = useState(false);
   const [termHistory, setTermHistory] = useState<TermEntry[]>([]);
   const repo = !!git?.status.repo;
+  // repo 经 ref 读取：仅 target.nonce 变化（点击改动卡）才切视图；
+  // git 状态后台刷新（repo false→true）不应把用户从当前视图（终端/预览）拽回 diff。
+  const repoRef = useRef(repo);
+  repoRef.current = repo;
 
   // 「文件改动」卡点击 → git 仓库跳到 diff；否则跳到「文件」视图（FilesTab 按 nonce 定位文件）。
-  // 仅依赖 target.nonce（每次点击都是新 nonce），不依赖整个 git 字面量（Workspace 每渲染重建会误触发）。
   useEffect(() => {
     if (!target) return;
-    setView(repo ? "diff" : "files");
-  }, [target?.nonce, repo]);
+    setView(repoRef.current ? "diff" : "files");
+  }, [target?.nonce]);
 
   // 点消息里的链接/来源 → 自动进「浏览器」（开关由父组件负责）。
   useEffect(() => {

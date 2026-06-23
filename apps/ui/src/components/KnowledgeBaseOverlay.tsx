@@ -143,10 +143,26 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
   };
 
   const newColl = () => {
-    const name = window.prompt("新建集合名称（英文 / 数字 / 连字符）", "");
-    const id = name?.trim();
-    if (!id) return;
-    if (!kbs.some((k) => k.kbId === id)) setExtraKbs((cur) => (cur.includes(id) ? cur : [...cur, id]));
+    const raw = window.prompt("新建集合名称（英文 / 数字 / 连字符）", "");
+    if (raw == null) return;
+    // 规范化为合法 kbId：转小写、非 [a-z0-9-] 折成连字符、去首尾连字符。
+    const id = raw
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (!id) {
+      alert("集合名无效：仅支持英文 / 数字 / 连字符。");
+      return;
+    }
+    // 已存在（后端或本地新建）→ 直接选中，不重复创建。
+    if (kbs.some((k) => k.kbId === id) || extraKbs.includes(id)) {
+      setActive(id);
+      setSel(null);
+      setContent(null);
+      return;
+    }
+    setExtraKbs((cur) => [...cur, id]);
     setActive(id);
     setSel(null);
     setContent(null);
