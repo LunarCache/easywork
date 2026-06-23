@@ -74,7 +74,7 @@ easywork status / stop         # daemon 状态 / 停止
 ```bash
 npm install            # 安装依赖
 npm run build          # turbo 构建全部包
-npm test               # vitest（204 测试）  ·  npm run typecheck  ·  npm run lint
+npm test               # vitest（201 测试）  ·  npm run typecheck  ·  npm run lint
 
 npm run dev:daemon     # 仅起 daemon（stdout 首行打印 {baseUrl, token, pid}）
 npm run dev:ui         # 起 Vite；浏览器连 daemon：http://localhost:5173/?baseUrl=<daemon>&token=<token>
