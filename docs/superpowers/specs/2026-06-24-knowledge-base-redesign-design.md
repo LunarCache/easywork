@@ -6,14 +6,13 @@
 
 当前 `KnowledgeBaseOverlay`（`apps/ui/src/components/KnowledgeBaseOverlay.tsx`）经多次迭代已从「三栏」改为「单列集合手风琴 + 右侧滑出预览」，但用户反馈信息架构仍不直观：集合默认折叠，要逐个展开才能看到文档；滑出预览遮挡列表。
 
-经 brainstorming（核心痛点 = 布局/信息架构；选 B 方向「左集合 + 右文档卡片网格」；确认要摘要预览 + 集合搜索框；搜索采用前端筛选），本设计把右侧改为**响应式卡片网格**，每张卡片承载类型角标 + 名称 + 2 行摘要 + 元信息。
+经 brainstorming（核心痛点 = 布局/信息架构；选 B 方向「左集合 + 右文档卡片网格」；确认要集合搜索框，搜索采用前端筛选），本设计把右侧改为**响应式卡片网格**，每张卡片承载类型角标 + 名称 + 元信息。
 
 ## 目标 / 非目标
 
 **目标**
 - 左集合栏常驻 + 右文档卡片网格，所有文档一眼平铺，切换集合即换内容。
-- 每张卡片显示摘要预览，扫读更快。
-- 文档区内置前端搜索框（按文件名 + 摘要即时过滤）。
+- 文档区内置前端搜索框（按文件名即时过滤）。
 - 复用现有滑出预览（md 渲染 / 纯文本 / 放大）、上传、新建集合、处理中轮询、删除。
 
 **非目标**
@@ -31,9 +30,8 @@
 │               ├──────────────────────────────────────────────────────┤
 │ ● default  4   │  ┌────────┐ ┌────────┐ ┌────────┐                   │
 │ ◉ docs     6   │  │MD name │ │PDF name│ │TXT name│  ← 响应式网格      │
-│ ○ research 2   │  │摘要2行  │ │摘要2行  │ │摘要2行  │  auto-fill 220px │
-│ ○ code-snps 1  │  │14片·3h │ │6片·2d  │ │3片·5d  │                   │
-│               │  └────────┘ └────────┘ └────────┘                   │
+│ ○ research 2   │  │14片·3h │ │6片·2d  │ │3片·5d  │  auto-fill 220px │
+│ ○ code-snps 1  │  └────────┘ └────────┘ └────────┘                   │
 │               │  点任意卡片 → 右侧滑出全文预览（复用现有 kb-pv）       │
 └───────────────┴──────────────────────────────────────────────────────┘
 ```
@@ -57,7 +55,6 @@
 
 每张卡片：
 - **顶部**：类型角标（`fileBadge(d.source)`，30×30 圆角）+ 文件名（hover 显删除按钮 `TrashIcon`）
-- **摘要预览**：`d.preview`，`-webkit-line-clamp:2` 截 2 行，`tx-1` 色 11.5px
 - **元信息**：片段数 · 相对时间（`relTime`），`tx-2` 色 mono 10.5px
 - 点击卡片 → `openDoc(d.id)` → 右侧滑出全文预览
 - `on` 态（当前预览中）：`acc-bd` 边 + `acc-soft` 底
@@ -70,7 +67,7 @@
 
 ### ③ 搜索框（文档区头部右侧）
 纯前端筛选，输入即过滤。
-- 过滤字段：`d.source`（文件名）+ `d.preview`（摘要文本），大小写不敏感
+- 过滤字段：`d.source`（文件名），大小写不敏感
 - 过滤后网格只显示命中卡片；空结果显示 "没有匹配的文档"
 - 切换集合时清空搜索词
 - `width: 160px`，`bg-elev` + `border` + 圆角，内含 `🔍` + `<input>`
@@ -86,51 +83,30 @@
 
 ## 数据流
 
-### 唯一后端改动：`listDocs` 增加 `preview` 字段
+### 后端：零改动
 
-`packages/core/src/rag/store.ts` 的 `listDocs()`：
-
-```ts
-// 当前 SQL（只返回计数）
-SELECT d.id, d.kb_id, d.source, d.created_at, COUNT(c.id) AS n
-FROM kb_docs d LEFT JOIN kb_chunks c ON c.doc_id = d.id
-${kbId ? "WHERE d.kb_id = ?" : ""} GROUP BY d.id ORDER BY d.created_at DESC
-
-// 改为（额外取首个 chunk 文本作摘要）
-SELECT d.id, d.kb_id, d.source, d.created_at,
-       COUNT(c.id) AS n,
-       substr((SELECT text FROM kb_chunks WHERE doc_id = d.id ORDER BY chunk_index LIMIT 1), 1, 160) AS preview
-FROM kb_docs d LEFT JOIN kb_chunks c ON c.doc_id = d.id
-${kbId ? "WHERE d.kb_id = ?" : ""} GROUP BY d.id ORDER BY d.created_at DESC
-```
-
-- `KbDoc` 接口增加 `preview: string`。
-- `/kb/docs` 路由透传（`kb.listDocs()` 已返回，无需改 app.ts）。
-- SDK `kbDocs()` 返回类型补 `preview: string`。
-
-**为什么取首个 chunk**：文档分块后第一个 chunk 通常是标题/导言，作为摘要最自然；`substr(...,1,160)` 截断防超长。这是相关子查询，单文档首 chunk，性能可接受。
+现有 `listDocs()` 已返回 `{ id, kbId, source, chunks, createdAt }`，足够支撑卡片网格（角标 + 文件名 + 片段数 + 时间）与文件名搜索。`/kb/docs` 路由、SDK `kbDocs()` 均无需改动。
 
 ### 前端数据流（最小改动）
 
 ```ts
-const [allDocs, setAllDocs] = useState<KbDoc[]>([]);  // 已存在，含 preview
+const [allDocs, setAllDocs] = useState<KbDoc[]>([]);  // 已存在
 const [selectedKb, setSelectedKb] = useState<string | undefined>(undefined);
 const [q, setQ] = useState("");
 
-// refresh 一次取全部文档（已存在，现在含 preview）
+// refresh 一次取全部文档（已存在）
 const [list, all] = await Promise.all([getClient().kbList(), getClient().kbDocs()]);
 
 // 当前集合文档
 const collDocs = allDocs.filter((d) => d.kbId === selectedKb);
-// 前端搜索过滤
+// 前端搜索过滤（仅文件名）
 const filtered = q.trim()
-  ? collDocs.filter((d) =>
-      (d.source + " " + (d.preview ?? "")).toLowerCase().includes(q.trim().toLowerCase()))
+  ? collDocs.filter((d) => d.source.toLowerCase().includes(q.trim().toLowerCase()))
   : collDocs;
 ```
 
 ### 零改动部分
-滑出预览、上传（`onFiles`）、新建集合（`confirmColl`）、处理中轮询（`useEffect` + `setInterval`）、删除（`del`）——逻辑全部保留，仅 JSX 结构和 CSS 重排。
+后端（store/route/SDK）、滑出预览、上传（`onFiles`）、新建集合（`confirmColl`）、处理中轮询（`useEffect` + `setInterval`）、删除（`del`）——逻辑全部保留，仅 JSX 结构和 CSS 重排。
 
 ## 视觉规范（贴合现有 Agent Tasks token）
 
@@ -148,23 +124,20 @@ const filtered = q.trim()
 
 | 文件 | 改动 |
 |---|---|
-| `packages/core/src/rag/store.ts` | `listDocs()` SQL 加 preview 子查询；`KbDoc` 加 `preview` 字段 |
-| `packages/sdk/src/index.ts` | `kbDocs()` 返回类型 `docs` 补 `preview: string` |
-| `apps/ui/src/components/KnowledgeBaseOverlay.tsx` | 重构 JSX：手风琴 → 左集合栏 + 右卡片网格；加搜索框 + 前端过滤 |
+| `apps/ui/src/components/KnowledgeBaseOverlay.tsx` | 重构 JSX：手风琴 → 左集合栏 + 右卡片网格；加搜索框 + 前端过滤（仅文件名） |
 | `apps/ui/src/styles.css` | 删 `.kb-acc-*` 手风琴样式；新增 `.kb-coll-*`（集合栏）/`.kb-doc-grid`/`.kb-doc-card`（网格）/`.kb-search`；调整 `.kb-pv` 定位 |
 
 ## 验收标准
 
 1. 左集合栏常驻，点击切换右侧文档区，处理中集合有脉冲点。
-2. 右侧文档以响应式卡片网格平铺，每张卡片显示角标 + 名称 + 2 行摘要 + 片段数·时间。
-3. 搜索框输入即过滤（文件名 + 摘要），空结果显示提示，切集合清空搜索词。
+2. 右侧文档以响应式卡片网格平铺，每张卡片显示角标 + 名称 + 片段数·时间。
+3. 搜索框输入即过滤（文件名），空结果显示提示，切集合清空搜索词。
 4. 点卡片滑出全文预览（md 渲染 / 纯文本 / 放大），与现状行为一致。
 5. 上传 / 新建集合 / 删除 / 处理中轮询功能不回归。
 6. `npm run typecheck`（19/19）+ `npm run lint`（0 error）+ UI `npm run build` 绿。
-7. 后端 `listDocs` 返回 preview；既有 KB 测试通过（`rag.test.ts` 等）。
+7. 后端零改动；既有测试全绿（`npm test`）。
 
 ## 风险 / 边界
 
-- **既有 KB 测试**：`rag.test.ts` 若断言 `listDocs` 返回形状，需同步更新。实现时先跑 `npm test` 确认。
-- **首 chunk 为空**：解析失败的文档首 chunk 可能为空 → preview 为空字符串，卡片摘要区留空（不崩）。
-- **超大文档**：`substr(...,1,160)` 在 SQL 层截断，不把全文传到前端。
+- **纯前端改动**：后端零改动，无回归风险；既有 KB 测试不受影响。
+- **空文件名/长文件名**：卡片名溢出用 `text-overflow: ellipsis` 处理。
