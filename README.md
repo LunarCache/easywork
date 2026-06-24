@@ -25,7 +25,7 @@ curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh
 - **工作区 + 聊天**：本地项目目录读写文件 / 跑命令（git 审查），或隔离的每会话工件目录；右侧常驻「工作台」面板（启动菜单：改动 / 文件 / 浏览器 / 终端）。
 - **知识库 RAG + 可插拔记忆**：sqlite-vec 语义 ⊕ 词法混合召回；记忆作用域化 + 渐进式披露 + 批量抽取。
 - **多协议网关**：`/v1`（OpenAI）+ `/v1/messages`（Anthropic），可让 Claude Code 等外部客户端直接指向。
-- **桌面 UI**：Tauri 2 + React 的 "Agent Tasks" 工作台（IDE/终端味 · 明暗双主题 · 展开式侧栏 + 插件页 + 行内工具调用）。
+- **桌面 UI**：Tauri 2 + React 的 "Agent Tasks" 工作台（IDE/终端味 · 明暗双主题 · 展开式侧栏 + 整页设置〔模型/知识库/Skills/MCP/记忆 内嵌〕+ 行内工具调用）。
 
 > 详见 [功能与设计 →](docs/FEATURES.md)
 

@@ -15,7 +15,7 @@
 - **记忆（作用域化）**：全局池 + 每工作区私有池；渐进式披露注入 + 批量事实抽取；sqlite-vec ⊕ 词法混合召回；markdown 可手改回灌。
 - **知识库 RAG**：上传 → 解析 → 分块 → 嵌入 → RRF 混合检索 + 引用来源。
 - **思考过程持久化**：reasoning 落库并跨会话回放（不回喂模型）。
-- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（Agent Desk 工作台设计语言）；图标轨道 + 分组会话列表 + 三栏可拖拽 + 统一「工作台坞」+ 设置 / 记忆浮层。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 整页设置（模型/知识库/Skills/MCP/记忆 内嵌）+ 统一弹层。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP 持久化）。
 - **命令行（CLI）**：`easywork` 既是 daemon 入口也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性，支持管道 stdin、`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `kb ls·search·add·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。
 - **打包发布（macOS）**：daemon 打成单文件原生二进制（Node SEA，运行免 Node）；Tauri 出 dmg（Apple Silicon，内置 daemon + sqlite-vec）；`install.sh` 一键安装并自动备齐 llama 运行时（缺失经 llama.app 装）；`v*` tag 触发 GitHub Actions 构建 + 发布到 Releases。
@@ -31,6 +31,17 @@
 ---
 
 ## 里程碑日志
+
+## 2026-06-24（续）— 设置整页化 + 插件并入设置 + 弹层统一 + 本地模型删除
+
+`feat/kb-redesign` 合回 main 后的一批 UI 一致性收口（纯 `apps/ui` + `@ew/core` 一个删除端点）。
+
+- **设置整页化 + 插件并入**：设置从弹层（`PageOverlay`）改为**整页内嵌**，左导航 8 项（通用 / 模型 / 知识库 / Skills / MCP / 记忆 / 向量记忆 / 本地网络）；删除 `PluginsView`，5 个管理页以 keep-alive 内嵌进设置；去掉侧栏「插件」入口 + `Mode "plugins"`。通用 / 向量记忆 / 本地网络改 ZCode 式卡片行（标题+说明左、控件右）；向量记忆精简为紧凑状态行。
+- **回归修复（多 agent 审查发现）**：设置整页化曾会卸载 Chat/Workspace 而中断在途流式运行并丢整轮 → 改为 `.ad-body` 始终挂载、CSS 隐藏；设置打开时隐藏工作台开关。
+- **弹层统一**：新增 `useConfirm` hook + `ConfirmDialog`（替代 Tauri 不可靠的 `window.confirm`）。确认类（模型/知识库/MCP 删除）→ `useConfirm`；记忆添加输入 → `.confirm-box.wide`；KB 上传目标选择 → `.confirm-box.list-box`。删除全部自研 `.kb-confirm`/`.kb-pick` 弹层与 KB 删除原生 `alert`；`useConfirm` 修复并发重入 promise 泄漏。
+- **本地模型删除**：模型页加删除按钮（hover 显形）+ 嵌入模型分级提示；后端 `/models/local/delete` 删的若是当前向量记忆引擎模型则一并停嵌入进程 + 清持久化设置（否则状态卡「运行中」）。
+- **死代码清理**：`PageOverlay`、`PluginsView`、`.plugins-*`/`.appearance-*`/`.kb-confirm*`/旧 `.kb-pick` 外壳 CSS。
+- 测试 **204 通过** · typecheck 19/19 · lint 0 error · UI build 绿（Playwright 逐项验证）。提交 `478f1c0`。
 
 ## 2026-06-24 — 知识库 / 记忆页重设计 + MCP 增强 + 审查修复（feat/kb-redesign）
 
