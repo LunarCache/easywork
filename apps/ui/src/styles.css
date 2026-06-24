@@ -678,10 +678,10 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mem-add-textarea { width: 100%; min-height: 90px; resize: vertical; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r); background: var(--color-bg-primary); color: var(--text); font-size: 13px; font-family: var(--font); line-height: 1.5; outline: none; }
 .mem-add-textarea:focus { border-color: var(--accent); }
 .mem-add-hint { font-size: 11px; color: var(--text-tertiary); }
-.mem-ov-scopes { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 20px 8px; }
-.mem-ov-scope { display: flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border); background: var(--color-bg-card); color: var(--text-2); font-size: 12px; font-weight: 550; cursor: pointer; }
-.mem-ov-scope:hover { background: var(--color-bg-tertiary); }
-.mem-ov-scope.on { background: var(--accent-soft); border-color: var(--color-accent-border); color: var(--accent); }
+.mem-ov-scopes { display: inline-flex; flex-wrap: wrap; gap: 0; padding: 3px; margin: 0 20px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r); }
+.mem-ov-scope { display: flex; align-items: center; gap: 5px; padding: 5px 12px; border: none; border-radius: calc(var(--r) - 3px); background: transparent; color: var(--text-2); font-size: 12px; font-weight: 550; cursor: pointer; white-space: nowrap; }
+.mem-ov-scope:hover { color: var(--text); }
+.mem-ov-scope.on { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); }
 .mem-ov-note { margin: 0 20px 8px; font-size: 12px; color: var(--text-2); background: var(--color-bg-tertiary); border-radius: var(--r); padding: 8px 12px; }
 .mem-ov-scroll { flex: 1; overflow-y: auto; padding: 6px 20px 16px; }
 .mem-ov-group { margin-bottom: 18px; }
