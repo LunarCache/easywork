@@ -1,16 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LocalNetInfo } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
-import {
-  loadAgentPrefs,
-  saveAgentPrefs,
-  type AgentPrefs,
-  type Appearance,
-  type ThemePrefs,
-} from "../lib/prefs.js";
+import { type Appearance, type ThemePrefs } from "../lib/prefs.js";
 import {
   SlidersIcon,
-  BrainIcon,
   GlobeIcon,
   PaletteIcon,
   AlertIcon,
@@ -40,20 +33,11 @@ export function Settings({
   onThemeChange: (next: ThemePrefs) => void;
 }) {
   const [note, setNote] = useState("");
-  const [agentPrefs, setAgentPrefs] = useState<AgentPrefs>(() => loadAgentPrefs());
   const [net, setNet] = useState<LocalNetInfo | null>(null);
   const [netBusy, setNetBusy] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [embed, setEmbed] = useState<EmbedStatus | null>(null);
   const [embedBusy, setEmbedBusy] = useState(false);
-
-  const setAgentPref = (key: keyof AgentPrefs, raw: string) => {
-    const v = raw.trim() === "" ? undefined : Number(raw);
-    const next = { ...agentPrefs, [key]: v };
-    if (v === undefined || Number.isNaN(v)) delete next[key];
-    setAgentPrefs(next);
-    saveAgentPrefs(next);
-  };
 
   const refresh = useCallback(async () => {
     try {
@@ -151,23 +135,6 @@ export function Settings({
               ))}
             </div>
           </div>
-        </div>
-      </section>
-
-      <section>
-        <div className="sec-head">
-          <span className="ico violet">
-            <BrainIcon size={18} />
-          </span>
-          <div>
-            <h3>Agent 循环</h3>
-          </div>
-        </div>
-        <div className="params-grid">
-          <label>
-            <span>最大工具迭代轮数</span>
-            <input type="number" step="1" min="1" max="100" placeholder="默认 25" value={agentPrefs.maxIterations ?? ""} onChange={(e) => setAgentPref("maxIterations", e.target.value)} />
-          </label>
         </div>
       </section>
 

@@ -11,3 +11,4 @@ export * from "./mcp.js";
 export * from "./im.js";
 export * from "./conversation.js";
 export * from "./events.js";
+export * from "./preview.js";

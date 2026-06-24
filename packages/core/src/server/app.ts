@@ -13,6 +13,9 @@ import {
   MemoryLayerSchema,
   messageText,
   normalizeContent,
+  resolvePreviewKind,
+  mimeForName,
+  type PreviewMeta,
   GLOBAL_SCOPE,
   workspaceScope,
   isWorkspaceScope,
@@ -38,7 +41,7 @@ import { SqliteConversationRepo } from "../store/conversation.js";
 import { EmbeddingService } from "../memory/embedding-service.js";
 import { buildFactExtractor } from "../memory/fact-extractor.js";
 import { GitService } from "../git/git.js";
-import { listDir, readFileSafe } from "@ew/tools";
+import { listDir, readFileSafe, readRawSafe, statFileSafe } from "@ew/tools";
 import { KnowledgeBaseStore } from "../rag/store.js";
 import { parseFile } from "../rag/parse.js";
 import { RouterServerManager } from "../engine/router-server-manager.js";
@@ -508,7 +511,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     threadId: z.string().default("default"),
     model: z.string(),
     history: z.array(ChatMessageSchema),
-    maxIterations: z.number().int().positive().optional(),
     excludeTools: z.array(z.string()).optional(),
     /** 禁用的 Skill 名称（按名过滤 pi resourceLoader 的 skills）。 */
     excludeSkills: z.array(z.string()).optional(),
@@ -976,19 +978,7 @@ version: "0.1.0"
       return reply.code(400).send({ error: "fs_error", message: e instanceof Error ? e.message : String(e) });
     }
   });
-  app.get("/workspace/:id/fs/read", async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const q = req.query as { path?: string; start?: string; end?: string };
-    if (!q.path) return reply.code(400).send({ error: "path_required" });
-    try {
-      return readFileSafe(projectRoot(id), q.path, {
-        ...(q.start ? { start: Number(q.start) } : {}),
-        ...(q.end ? { end: Number(q.end) } : {}),
-      });
-    } catch (e) {
-      return reply.code(400).send({ error: "fs_error", message: e instanceof Error ? e.message : String(e) });
-    }
-  });
+  // 注：单文件读取统一走下面的 /files/meta + /files/raw（FileViewer）；旧 /workspace/:id/fs/read 与 /chat/:threadId/file 已移除。
 
   // 对话模式工件浏览（只读）：每会话目录 <workspace>/chats/<threadId>，供右侧「工件」面板按会话展示产出。
   app.get("/chat/:threadId/files", async (req, reply) => {
@@ -1002,15 +992,40 @@ version: "0.1.0"
       return reply.code(400).send({ error: "fs_error", message: e instanceof Error ? e.message : String(e) });
     }
   });
-  app.get("/chat/:threadId/file", async (req, reply) => {
-    const { threadId } = req.params as { threadId: string };
-    const q = req.query as { path?: string; start?: string; end?: string };
-    if (!q.path) return reply.code(400).send({ error: "path_required" });
+
+  // —— 统一文件预览（dock 文件 / 工件 共用）：scope=workspace|chat ——
+  // /files/meta：渲染类型 + 文本类内联；/files/raw：原始字节（img/pdf 经 blob 渲染）。路径经 readFileSafe/readRawSafe 限定。
+  const previewBase = (scope: string, id: string): string =>
+    scope === "workspace" ? projectRoot(id) : chatWorkspaceDir(id);
+  app.get("/files/meta", async (req, reply) => {
+    const q = req.query as { scope?: string; id?: string; path?: string };
+    if (!q.scope || !q.id || !q.path) return reply.code(400).send({ error: "params_required" });
     try {
-      return readFileSafe(chatWorkspaceDir(threadId), q.path, {
-        ...(q.start ? { start: Number(q.start) } : {}),
-        ...(q.end ? { end: Number(q.end) } : {}),
-      });
+      const base = previewBase(q.scope, q.id);
+      const name = q.path.split(/[/\\]/).pop() || q.path;
+      const kind = resolvePreviewKind(name);
+      const mime = mimeForName(name);
+      if (kind === "image" || kind === "pdf") {
+        const { size } = statFileSafe(base, q.path);
+        return { name, mime, kind, size } satisfies PreviewMeta;
+      }
+      const r = readFileSafe(base, q.path);
+      if (r.binary) return { name, mime, kind: "binary", size: r.size } satisfies PreviewMeta;
+      return { name, mime, kind, size: r.size, text: r.content ?? "", truncated: !!r.truncated } satisfies PreviewMeta;
+    } catch (e) {
+      return reply.code(400).send({ error: "fs_error", message: e instanceof Error ? e.message : String(e) });
+    }
+  });
+  app.get("/files/raw", async (req, reply) => {
+    const q = req.query as { scope?: string; id?: string; path?: string };
+    if (!q.scope || !q.id || !q.path) return reply.code(400).send({ error: "params_required" });
+    try {
+      const raw = readRawSafe(previewBase(q.scope, q.id), q.path);
+      const name = q.path.split(/[/\\]/).pop() || q.path;
+      reply.header("content-type", mimeForName(name));
+      reply.header("content-length", String(raw.buffer.length));
+      reply.header("cache-control", "no-store");
+      return reply.send(raw.buffer);
     } catch (e) {
       return reply.code(400).send({ error: "fs_error", message: e instanceof Error ? e.message : String(e) });
     }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ExecResult, GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
-import { CopyButton } from "./MessageStream.js";
+import { FileViewer } from "./FileViewer.js";
 import { fileType } from "../lib/filetype.js";
 import type { UiMsg } from "../lib/agent-stream.js";
 import {
@@ -24,13 +24,6 @@ import {
   XIcon,
 } from "../icons.js";
 
-// ===== 共享类型 =====
-export interface FilePreview {
-  content?: string;
-  binary?: boolean;
-  truncated?: boolean;
-  size: number;
-}
 /** git 上下文：提供则出现「改动」tab（工作区模式）。 */
 export interface GitContext {
   projectId: string;
@@ -67,7 +60,8 @@ export function SideDock({
   open,
   onClose,
   files,
-  readFile,
+  previewScope,
+  previewId,
   onFilesRefresh,
   onRevealDir,
   filesEmpty,
@@ -81,7 +75,9 @@ export function SideDock({
   open: boolean;
   onClose: () => void;
   files: WsEntry[];
-  readFile: (path: string) => Promise<FilePreview>;
+  /** 统一文件预览的作用域 + id（FileViewer 据此走 /files/meta + /files/raw）。 */
+  previewScope: "workspace" | "chat";
+  previewId: string;
   onFilesRefresh: () => void;
   onRevealDir: () => void;
   filesEmpty: ReactNode;
@@ -196,7 +192,13 @@ export function SideDock({
         )}
         {view === "diff" && git && <DiffTab git={git} />}
         {view === "files" && (
-          <FilesTab files={files} readFile={readFile} emptyHint={filesEmpty} openTarget={repo ? null : target} />
+          <FilesTab
+            files={files}
+            scope={previewScope}
+            id={previewId}
+            emptyHint={filesEmpty}
+            openTarget={repo ? null : target}
+          />
         )}
         {view === "terminal" && <TerminalTab msgs={msgs} history={termHistory} onRun={runCommand} />}
         {view === "preview" && <PreviewTab url={previewUrl} onClear={onClearPreview} />}
@@ -205,33 +207,30 @@ export function SideDock({
   );
 }
 
-// ===== 文件 tab（工件列表 + 文件树统一）=====
+// ===== 文件 tab（工件列表 + 文件树统一）；预览交给统一 FileViewer =====
 function FilesTab({
   files,
-  readFile,
+  scope,
+  id,
   emptyHint,
   openTarget,
 }: {
   files: WsEntry[];
-  readFile: (path: string) => Promise<FilePreview>;
+  scope: "workspace" | "chat";
+  id: string;
   emptyHint: ReactNode;
   /** 外部请求打开的文件（点「文件改动」卡时定位预览）；nonce 让连点同一文件也触发。 */
   openTarget?: { path: string; nonce: number } | null;
 }) {
   const [sel, setSel] = useState<string | null>(null);
-  const [data, setData] = useState<FilePreview | null>(null);
-  const [mode, setMode] = useState<"code" | "preview">("code");
   const handledRef = useRef<number | null>(null);
 
   // 选中文件刷新后消失（被删/改名）→ 收起预览。
   useEffect(() => {
-    if (sel && !files.some((f) => f.path === sel)) {
-      setSel(null);
-      setData(null);
-    }
+    if (sel && !files.some((f) => f.path === sel)) setSel(null);
   }, [files, sel]);
 
-  // 外部请求打开某文件（文件改动卡）→ 选中并预览。按 nonce 去重（防文件列表轮询重复触发；连点同一文件 nonce 变 → 重新打开）。
+  // 外部请求打开某文件（文件改动卡）→ 选中。按 nonce 去重（防文件列表轮询重复触发；连点同一文件 nonce 变 → 重新打开）。
   useEffect(() => {
     if (!openTarget || handledRef.current === openTarget.nonce) return;
     // 路径优先精确匹配；不中（相对/绝对形式不一）则退化到 basename 匹配，避免静默无反应。
@@ -241,28 +240,7 @@ function FilesTab({
     if (!hit) return;
     handledRef.current = openTarget.nonce;
     setSel(hit.path);
-    setData(null);
-    setMode(/\.html?$/i.test(hit.path) ? "preview" : "code");
-    readFile(hit.path)
-      .then(setData)
-      .catch(() => setData({ size: 0 }));
-  }, [openTarget, files, readFile]);
-
-  const openFile = async (p: string) => {
-    if (sel === p) {
-      setSel(null);
-      setData(null);
-      return;
-    }
-    setSel(p);
-    setData(null);
-    setMode(/\.html?$/i.test(p) ? "preview" : "code");
-    try {
-      setData(await readFile(p));
-    } catch {
-      setData({ size: 0 });
-    }
-  };
+  }, [openTarget, files]);
 
   if (files.length === 0) return <div className="rev-empty">{emptyHint}</div>;
   return (
@@ -271,7 +249,10 @@ function FilesTab({
         const isOpen = sel === f.path;
         return (
           <div key={f.path} className="af-file">
-            <div className={`af-file-head ${isOpen ? "open" : ""}`} onClick={() => void openFile(f.path)}>
+            <div
+              className={`af-file-head ${isOpen ? "open" : ""}`}
+              onClick={() => setSel(isOpen ? null : f.path)}
+            >
               <ChevronIcon size={13} className={`chev ${isOpen ? "open" : ""}`} />
               {fileIconFor(f.path)}
               <span className="af-path" title={f.path}>
@@ -279,53 +260,14 @@ function FilesTab({
               </span>
               {f.size != null && <span className="af-size">{fmtBytes(f.size)}</span>}
             </div>
-            {isOpen && <FilePreviewView path={f.path} data={data} mode={mode} setMode={setMode} />}
+            {isOpen && (
+              <div className="af-body">
+                <FileViewer key={f.path} source={{ kind: "fs", scope, id, path: f.path }} />
+              </div>
+            )}
           </div>
         );
       })}
-    </div>
-  );
-}
-
-export function FilePreviewView({
-  path,
-  data,
-  mode,
-  setMode,
-}: {
-  path: string;
-  data: FilePreview | null;
-  mode: "code" | "preview";
-  setMode: (m: "code" | "preview") => void;
-}) {
-  if (!data) return <div className="af-loading">加载中…</div>;
-  if (data.binary) return <div className="af-bin">二进制文件，无法预览 · {fmtBytes(data.size)}</div>;
-  const content = data.content ?? "";
-  const isHtml = /\.html?$/i.test(path);
-  return (
-    <div className="af-body">
-      <div className="af-toolbar">
-        {isHtml && (
-          <div className="af-seg">
-            <button className={mode === "preview" ? "on" : ""} onClick={() => setMode("preview")}>
-              预览
-            </button>
-            <button className={mode === "code" ? "on" : ""} onClick={() => setMode("code")}>
-              源码
-            </button>
-          </div>
-        )}
-        <span className="bar-spacer" />
-        <CopyButton text={content} />
-      </div>
-      {isHtml && mode === "preview" ? (
-        <iframe className="af-frame" sandbox="allow-scripts" title={path} srcDoc={content} />
-      ) : (
-        <pre className="af-code">
-          <code>{content || "（空文件）"}</code>
-        </pre>
-      )}
-      {data.truncated && <div className="af-trunc">内容较大，已截断显示。</div>}
     </div>
   );
 }

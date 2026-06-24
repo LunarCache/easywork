@@ -457,15 +457,23 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 用户右对齐气泡；**助手无逐行头像、纯 prose**（react-markdown + remark-gfm + rehype-highlight，外链改路由到 dock 内嵌预览而非跳走 webview）。按有序 `blocks`（reasoning|tool|text）保留真实交织。**行内工具调用**（`<details>` 行）：思考/编辑〔文件类型角标 + `+/-`〕/运行〔命令 + 终端输出〕/读取/搜索〔favicon 来源〕。**diff 统计**：`lineDiffStat`（滚动 Int32Array LCS，`n*m>250_000` 退化行数差防流式卡顿）、`diffStat`（优先 unified、否则 before/after）、`editStat`（str_replace 行级 diff 防虚高）、`aggregateEdits`（按路径合并、过滤 `+0 −0` 幽灵）。**文件改动汇总卡**点击跳 dock 对应文件 diff。
 
-### 13.5 插件页
+### 13.5 统一文件预览 FileViewer
+
+一个 `<FileViewer source>` 组件按 `kind` 选渲染器（开闭：加类型=加分支），统一三处预览面（工作台「文件」tab、项目文件浏览页 FilesPage、知识库文档预览）：
+- **数据源四态**：`fs`（工作区/会话文件，走 `/files/meta` + `/files/raw`）/ `text`（KB 文档等已有文本）/ `url`（网页）/ `bytes`（消息图片 base64）。
+- **类型**：文本·代码（highlight.js 高亮）/ Markdown（渲染 ⇆ 源码）/ 图片（鉴权 fetch→blob URL）/ SVG（渲染 ⇆ 源码）/ PDF（`<iframe>` 浏览器原生）/ HTML（沙箱 iframe ⇆ 源码）/ 二进制兜底下载。不做音视频。
+- **鉴权字节**：daemon 用 Bearer，`<img>/<iframe>` 不能带 header → SDK `fileBytes()` 用 fetch 取 Blob → `useBlobUrl` 的 `createObjectURL` 当 src，卸载/换 key 时 revoke。
+- **后端**：`/files/meta`（类型判定 + 文本类内联）+ `/files/raw`（原始字节 + `Content-Type`），`scope=workspace|chat`，复用 `readFileSafe`/`readRawSafe` 路径限定；`resolvePreviewKind`/`mimeForName`（`@ew/shared/preview`）前后端共用判定。旧 `/workspace/:id/fs/read`、`/chat/:threadId/file` 已被它取代移除。
+
+### 13.6 插件页
 
 顶部标签 模型/知识库/Skills/MCP/记忆，**lazy keep-alive**（访问过的标签 `display:none` 保活，避免 KB 上传/索引轮询中断）。KB/记忆以 `embedded` 模式无遮罩铺满。
-- **知识库（卡片网格）**：左集合栏（主导文件类型图标 + 计数 + 处理中脉冲点）+ 中文档卡片网格 + 右滑出预览（md 渲染 / `<pre>`，`docReqRef` 时序保护）；顶部两步上传（先选/建目标集合，kbId 规范化）；900ms job 轮询。
+- **知识库（卡片网格）**：左集合栏（主导文件类型图标 + 计数 + 处理中脉冲点）+ 中文档卡片网格 + 右滑出预览（统一 `FileViewer`，`docReqRef` 时序保护）；顶部两步上传（先选/建目标集合，kbId 规范化）；900ms job 轮询。
 - **记忆（档案 Dossier）**：左作用域栏（全局/你 + 各工作区，带计数、空作用域变灰）+ 右按层分区（层语义色点 + 计数 + 行内添加）；记忆卡带**来源徽章（手动 / 自动抽取，按 `sessionId` 区分）** + 时间 + 行内编辑/删除；顶部搜索（作用域内过滤）+ 向量召回状态（含一键启用 nomic）；空作用域/空层可从「+ 添加」选目标加第一条。
 - **模型**：本地/云端分页；本地按 kind（文本/嵌入/视觉）显示，load/unload 或"启用向量"；无 llama 二进制时一键安装 banner；HF 搜索下载（流式 %）；云端 provider 预设 + 手填上下文窗口。
 - **Skills/MCP**：SKILL.md frontmatter 卡 + 启停；MCP server 列表自动探测 + 增删改导入。
 
-### 13.6 文件类型体系 + Tauri prompt 规避
+### 13.7 文件类型体系 + Tauri prompt 规避
 
 `lib/filetype.ts` 统一扩展名→`{label,color,Icon}`（工具行/KB/文件树/汇总卡共用）；`BY_NAME` 处理整名配置（Dockerfile/.gitignore→GIT，避免 `.gitignore`→GITI）。**Tauri webview 无 `window.prompt`** → 新建集合/技能等改**行内输入**（仅浏览器回退仍用 prompt；桌面走 Rust 原生目录选择）。
 
@@ -522,10 +530,10 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 - **知识库**：`packages/core/src/rag/{store,chunking,parse,tool}.ts`
 - **Skills / MCP**：`packages/skills/src/{manager,frontmatter}.ts` · `packages/mcp/src/{manager,connect}.ts`
 - **/v1 网关**：`packages/core/src/openai-compat/{router,pi-adapt,translate,anthropic}.ts`
-- **契约**：`packages/shared/src/{message,provider,tool,memory,conversation,events,im,model,mcp,skill}.ts`
+- **契约**：`packages/shared/src/{message,provider,tool,memory,conversation,events,im,model,mcp,skill,preview}.ts`
 - **CLI**：`apps/daemon/src/cli.ts` + `apps/daemon/src/cli/*`
 - **IM**：`packages/im-connectors/src/{host,telegram,index}.ts`
-- **UI**：`apps/ui/src/{App,main}.tsx` · `apps/ui/src/components/*` · `apps/ui/src/pages/*` · `apps/ui/src/lib/{prefs,filetype,client,desktop}.ts` · `apps/ui/src/styles.css`
+- **UI**：`apps/ui/src/{App,main}.tsx` · `apps/ui/src/components/*`（含统一预览 `FileViewer.tsx`）· `apps/ui/src/pages/*` · `apps/ui/src/lib/{prefs,filetype,preview,client,desktop}.ts` · `apps/ui/src/styles.css`
 - **打包/发布**：`scripts/build-daemon-sea.mjs` · `.github/workflows/release.yml`
 
 ---

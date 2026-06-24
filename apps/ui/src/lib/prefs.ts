@@ -9,12 +9,7 @@ export interface Sampling {
   maxTokens?: number;
 }
 
-export interface AgentPrefs {
-  maxIterations?: number;
-}
-
 const SAMPLING_KEY = "ew.sampling"; // Record<modelId, Sampling>
-const AGENT_KEY = "ew.agent";
 
 function readMap(): Record<string, Sampling> {
   try {
@@ -44,22 +39,6 @@ export function saveSampling(model: string, s: Sampling): void {
   }
 }
 
-export function loadAgentPrefs(): AgentPrefs {
-  try {
-    const raw = localStorage.getItem(AGENT_KEY);
-    return raw ? (JSON.parse(raw) as AgentPrefs) : {};
-  } catch {
-    return {};
-  }
-}
-
-export function saveAgentPrefs(p: AgentPrefs): void {
-  try {
-    localStorage.setItem(AGENT_KEY, JSON.stringify(p));
-  } catch {
-    /* ignore */
-  }
-}
 
 // 被禁用的 Skill 名称（按名传给 runAgent.excludeSkills，过滤 pi 发现的 skills）。
 const DISABLED_SKILLS_KEY = "ew.disabledSkills";

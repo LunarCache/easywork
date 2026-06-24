@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
+import { FileViewer } from "./FileViewer.js";
 import { getClient } from "../lib/client.js";
 import { fileType, type FileTypeInfo } from "../lib/filetype.js";
 import {
@@ -61,7 +59,6 @@ const ACTIVE = ["queued", "parsing", "embedding"];
 
 /** 文件类型角标 = 统一文件类型体系（见 lib/filetype）。 */
 const fileBadge = fileType;
-const isMarkdown = (source: string) => /\.(md|markdown|mdx)$/i.test(source);
 
 /** 集合主导文件类型：取集合内最多的扩展名对应的角标（空集合返回 null → 用中性集合图标）。 */
 function dominantType(sources: string[]): FileTypeInfo | null {
@@ -411,15 +408,9 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                         {content.chunks} 片段 · {relTime(content.createdAt)} · {content.kbId}
                       </span>
                     </div>
-                    {isMarkdown(content.source) ? (
-                      <div className="kb-pv-body md">
-                        <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
-                          {content.text || "（空文档）"}
-                        </Markdown>
-                      </div>
-                    ) : (
-                      <pre className="kb-pv-body pre">{content.text || "（空文档）"}</pre>
-                    )}
+                    <div className="kb-pv-fv">
+                      <FileViewer source={{ kind: "text", name: content.source, text: content.text || "" }} />
+                    </div>
                   </>
                 )}
               </>

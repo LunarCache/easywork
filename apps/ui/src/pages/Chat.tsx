@@ -21,7 +21,6 @@ import {
   loadSampling,
   saveSampling,
   samplingToRequest,
-  loadAgentPrefs,
   loadDisabledSkills,
   type Sampling,
 } from "../lib/prefs.js";
@@ -286,7 +285,6 @@ export function Chat({
 
     const excludeTools = web ? [] : ["web_search", "http_get"];
     const sampling = samplingToRequest(loadSampling(model));
-    const agentPrefs = loadAgentPrefs();
     const excludeSkills = loadDisabledSkills();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -302,7 +300,6 @@ export function Chat({
           kb,
           ...(kb && kbId ? { kbId } : {}),
           ...(Object.keys(sampling).length ? { sampling } : {}),
-          ...(agentPrefs.maxIterations ? { maxIterations: agentPrefs.maxIterations } : {}),
           ...(excludeSkills.length ? { excludeSkills } : {}),
         },
         { signal: ac.signal },
@@ -610,7 +607,8 @@ export function Chat({
         open={dockOpen}
         onClose={() => setDockOpen(false)}
         files={files}
-        readFile={(p) => getClient().chatFile(threadId, p)}
+        previewScope="chat"
+        previewId={threadId}
         onFilesRefresh={() => void refreshFiles()}
         onRevealDir={() => void getClient().chatReveal(threadId)}
         filesEmpty="本会话还没有产出文件。让 AI 写文件、或运行命令生成网页 / 构建物后，会在这里展示并可预览。"

@@ -106,6 +106,40 @@ export function readFileSafe(
   return { content: text, truncated, size: stat.size };
 }
 
+const MAX_RAW_BYTES = 12 * 1024 * 1024; // 12MB：图片/PDF/SVG 足够；blob 整文件进内存，超限只取前缀并标记。
+
+export interface RawResult {
+  buffer: Buffer;
+  size: number;
+  truncated: boolean;
+}
+
+/** 纯函数：安全读"原始字节"（供 /files/raw 端点给 img/pdf 用 blob 渲染）。路径经 resolveWorkspacePath 限定。 */
+export function readRawSafe(root: string, relPath: string, maxBytes = MAX_RAW_BYTES): RawResult {
+  const abs = resolveWorkspacePath(root, relPath);
+  const stat = fs.statSync(abs);
+  if (stat.isDirectory()) throw new Error("目标是目录，无法预览");
+  if (stat.size > maxBytes) {
+    const fd = fs.openSync(abs, "r");
+    try {
+      const buffer = Buffer.alloc(maxBytes);
+      const n = fs.readSync(fd, buffer, 0, maxBytes, 0);
+      return { buffer: buffer.subarray(0, n), size: stat.size, truncated: true };
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+  return { buffer: fs.readFileSync(abs), size: stat.size, truncated: false };
+}
+
+/** 纯函数：安全取文件大小（媒体类预览 meta 用，不读全文）。路径经 resolveWorkspacePath 限定。 */
+export function statFileSafe(root: string, relPath: string): { size: number } {
+  const abs = resolveWorkspacePath(root, relPath);
+  const stat = fs.statSync(abs);
+  if (stat.isDirectory()) throw new Error("目标是目录，无法预览");
+  return { size: stat.size };
+}
+
 /** 带行号渲染（cat -n 风格，便于模型按行定位）。 */
 function withLineNumbers(text: string, startLine = 1): string {
   return text

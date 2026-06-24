@@ -364,7 +364,8 @@ export function Workspace({
         open={dockOpen}
         onClose={() => setDockOpen(false)}
         files={wsFiles}
-        readFile={(p) => getClient().wsRead(project.id, p)}
+        previewScope="workspace"
+        previewId={project.id}
         onFilesRefresh={() => void refreshWsFiles()}
         onRevealDir={() => void getClient().wsReveal(project.id)}
         filesEmpty="该工作区暂无可显示的文件。"

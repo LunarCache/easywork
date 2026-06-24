@@ -12,6 +12,7 @@ import type {
   McpServerConfig,
   McpProbeResult,
   McpToolInfo,
+  PreviewMeta,
   Project,
   SamplingParams,
   Skill,
@@ -283,7 +284,6 @@ export class EasyWorkClient {
       threadId?: string;
       model: string;
       history: ChatMessage[];
-      maxIterations?: number;
       excludeTools?: string[];
       excludeSkills?: string[];
       think?: boolean;
@@ -340,17 +340,6 @@ export class EasyWorkClient {
   }
 
   /** 读取工作区项目内某文件（只读查看）。 */
-  async wsRead(
-    projectId: string,
-    path: string,
-    range?: { start?: number; end?: number },
-  ): Promise<{ content?: string; binary?: boolean; truncated?: boolean; size: number }> {
-    const q = new URLSearchParams({ path });
-    if (range?.start) q.set("start", String(range.start));
-    if (range?.end) q.set("end", String(range.end));
-    return this.getJSON(`/workspace/${encodeURIComponent(projectId)}/fs/read?${q}`);
-  }
-
   /** 列出对话会话产出的工件文件（每会话目录 <workspace>/chats/<threadId>）。 */
   async chatFiles(threadId: string, path = ".", depth = 4): Promise<WsEntry[]> {
     const q = new URLSearchParams({ path, depth: String(depth) });
@@ -359,16 +348,23 @@ export class EasyWorkClient {
     ).entries;
   }
 
-  /** 读取对话会话工件文件（只读预览）。 */
-  async chatFile(
-    threadId: string,
-    path: string,
-    range?: { start?: number; end?: number },
-  ): Promise<{ content?: string; binary?: boolean; truncated?: boolean; size: number }> {
-    const q = new URLSearchParams({ path });
-    if (range?.start) q.set("start", String(range.start));
-    if (range?.end) q.set("end", String(range.end));
-    return this.getJSON(`/chat/${encodeURIComponent(threadId)}/file?${q}`);
+  /** 统一文件预览元信息（渲染类型 + 文本类内联）。scope=workspace|chat。 */
+  async previewMeta(scope: "workspace" | "chat", id: string, path: string): Promise<PreviewMeta> {
+    const q = new URLSearchParams({ scope, id, path });
+    return this.getJSON(`/files/meta?${q}`);
+  }
+
+  /** 统一文件预览的原始字节 URL（img/pdf 经 blob 渲染时拼鉴权 fetch）。 */
+  fileRawUrl(scope: "workspace" | "chat", id: string, path: string): string {
+    const q = new URLSearchParams({ scope, id, path });
+    return `${this.baseUrl}/files/raw?${q}`;
+  }
+
+  /** 取原始字节为 Blob（带 Bearer 鉴权 → 调用方 createObjectURL 当 img/pdf 的 src）。 */
+  async fileBytes(scope: "workspace" | "chat", id: string, path: string): Promise<Blob> {
+    const res = await this.fetchImpl(this.fileRawUrl(scope, id, path), { headers: this.headers() });
+    if (!res.ok) throw new Error(`raw HTTP ${res.status}`);
+    return res.blob();
   }
 
   /** 在工作区目录里执行命令（终端 tab）。返回退出码 + 合并输出。 */
