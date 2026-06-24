@@ -108,17 +108,6 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
     }
   };
 
-  const clearScope = async () => {
-    if (!confirm("清空「全局」作用域的全部记忆？此操作不可撤销（含由对话自动抽取的事实）。")) return;
-    try {
-      const { removed } = await getClient().clearMemoryScope(GLOBAL_SCOPE);
-      setNote(`已清空 ${removed} 条记忆。`);
-      await refresh();
-    } catch (e) {
-      setNote(`清空失败：${e instanceof Error ? e.message : String(e)}`);
-    }
-  };
-
   const enableEmbedding = async () => {
     setEmbBusy(true);
     setNote("正在下载/加载本地 embedding 模型（nomic，~84MB，CPU）并重建索引…");
@@ -297,11 +286,6 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
             {!emb?.ready && (
               <button onClick={() => void enableEmbedding()} disabled={embBusy}>
                 {embBusy ? "处理中…" : "启用向量召回"}
-              </button>
-            )}
-            {allMem.some((m) => (m.scope ?? GLOBAL_SCOPE) === GLOBAL_SCOPE) && (
-              <button className="mem-ov-clear" onClick={() => void clearScope()}>
-                清空全局
               </button>
             )}
           </div>
