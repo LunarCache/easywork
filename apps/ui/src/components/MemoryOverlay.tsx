@@ -173,21 +173,23 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
         </div>
 
         <div className="mem-ov-body">
-          <div className="mem-ov-scopes">
-            <button className={`mem-ov-scope ${!isWs ? "on" : ""}`} onClick={() => setScope(GLOBAL_SCOPE)}>
-              <ChatIcon size={16} /> 全局 / 对话
-            </button>
-            {projects.map((p) => (
-              <button
-                key={p.id}
-                className={`mem-ov-scope ${scope === `ws:${p.id}` ? "on" : ""}`}
-                title={p.workspaceDir}
-                onClick={() => setScope(`ws:${p.id}`)}
-              >
-                <FolderClosedIcon size={16} /> {p.name}
+          {items.length > 0 && (
+            <div className="mem-ov-scopes">
+              <button className={`mem-ov-scope ${!isWs ? "on" : ""}`} onClick={() => setScope(GLOBAL_SCOPE)}>
+                <ChatIcon size={16} /> 全局 / 对话
               </button>
-            ))}
-          </div>
+              {projects.map((p) => (
+                <button
+                  key={p.id}
+                  className={`mem-ov-scope ${scope === `ws:${p.id}` ? "on" : ""}`}
+                  title={p.workspaceDir}
+                  onClick={() => setScope(`ws:${p.id}`)}
+                >
+                  <FolderClosedIcon size={16} /> {p.name}
+                </button>
+              ))}
+            </div>
+          )}
 
           {note && <div className="mem-ov-note">{note}</div>}
 
@@ -196,7 +198,7 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
               <div className="mem-ov-empty">
                 <BrainIcon size={26} />
                 <p>暂无记忆</p>
-                <span>在上方教 Agent 记住点什么，或随对话自动抽取。</span>
+                <span>点右上「添加」教 Agent 记住点什么，或随对话自动抽取。</span>
               </div>
             ) : (
               groups.map((g) => (
