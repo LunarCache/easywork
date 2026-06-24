@@ -644,17 +644,6 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .kb-confirm-cancel:hover { background: var(--color-bg-tertiary); color: var(--text); }
 .kb-confirm-del { height: 32px; padding: 0 14px; border: none; border-radius: 8px; background: var(--color-error); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
 .kb-confirm-del:hover { filter: brightness(1.08); }
-/* —— MCP 卡片可点击 + 工具清单弹层 —— */
-.mcp-card.clickable { cursor: pointer; }
-/* —— 工具清单弹层 —— */
-.kb-tools { width: 360px; max-height: 70%; display: flex; flex-direction: column; background: var(--color-bg-card); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow-md); overflow: hidden; }
-.kb-tools-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; border-bottom: 1px solid var(--border-soft); font-size: 13px; font-weight: 650; }
-.kb-tools-list { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
-.kb-tools-empty { font-size: 12.5px; color: var(--text-tertiary); padding: 16px 12px; text-align: center; line-height: 1.5; }
-.kb-tools-item { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border-radius: 8px; }
-.kb-tools-item:hover { background: var(--color-bg-tertiary); }
-.kb-tools-name { font-size: 13px; font-weight: 600; color: var(--text); }
-.kb-tools-desc { font-size: 12px; color: var(--text-2); line-height: 1.45; }
 .kb-ov-doc { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 11px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--color-bg-card); cursor: pointer; }
 .kb-ov-doc:hover { border-color: var(--border-strong); }
 .kb-ov-doc.on { background: var(--accent-soft); border-color: var(--color-accent-border); }

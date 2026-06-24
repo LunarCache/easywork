@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import type { McpServerConfig, McpToolInfo } from "@ew/shared";
+import type { McpServerConfig } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { TrashIcon, RefreshIcon, PlusIcon, ArrowLeftIcon, GearIcon, XIcon } from "../icons.js";
+import { TrashIcon, RefreshIcon, PlusIcon, ArrowLeftIcon, GearIcon } from "../icons.js";
 
 type Kind = "stdio" | "http";
 type Probe = { ok: boolean; toolCount: number; error?: string };
@@ -16,8 +16,6 @@ export function Mcp() {
   const [importText, setImportText] = useState("");
   const [note, setNote] = useState("");
   const [pendingDel, setPendingDel] = useState<string | null>(null); // 待删服务器 id（null=不弹确认）
-  // 工具清单弹层（点卡片查看某服务器的工具）。loading=true 表示正在拉取。
-  const [toolView, setToolView] = useState<{ id: string; name: string; tools: McpToolInfo[]; loading: boolean } | null>(null);
 
   const probeOne = useCallback(async (s: McpServerConfig) => {
     setProbe((m) => ({ ...m, [s.id]: "busy" }));
@@ -123,18 +121,6 @@ export function Mcp() {
     await getClient().upsertMcpServer({ ...s, enabled: s.enabled === false });
     await refresh();
   };
-
-  // 点卡片查看工具清单：开弹层 → 拉取工具 → 填充。
-  const showTools = async (s: McpServerConfig) => {
-    setToolView({ id: s.id, name: s.displayName || s.id, tools: [], loading: true });
-    try {
-      const tools = await getClient().listMcpTools(s.id);
-      setToolView((v) => (v && v.id === s.id ? { ...v, tools, loading: false } : v));
-    } catch {
-      setToolView((v) => (v && v.id === s.id ? { ...v, loading: false } : v));
-    }
-  };
-
   const importJson = async () => {
     let parsed: { mcpServers?: Record<string, Record<string, unknown>> };
     try {
@@ -279,7 +265,7 @@ export function Mcp() {
               s.transport.kind === "stdio" ? `${s.transport.command} ${s.transport.args.join(" ")}` : s.transport.url;
             const status = busy ? "连接中…" : ok ? "已连接" : err ? "连接失败" : "未探测";
             return (
-              <div key={s.id} className="mcp-card clickable" onClick={() => void showTools(s)}>
+              <div key={s.id} className="mcp-card">
                 <span className={`mcp-dot ${ok ? "ok" : err ? "err" : "busy"}`} />
                 <div className="mcp-card-body">
                   <div className="mcp-card-name">
@@ -296,13 +282,13 @@ export function Mcp() {
                     </div>
                   )}
                 </div>
-                <button className="mcp-icon-btn" title="编辑配置" onClick={(e) => { e.stopPropagation(); editConfig(s); }}>
+                <button className="mcp-icon-btn" title="编辑配置" onClick={() => editConfig(s)}>
                   <GearIcon size={13} />
                 </button>
-                <button className="mcp-icon-btn" title="重新探测" onClick={(e) => { e.stopPropagation(); void probeOne(s); }}>
+                <button className="mcp-icon-btn" title="重新探测" onClick={() => void probeOne(s)}>
                   <RefreshIcon size={13} className={busy ? "spin" : ""} />
                 </button>
-                <button className="mcp-icon-btn danger" title="删除" onClick={(e) => { e.stopPropagation(); remove(s.id); }}>
+                <button className="mcp-icon-btn danger" title="删除" onClick={() => remove(s.id)}>
                   <TrashIcon size={13} />
                 </button>
                 <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} title={err ? (res?.error ?? "") : ""}>
@@ -338,34 +324,6 @@ export function Mcp() {
               <button className="kb-confirm-del" onClick={() => void confirmRemove()}>
                 删除
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* 工具清单弹层（点卡片查看） */}
-      {toolView && (
-        <div className="kb-pick-mask" onClick={() => setToolView(null)}>
-          <div className="kb-tools" onClick={(e) => e.stopPropagation()}>
-            <div className="kb-tools-head">
-              <span>{toolView.name} 的工具</span>
-              <button className="kb-pv-btn" title="关闭" onClick={() => setToolView(null)}>
-                <XIcon size={15} />
-              </button>
-            </div>
-            <div className="kb-tools-list">
-              {toolView.loading ? (
-                <div className="kb-tools-empty">加载中…</div>
-              ) : toolView.tools.length === 0 ? (
-                <div className="kb-tools-empty">
-                  没有工具。请确认服务器已连接并启用；stdio 需设 EW_ALLOW_STDIO_MCP=1。
-                </div>
-              ) : (
-                toolView.tools.map((t) => (
-                  <div key={t.name} className="kb-tools-item" title={t.description ?? ""}>
-                    <span className="kb-tools-name mono">{t.name}</span>
-                  </div>
-                ))
-              )}
             </div>
           </div>
         </div>
