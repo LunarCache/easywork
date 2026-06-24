@@ -230,27 +230,26 @@ export function Mcp() {
             const status = busy ? "连接中…" : ok ? "已连接" : err ? "连接失败" : "未探测";
             return (
               <div key={s.id} className="mcp-card">
-                <div className="mcp-card-top">
-                  <span className={`mcp-dot ${ok ? "ok" : err ? "err" : "busy"}`} />
-                  <span className="mcp-card-name mono">{s.displayName || s.id}</span>
-                  <span className="ad-spacer" />
-                  <button className="mcp-icon-btn" title="重新探测" onClick={() => void probeOne(s)}>
-                    <RefreshIcon size={13} className={busy ? "spin" : ""} />
-                  </button>
-                  <button className="mcp-icon-btn danger" title="删除" onClick={() => remove(s.id)}>
-                    <TrashIcon size={13} />
-                  </button>
+                <span className={`mcp-dot ${ok ? "ok" : err ? "err" : "busy"}`} />
+                <div className="mcp-card-body">
+                  <div className="mcp-card-name">
+                    <span className="mono">{s.displayName || s.id}</span>
+                    {ok && res && <span className="set-pill">{res.toolCount} 工具</span>}
+                    <span className="set-pill ghost">{s.transport.kind}</span>
+                  </div>
+                  <div className="mcp-card-detail mono" title={detail}>
+                    {detail}
+                  </div>
                 </div>
-                <div className="mcp-card-tags">
-                  {ok && res && <span className="set-pill">{res.toolCount} 工具</span>}
-                  <span className="set-pill ghost">{s.transport.kind}</span>
-                  <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} title={err ? (res?.error ?? "") : ""}>
-                    {status}
-                  </span>
-                </div>
-                <div className="mcp-card-detail mono" title={detail}>
-                  {detail}
-                </div>
+                <button className="mcp-icon-btn" title="重新探测" onClick={() => void probeOne(s)}>
+                  <RefreshIcon size={13} className={busy ? "spin" : ""} />
+                </button>
+                <button className="mcp-icon-btn danger" title="删除" onClick={() => remove(s.id)}>
+                  <TrashIcon size={13} />
+                </button>
+                <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} title={err ? (res?.error ?? "") : ""}>
+                  {status}
+                </span>
                 <button
                   className={`set-toggle ${on ? "on" : ""}`}
                   title={on ? "已启用（点击禁用）" : "已禁用（点击启用）"}
