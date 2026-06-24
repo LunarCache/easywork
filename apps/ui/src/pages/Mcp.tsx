@@ -356,9 +356,8 @@ export function Mcp() {
                 </div>
               ) : (
                 toolView.tools.map((t) => (
-                  <div key={t.name} className="kb-tools-item">
+                  <div key={t.name} className="kb-tools-item" title={t.description ?? ""}>
                     <span className="kb-tools-name mono">{t.name}</span>
-                    {t.description && <span className="kb-tools-desc">{t.description}</span>}
                   </div>
                 ))
               )}
