@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Skill } from "@ew/shared";
 import { getClient } from "../lib/client.js";
 import { loadDisabledSkills, saveDisabledSkills } from "../lib/prefs.js";
-import { SparkIcon, FolderIcon, PlusIcon, ArrowLeftIcon } from "../icons.js";
+import { SparkIcon, FolderIcon, PlusIcon, ArrowLeftIcon, CheckIcon, XIcon } from "../icons.js";
 
 export function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -11,6 +11,8 @@ export function Skills() {
   const [note, setNote] = useState("");
   const [disabled, setDisabled] = useState<string[]>(() => loadDisabledSkills());
   const [detail, setDetail] = useState<{ skill: Skill; body: string | null } | null>(null);
+  const [creating, setCreating] = useState(false); // 新建技能的行内输入（Tauri webview 无 window.prompt）
+  const [newName, setNewName] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -37,9 +39,23 @@ export function Skills() {
     }
   };
 
-  const newTemplate = async () => {
-    const name = window.prompt("新技能名称（英文/数字/连字符）", "my-skill");
-    if (!name) return;
+  const newTemplate = () => {
+    setNewName("my-skill");
+    setCreating(true);
+  };
+  const cancelTemplate = () => {
+    setCreating(false);
+    setNewName("");
+  };
+  const confirmTemplate = async () => {
+    const name = newName
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (!name) return; // 空名：保持输入态
+    setCreating(false);
+    setNewName("");
     try {
       const r = await getClient().createSkillTemplate(name);
       setNote(`已创建模板：${r.file}`);
@@ -97,10 +113,31 @@ export function Skills() {
         <button className="set-add icon" title="打开技能目录" onClick={() => void openDir()}>
           <FolderIcon size={16} />
         </button>
-        <button className="set-add icon" title="新建技能" onClick={() => void newTemplate()}>
+        <button className="set-add icon" title="新建技能" onClick={newTemplate}>
           <PlusIcon size={16} />
         </button>
       </div>
+      {creating && (
+        <div className="skills-new">
+          <PlusIcon size={14} />
+          <input
+            autoFocus
+            placeholder="技能名（英文 / 数字 / 连字符）"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void confirmTemplate();
+              else if (e.key === "Escape") cancelTemplate();
+            }}
+          />
+          <button title="创建" onClick={() => void confirmTemplate()}>
+            <CheckIcon size={15} />
+          </button>
+          <button title="取消" onClick={cancelTemplate}>
+            <XIcon size={15} />
+          </button>
+        </div>
+      )}
       {note && <div className="note">{note}</div>}
 
       {!loading && skills.length === 0 && (

@@ -14,6 +14,7 @@ export function Mcp() {
   const [form, setForm] = useState({ id: "", command: "", args: "", url: "", headers: "" });
   const [importText, setImportText] = useState("");
   const [note, setNote] = useState("");
+  const [pendingDel, setPendingDel] = useState<string | null>(null); // 待删服务器 id（null=不弹确认）
 
   const probeOne = useCallback(async (s: McpServerConfig) => {
     setProbe((m) => ({ ...m, [s.id]: "busy" }));
@@ -74,7 +75,12 @@ export function Mcp() {
     await refresh();
   };
 
-  const remove = async (id: string) => {
+  // 点删除：先弹确认，确认后真删。
+  const remove = (id: string) => setPendingDel(id);
+  const confirmRemove = async () => {
+    const id = pendingDel;
+    if (!id) return;
+    setPendingDel(null);
     await getClient().removeMcpServer(id);
     await refresh();
   };
@@ -224,26 +230,27 @@ export function Mcp() {
             const status = busy ? "连接中…" : ok ? "已连接" : err ? "连接失败" : "未探测";
             return (
               <div key={s.id} className="mcp-card">
-                <span className={`mcp-dot ${ok ? "ok" : err ? "err" : "busy"}`} />
-                <div className="mcp-card-body">
-                  <div className="mcp-card-name">
-                    <span className="mono">{s.displayName || s.id}</span>
-                    {ok && res && <span className="set-pill">{res.toolCount} 工具</span>}
-                    <span className="set-pill ghost">{s.transport.kind}</span>
-                  </div>
-                  <div className="mcp-card-detail mono" title={detail}>
-                    {detail}
-                  </div>
+                <div className="mcp-card-top">
+                  <span className={`mcp-dot ${ok ? "ok" : err ? "err" : "busy"}`} />
+                  <span className="mcp-card-name mono">{s.displayName || s.id}</span>
+                  <span className="ad-spacer" />
+                  <button className="mcp-icon-btn" title="重新探测" onClick={() => void probeOne(s)}>
+                    <RefreshIcon size={13} className={busy ? "spin" : ""} />
+                  </button>
+                  <button className="mcp-icon-btn danger" title="删除" onClick={() => remove(s.id)}>
+                    <TrashIcon size={13} />
+                  </button>
                 </div>
-                <button className="mcp-icon-btn" title="重新探测" onClick={() => void probeOne(s)}>
-                  <RefreshIcon size={13} className={busy ? "spin" : ""} />
-                </button>
-                <button className="mcp-icon-btn danger" title="删除" onClick={() => void remove(s.id)}>
-                  <TrashIcon size={13} />
-                </button>
-                <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} title={err ? (res?.error ?? "") : ""}>
-                  {status}
-                </span>
+                <div className="mcp-card-tags">
+                  {ok && res && <span className="set-pill">{res.toolCount} 工具</span>}
+                  <span className="set-pill ghost">{s.transport.kind}</span>
+                  <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} title={err ? (res?.error ?? "") : ""}>
+                    {status}
+                  </span>
+                </div>
+                <div className="mcp-card-detail mono" title={detail}>
+                  {detail}
+                </div>
                 <button
                   className={`set-toggle ${on ? "on" : ""}`}
                   title={on ? "已启用（点击禁用）" : "已禁用（点击启用）"}
@@ -255,6 +262,27 @@ export function Mcp() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* 删除确认弹层 */}
+      {pendingDel && (
+        <div className="kb-pick-mask" onClick={() => setPendingDel(null)}>
+          <div className="kb-confirm" onClick={(e) => e.stopPropagation()}>
+            <p className="kb-confirm-text">
+              确定删除服务器「{pendingDel}」？
+              <br />
+              <span className="kb-confirm-warn">该 MCP 服务器配置将被永久删除，无法撤销。</span>
+            </p>
+            <div className="kb-confirm-actions">
+              <button className="kb-confirm-cancel" onClick={() => setPendingDel(null)}>
+                取消
+              </button>
+              <button className="kb-confirm-del" onClick={() => void confirmRemove()}>
+                删除
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
