@@ -673,12 +673,11 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mem-ov-ico { width: 34px; height: 34px; border-radius: var(--r); background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
 .mem-ov-titles { display: flex; flex-direction: column; line-height: 1.25; }
 .mem-ov-sub { font-size: 11px; color: var(--text-tertiary); }
-.mem-ov-body { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--color-bg-primary); }
-.mem-ov-add { display: flex; gap: 10px; padding: 16px 20px 12px; }
-.mem-ov-add input { flex: 1; height: 40px; padding: 0 14px; border-radius: var(--r-lg); border: 1px solid var(--border-strong); background: var(--color-bg-card); color: var(--text); font-size: 13px; }
-.mem-ov-add input:focus { outline: none; border-color: var(--accent); }
-.mem-ov-add-btn { flex: none; height: 40px; padding: 0 20px; border-radius: var(--r-lg); border: none; background: var(--accent); color: var(--color-text-inverse, #fff); font-size: 13px; font-weight: 650; cursor: pointer; }
-.mem-ov-add-btn:disabled { opacity: 0.5; cursor: default; }
+.mem-ov-body { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--color-bg-primary); position: relative; overflow: hidden; }
+/* —— 添加记忆弹层（仿知识库上传目标选择） —— */
+.mem-add-textarea { width: 100%; min-height: 90px; resize: vertical; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r); background: var(--color-bg-primary); color: var(--text); font-size: 13px; font-family: var(--font); line-height: 1.5; outline: none; }
+.mem-add-textarea:focus { border-color: var(--accent); }
+.mem-add-hint { font-size: 11px; color: var(--text-tertiary); }
 .mem-ov-scopes { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 20px 8px; }
 .mem-ov-scope { display: flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border); background: var(--color-bg-card); color: var(--text-2); font-size: 12px; font-weight: 550; cursor: pointer; }
 .mem-ov-scope:hover { background: var(--color-bg-tertiary); }

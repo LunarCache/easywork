@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Project } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { BrainIcon, TrashIcon, XIcon, ChatIcon, FolderClosedIcon, EditIcon, CheckIcon } from "../icons.js";
+import { BrainIcon, TrashIcon, XIcon, ChatIcon, FolderClosedIcon, EditIcon, CheckIcon, PlusIcon } from "../icons.js";
 
 interface MemItem {
   id: string;
@@ -77,10 +77,12 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
   }, []);
 
   const [draft, setDraft] = useState("");
+  const [adding, setAdding] = useState(false); // 添加记忆弹层（仿知识库上传目标选择）
   const add = async () => {
     const text = draft.trim();
     if (!text) return;
     const layer = ADD_LAYER[scope] ?? (isWs ? "conventions" : "agent-memory");
+    setAdding(false);
     setDraft("");
     try {
       await getClient().writeMemory({ scope, layer, text });
@@ -153,6 +155,16 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
             <span className="mem-ov-sub">Agent 跨会话记住的内容</span>
           </div>
           <span className="ad-spacer" />
+          <button
+            className="kb-ov-upload"
+            title="添加记忆"
+            onClick={() => {
+              setDraft("");
+              setAdding(true);
+            }}
+          >
+            <PlusIcon size={15} /> 添加
+          </button>
           {!embedded && (
             <button className="ad-ov-close" title="关闭" onClick={onClose}>
               <XIcon size={15} />
@@ -161,18 +173,6 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
         </div>
 
         <div className="mem-ov-body">
-          <div className="mem-ov-add">
-            <input
-              placeholder="教 Agent 记住点什么…"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void add()}
-            />
-            <button className="mem-ov-add-btn" onClick={() => void add()} disabled={!draft.trim()}>
-              添加
-            </button>
-          </div>
-
           <div className="mem-ov-scopes">
             <button className={`mem-ov-scope ${!isWs ? "on" : ""}`} onClick={() => setScope(GLOBAL_SCOPE)}>
               <ChatIcon size={13} /> 全局 / 对话
@@ -242,6 +242,41 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
               ))
             )}
           </div>
+
+          {/* 添加记忆弹层（仿知识库上传目标选择） */}
+          {adding && (
+            <div className="kb-pick-mask" onClick={() => setAdding(false)}>
+              <div className="kb-confirm" onClick={(e) => e.stopPropagation()}>
+                <div className="kb-pick-head">
+                  <span>添加到「{scopeName}」</span>
+                  <button className="kb-pv-btn" title="取消" onClick={() => setAdding(false)}>
+                    <XIcon size={15} />
+                  </button>
+                </div>
+                <textarea
+                  className="mem-add-textarea"
+                  autoFocus
+                  placeholder="教 Agent 记住点什么…"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void add();
+                    else if (e.key === "Escape") setAdding(false);
+                  }}
+                />
+                <div className="kb-confirm-actions">
+                  <span className="mem-add-hint">⌘↵ 保存</span>
+                  <span className="ad-spacer" />
+                  <button className="kb-confirm-cancel" onClick={() => setAdding(false)}>
+                    取消
+                  </button>
+                  <button className="kb-confirm-del" onClick={() => void add()} disabled={!draft.trim()}>
+                    添加
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="mem-ov-foot">
             <span>
