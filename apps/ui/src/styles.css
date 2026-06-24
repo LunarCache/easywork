@@ -237,7 +237,8 @@ svg.lucide { stroke-width: 1.8px; stroke-linecap: round; stroke-linejoin: round;
    基础元素
    ================================================================ */
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
+/* overscroll-behavior:none 阻断 WKWebView 文档级弹性回弹（双指拖动整页轻微位移）+ 横向双指返回手势 */
+html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; }
 body {
   font-family: var(--font);
   color: var(--text);
@@ -571,28 +572,59 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 /* —— 知识库浮层（集合导航 + 文档列表 + 预览）—— */
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 1s linear infinite; }
-.kb-ov-card { width: 1140px; }
+.kb-ov-card { width: 920px; }
 .kb-ov-head { gap: 11px; }
 .kb-ov-ico { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
 .kb-ov-titles { display: flex; flex-direction: column; line-height: 1.25; }
 .kb-ov-sub { font-size: 11.5px; color: var(--text-tertiary); }
 .kb-ov-upload { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 8px; border: none; background: var(--accent); color: var(--color-text-inverse, #fff); font-size: 13px; font-weight: 600; cursor: pointer; }
 .kb-ov-upload:hover { filter: brightness(1.06); }
-.kb-ov-body { flex: 1; display: flex; min-height: 0; }
-.kb-ov-colls { width: 210px; flex: none; padding: 14px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
-.kb-ov-colls-h { display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); padding: 4px 4px 8px 10px; }
-.kb-ov-coll-add { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: none; border-radius: 6px; background: transparent; color: var(--text-tertiary); cursor: pointer; }
-.kb-ov-coll-add:hover { background: var(--color-bg-tertiary); color: var(--text); }
-.kb-ov-coll { display: flex; align-items: center; gap: 8px; padding: 8px 11px; border: none; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 550; cursor: pointer; }
-.kb-ov-coll:hover { background: var(--color-bg-tertiary); color: var(--text); }
-.kb-ov-coll.on { background: var(--accent-soft); color: var(--accent); }
-.kb-ov-coll-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kb-ov-coll-n { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
-.kb-ov-coll.on .kb-ov-coll-n { color: var(--accent); }
-.kb-ov-list { width: 372px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--border); min-height: 0; }
-.kb-ov-list-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); }
-.kb-ov-list-n { font-weight: 500; }
-.kb-ov-list-scroll { flex: 1; overflow-y: auto; padding: 0 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.kb-ov-newcoll { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: transparent; color: var(--text-2); font-size: 13px; font-weight: 600; cursor: pointer; }
+.kb-ov-newcoll:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.kb-ov-body { position: relative; overflow: hidden; }
+/* —— 知识库：左集合栏 + 右文档卡片网格 —— */
+/* 左：集合栏 */
+.kb-colls { width: 210px; flex: none; padding: 12px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.kb-colls-h { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); padding: 4px 6px 8px; }
+.kb-colls-empty { font-size: 12px; color: var(--text-tertiary); padding: 12px 6px; text-align: center; }
+.kb-coll { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 10px; border: none; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 550; cursor: pointer; }
+.kb-coll:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.kb-coll.on { background: var(--accent-soft); color: var(--accent); }
+.kb-coll-ico { flex: none; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: #fff; }
+.kb-coll-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-coll-proc { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: kb-pulse 1.2s ease-in-out infinite; }
+.kb-coll-n { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
+.kb-coll.on .kb-coll-n { color: var(--accent); }
+@keyframes kb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.kb-coll-new { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--accent); border-radius: 8px; background: var(--color-bg-card); margin-bottom: 4px; }
+.kb-coll-new-input { flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); font-size: 13px; font-family: var(--font-mono); padding: 2px 0; outline: none; }
+/* 右：文档区 */
+.kb-docs { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.kb-docs-h { display: flex; align-items: center; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--border-soft); }
+.kb-docs-h-name { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); }
+.kb-docs-h-n { font-weight: 500; color: var(--text-2); font-size: 11px; }
+.kb-search { margin-left: auto; display: flex; align-items: center; height: 28px; }
+.kb-search input { width: 150px; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--color-bg-card); color: var(--text); font-size: 12px; outline: none; }
+.kb-search input:focus { border-color: var(--accent); }
+.kb-search input::placeholder { color: var(--text-tertiary); }
+/* 文档卡片网格 */
+.kb-doc-grid { flex: 1; overflow-y: auto; padding: 14px 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; align-content: start; }
+.kb-doc-card { display: flex; flex-direction: column; gap: 8px; padding: 13px; border: 1px solid var(--border); border-radius: 12px; background: var(--color-bg-card); cursor: pointer; transition: border-color 0.12s, transform 0.12s; text-align: left; }
+.kb-doc-card:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.kb-doc-card.on { border-color: var(--color-accent-border); background: var(--accent-soft); }
+.kb-doc-card.proc { border-style: dashed; border-color: var(--color-accent-border); cursor: default; }
+.kb-doc-card.proc:hover { transform: none; }
+.kb-doc-card-top { display: flex; align-items: center; gap: 8px; }
+.kb-doc-card .kb-ov-badge { width: 30px; height: 30px; border-radius: 8px; }
+.kb-doc-card-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-doc-card-del { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; color: var(--text-tertiary); opacity: 0; }
+.kb-doc-card:hover .kb-doc-card-del { opacity: 1; }
+.kb-doc-card-del:hover { background: var(--color-danger-soft); color: var(--err); }
+.kb-doc-card-meta { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); display: flex; align-items: center; gap: 5px; }
+.kb-proc-bar { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.kb-proc-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+@keyframes proc-indet { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.kb-ov-empty.grid-empty { grid-column: 1 / -1; }
 .kb-ov-doc { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 11px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--color-bg-card); cursor: pointer; }
 .kb-ov-doc:hover { border-color: var(--border-strong); }
 .kb-ov-doc.on { background: var(--accent-soft); border-color: var(--color-accent-border); }
@@ -604,11 +636,19 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .kb-ov-doc-del { flex: none; display: grid; place-items: center; padding: 5px; border-radius: 6px; color: var(--muted); opacity: 0; }
 .kb-ov-doc:hover .kb-ov-doc-del { opacity: 1; }
 .kb-ov-doc-del:hover { background: var(--color-danger-soft); color: var(--err); }
-.kb-ov-preview { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-.kb-ov-pv-head { display: flex; align-items: center; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--border); }
-.kb-ov-pv-name { font-size: 14px; font-weight: 650; font-family: var(--font-mono); }
-.kb-ov-pv-meta { font-size: 11.5px; color: var(--text-tertiary); margin-top: 3px; }
-.kb-ov-pv-body { flex: 1; overflow: auto; margin: 0; padding: 20px 22px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; color: var(--text); }
+/* —— 文档预览：右侧滑出面板（复用工作台视觉） —— */
+.kb-pv { position: absolute; top: 0; right: 0; bottom: 0; width: min(460px, 72%); background: var(--color-bg-card); border-left: 1px solid var(--border-strong); display: flex; flex-direction: column; min-height: 0; transform: translateX(101%); transition: transform 0.18s var(--ease); box-shadow: -12px 0 28px rgba(0, 0, 0, 0.18); z-index: 4; }
+.kb-pv.open { transform: translateX(0); }
+.kb-pv.max { width: 100%; }
+.kb-pv-top { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.kb-pv-title { font-size: 13px; font-weight: 600; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-pv-btn { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; border: none; background: transparent; color: var(--text-tertiary); cursor: pointer; }
+.kb-pv-btn:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.kb-pv-meta { flex: none; display: flex; align-items: center; gap: 9px; padding: 12px 18px; font-size: 11.5px; color: var(--text-tertiary); border-bottom: 1px solid var(--border-soft); }
+.kb-ov-badge.sm { width: 26px; height: 26px; border-radius: 7px; font-size: 9px; }
+.kb-pv-body { flex: 1; overflow: auto; margin: 0; padding: 16px 20px; color: var(--text); min-height: 0; }
+.kb-pv-body.pre { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; }
+.kb-pv-body.md { font-size: 13.5px; line-height: 1.65; }
 .kb-ov-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text-tertiary); text-align: center; padding: 40px 20px; }
 .kb-ov-empty.pad { margin: auto; }
 .kb-ov-empty p { font-size: 13px; color: var(--text-2); }
@@ -656,6 +696,10 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 /* —— Skills 简约卡片 + SKILL.md 详情 —— */
 .skills-head { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .skills-lead { font-size: 12.5px; color: var(--text-2); margin: 0; line-height: 1.5; }
+.skills-new { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; padding: 9px 12px; border: 1px solid var(--accent); border-radius: 10px; background: var(--color-bg-card); color: var(--text-tertiary); }
+.skills-new input { flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); font-size: 13.5px; font-family: var(--font-mono); outline: none; }
+.skills-new button { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; border: none; background: transparent; color: var(--text-tertiary); cursor: pointer; }
+.skills-new button:hover { background: var(--color-bg-tertiary); color: var(--text); }
 .skill-list { display: flex; flex-direction: column; gap: 10px; }
 .skill-card { display: flex; align-items: center; gap: 14px; padding: 15px 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--color-bg-card); cursor: pointer; transition: border-color 0.12s; }
 .skill-card:hover { border-color: var(--border-strong); }
