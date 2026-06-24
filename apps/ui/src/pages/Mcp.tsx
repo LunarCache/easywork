@@ -290,6 +290,11 @@ export function Mcp() {
                   <div className="mcp-card-detail mono" title={detail}>
                     {detail}
                   </div>
+                  {err && res?.error && (
+                    <div className="mcp-card-err" title={res.error}>
+                      {res.error}
+                    </div>
+                  )}
                 </div>
                 <button className="mcp-icon-btn" title="编辑配置" onClick={(e) => { e.stopPropagation(); editConfig(s); }}>
                   <GearIcon size={13} />
