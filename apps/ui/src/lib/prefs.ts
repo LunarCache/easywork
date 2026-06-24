@@ -83,8 +83,8 @@ export function saveDisabledSkills(names: string[]): void {
 
 /** 明暗：浅色 / 深色 / 跟随系统。 */
 export type Appearance = "light" | "dark" | "system";
-/** 强调色（唯一彩色）—— 见 styles.css [data-accent]。 */
-export type Accent = "blue" | "iris" | "violet";
+/** 强调色固定为 blue（已移除主题色切换，仅保留黑白明暗）。 */
+export type Accent = "blue";
 export interface ThemePrefs {
   appearance: Appearance;
   accent: Accent;
@@ -93,7 +93,6 @@ export interface ThemePrefs {
 const THEME_KEY = "ew.theme";
 const THEME_DEFAULT: ThemePrefs = { appearance: "dark", accent: "blue" };
 const APPEARANCES: readonly Appearance[] = ["light", "dark", "system"];
-const ACCENTS: readonly Accent[] = ["blue", "iris", "violet"];
 
 export function loadThemePrefs(): ThemePrefs {
   try {
@@ -102,7 +101,7 @@ export function loadThemePrefs(): ThemePrefs {
     const p = JSON.parse(raw) as Partial<ThemePrefs>;
     return {
       appearance: p.appearance && APPEARANCES.includes(p.appearance) ? p.appearance : THEME_DEFAULT.appearance,
-      accent: p.accent && ACCENTS.includes(p.accent) ? p.accent : THEME_DEFAULT.accent,
+      accent: "blue",
     };
   } catch {
     return { ...THEME_DEFAULT };
@@ -117,14 +116,13 @@ export function saveThemePrefs(p: ThemePrefs): void {
   }
 }
 
-/** 把外观偏好应用到 <html>：明暗 data-theme（跟随系统时按 prefers-color-scheme）+ 强调色 data-accent。 */
+/** 把外观偏好应用到 <html>：明暗 data-theme（跟随系统时按 prefers-color-scheme）。 */
 export function applyTheme(p: ThemePrefs): void {
   const root = document.documentElement;
   const prefersDark =
     typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
   const dark = p.appearance === "dark" || (p.appearance === "system" && prefersDark);
   root.setAttribute("data-theme", dark ? "dark" : "light");
-  root.setAttribute("data-accent", p.accent);
 }
 
 /** 采样对象 → runAgent 的 sampling 字段（仅含已设置项）。 */

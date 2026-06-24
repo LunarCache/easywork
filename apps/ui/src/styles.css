@@ -1,7 +1,7 @@
-/* EasyWork UI — Tailwind v4 + "Agent Tasks" 设计语言（dark-only · IBM Plex Sans/JetBrains Mono）。
-   策略：分层导入 Tailwind + @theme token（深色，逐字取自 Design Spec.dc.html）；强调色走
-   [data-accent=blue|iris|violet] 定义的 --acc/--acc-weak/--acc-bd（唯一彩色）；旧语义别名
-   （--bg/--surface/--text/--accent…）重映射到新 token，存量组件规则平滑过渡。主题挂 <html> data-accent。 */
+/* EasyWork UI — Tailwind v4 + "Agent Tasks" 设计语言（明暗双主题 · IBM Plex Sans/JetBrains Mono）。
+   策略：分层导入 Tailwind + @theme token（深色默认，逐字取自 Design Spec.dc.html）；强调色固定
+   蓝色 --acc/--acc-weak/--acc-bd（唯一彩色）；旧语义别名（--bg/--surface/--text/--accent…）
+   重映射到新 token，存量组件规则平滑过渡。明暗由 <html> data-theme 切换。 */
 
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
@@ -88,17 +88,11 @@
 @variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* ================================================================
-   ACCENT 套（blue 默认 / iris / violet）—— 唯一彩色；定义 --acc/--acc-weak/--acc-bd
+   强调色（固定蓝）—— 唯一彩色；定义 --acc/--acc-weak/--acc-bd
    （逐字取自 Agent Tasks.dc.html / Design Spec.dc.html）
    ================================================================ */
-:root, [data-accent="blue"] {
+:root {
   --acc: #3B82F6; --acc-weak: rgba(59, 130, 246, .15); --acc-bd: rgba(59, 130, 246, .42);
-}
-[data-accent="iris"] {
-  --acc: #7C84FF; --acc-weak: rgba(124, 132, 255, .16); --acc-bd: rgba(124, 132, 255, .45);
-}
-[data-accent="violet"] {
-  --acc: #A06CF5; --acc-weak: rgba(160, 108, 245, .16); --acc-bd: rgba(160, 108, 245, .45);
 }
 
 /* ================================================================
@@ -577,8 +571,8 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .kb-ov-ico { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
 .kb-ov-titles { display: flex; flex-direction: column; line-height: 1.25; }
 .kb-ov-sub { font-size: 11.5px; color: var(--text-tertiary); }
-.kb-ov-upload { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 8px; border: none; background: var(--accent); color: var(--color-text-inverse, #fff); font-size: 13px; font-weight: 600; cursor: pointer; }
-.kb-ov-upload:hover { filter: brightness(1.06); }
+.kb-ov-upload { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--color-bg-card); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
+.kb-ov-upload:hover { background: var(--color-bg-tertiary); }
 .kb-ov-body { flex: 1; display: flex; min-height: 0; position: relative; overflow: hidden; }
 /* —— 知识库：左集合栏 + 右文档卡片网格 —— */
 /* 左：集合栏 */
@@ -632,8 +626,8 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .kb-pick-new { display: flex; gap: 6px; padding: 6px 10px 12px; }
 .kb-pick-new input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--color-bg-primary); color: var(--text); font-size: 13px; font-family: var(--font-mono); outline: none; }
 .kb-pick-new input:focus { border-color: var(--accent); }
-.kb-pick-go { flex: none; height: 32px; padding: 0 14px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 600; cursor: pointer; }
-.kb-pick-go:hover:not(:disabled) { filter: brightness(1.06); }
+.kb-pick-go { flex: none; height: 32px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--color-bg-card); color: var(--text); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.kb-pick-go:hover:not(:disabled) { background: var(--color-bg-tertiary); }
 .kb-pick-go:disabled { opacity: 0.4; cursor: not-allowed; }
 /* —— 删除确认弹层 —— */
 .kb-confirm { width: 340px; background: var(--color-bg-card); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow-md); padding: 18px 20px; }

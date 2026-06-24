@@ -6,7 +6,6 @@ import {
   saveAgentPrefs,
   type AgentPrefs,
   type Appearance,
-  type Accent,
   type ThemePrefs,
 } from "../lib/prefs.js";
 import {
@@ -27,11 +26,6 @@ const APPEARANCES: { id: Appearance; label: string; Icon: typeof SunIcon }[] = [
   { id: "light", label: "浅色", Icon: SunIcon },
   { id: "dark", label: "深色", Icon: MoonIcon },
   { id: "system", label: "跟随系统", Icon: MonitorIcon },
-];
-const ACCENTS: { id: Accent; label: string; color: string }[] = [
-  { id: "blue", label: "蓝", color: "#3B82F6" },
-  { id: "iris", label: "鸢尾", color: "#7C84FF" },
-  { id: "violet", label: "紫", color: "#A06CF5" },
 ];
 /** 生成一个随机 api-key（暴露 0.0.0.0 时用）。 */
 function genApiKey(): string {
@@ -154,21 +148,6 @@ export function Settings({
                   <Icon size={14} style={{ marginRight: 5, verticalAlign: "-2px" }} />
                   {label}
                 </button>
-              ))}
-            </div>
-          </div>
-          <div className="appearance-block">
-            <span>主题色</span>
-            <div className="swatches">
-              {ACCENTS.map(({ id, label, color }) => (
-                <button
-                  key={id}
-                  className={`swatch ${theme.accent === id ? "on" : ""}`}
-                  style={{ background: color }}
-                  title={label}
-                  aria-label={label}
-                  onClick={() => onThemeChange({ ...theme, accent: id })}
-                />
               ))}
             </div>
           </div>
