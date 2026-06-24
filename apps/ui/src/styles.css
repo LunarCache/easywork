@@ -579,7 +579,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .kb-ov-sub { font-size: 11.5px; color: var(--text-tertiary); }
 .kb-ov-upload { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 8px; border: none; background: var(--accent); color: var(--color-text-inverse, #fff); font-size: 13px; font-weight: 600; cursor: pointer; }
 .kb-ov-upload:hover { filter: brightness(1.06); }
-.kb-ov-body { position: relative; overflow: hidden; }
+.kb-ov-body { flex: 1; display: flex; min-height: 0; position: relative; overflow: hidden; }
 /* —— 知识库：左集合栏 + 右文档卡片网格 —— */
 /* 左：集合栏 */
 .kb-colls { width: 210px; flex: none; padding: 12px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
