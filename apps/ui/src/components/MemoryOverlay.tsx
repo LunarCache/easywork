@@ -175,7 +175,7 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
         <div className="mem-ov-body">
           <div className="mem-ov-scopes">
             <button className={`mem-ov-scope ${!isWs ? "on" : ""}`} onClick={() => setScope(GLOBAL_SCOPE)}>
-              <ChatIcon size={13} /> 全局 / 对话
+              <ChatIcon size={16} /> 全局 / 对话
             </button>
             {projects.map((p) => (
               <button
@@ -184,7 +184,7 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                 title={p.workspaceDir}
                 onClick={() => setScope(`ws:${p.id}`)}
               >
-                <FolderClosedIcon size={13} /> {p.name}
+                <FolderClosedIcon size={16} /> {p.name}
               </button>
             ))}
           </div>
