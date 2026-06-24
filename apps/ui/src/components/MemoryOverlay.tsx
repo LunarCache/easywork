@@ -42,6 +42,7 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
   const [projects, setProjects] = useState<Project[]>([]);
   const [scope, setScope] = useState<string>(GLOBAL_SCOPE);
   const [items, setItems] = useState<MemItem[]>([]);
+  const [allMem, setAllMem] = useState<MemItem[]>([]);
   const [note, setNote] = useState("");
   const [emb, setEmb] = useState<{ ready: boolean; modelId?: string; dim: number } | null>(null);
   const [embBusy, setEmbBusy] = useState(false);
@@ -51,7 +52,12 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
 
   const refresh = useCallback(async () => {
     try {
-      setItems(await getClient().listMemory({ scope }));
+      const [cur, all] = await Promise.all([
+        getClient().listMemory({ scope }),
+        getClient().listMemory(),
+      ]);
+      setItems(cur);
+      setAllMem(all);
     } catch {
       /* ignore */
     }
@@ -143,6 +149,13 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
     .map((layer) => ({ layer, items: items.filter((m) => m.layer === layer) }))
     .filter((g) => g.items.length > 0);
 
+  // 各 scope 的记忆数（只显示有记忆的 scope）。
+  const scopeCount = new Map<string, number>();
+  for (const m of allMem) scopeCount.set(m.scope ?? GLOBAL_SCOPE, (scopeCount.get(m.scope ?? GLOBAL_SCOPE) ?? 0) + 1);
+  // 有记忆的工作区（保留项目顺序）。
+  const visibleProjects = projects.filter((p) => (scopeCount.get(`ws:${p.id}`) ?? 0) > 0);
+  const showGlobal = (scopeCount.get(GLOBAL_SCOPE) ?? 0) > 0;
+
   return (
     <div className={embedded ? "ad-page-embed" : "ad-overlay"} onClick={embedded ? undefined : onClose}>
       <div className={`ad-overlay-card mem-ov-card ${embedded ? "embed" : ""}`} onClick={(e) => e.stopPropagation()}>
@@ -173,12 +186,14 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
         </div>
 
         <div className="mem-ov-body">
-          {items.length > 0 && (
+          {(showGlobal || visibleProjects.length > 0 || items.length > 0) && (
             <div className="mem-ov-scopes">
-              <button className={`mem-ov-scope ${!isWs ? "on" : ""}`} onClick={() => setScope(GLOBAL_SCOPE)}>
-                <ChatIcon size={16} /> 全局 / 对话
-              </button>
-              {projects.map((p) => (
+              {(showGlobal || !isWs) && (
+                <button className={`mem-ov-scope ${!isWs ? "on" : ""}`} onClick={() => setScope(GLOBAL_SCOPE)}>
+                  <ChatIcon size={16} /> 全局 / 对话
+                </button>
+              )}
+              {visibleProjects.map((p) => (
                 <button
                   key={p.id}
                   className={`mem-ov-scope ${scope === `ws:${p.id}` ? "on" : ""}`}
