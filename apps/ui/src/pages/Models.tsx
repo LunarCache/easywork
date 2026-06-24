@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { GGUFVariant, HFModelSummary, LocalModel } from "@ew/shared";
 import type { ProviderInfo } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
+import { useConfirm } from "../components/ConfirmDialog.js";
 import {
   AlertIcon,
   BoxIcon,
@@ -56,6 +57,7 @@ function displayName(m: LocalModel, quant: string | null): string {
 export function Models({ onChange }: { onChange: () => void }) {
   const [tab, setTabRaw] = useState<ModelsTab>("local");
   const [view, setView] = useState<View>("list");
+  const { confirm: askConfirm, dialog: confirmDialog } = useConfirm();
   const setTab = (t: ModelsTab) => {
     setTabRaw(t);
     setView("list");
@@ -208,6 +210,30 @@ export function Models({ onChange }: { onChange: () => void }) {
       setBusy(null);
     }
   };
+  // 删除本地模型：从磁盘移除 GGUF（含分片 / 同目录 mmproj）。后端先卸载再删，受管目录硬校验。
+  const delLocal = async (m: LocalModel) => {
+    const label = displayName(m, quantOf(m));
+    const isEmbed = modelKind(m) === "embed";
+    const activeEmbed = isEmbed && !!embed?.ready && embed.modelId === m.path;
+    let body = "将从磁盘删除其 GGUF 文件（含分片与同目录 mmproj），不可恢复。";
+    if (activeEmbed) {
+      body += "\n\n⚠ 该模型正用作向量记忆引擎——删除后记忆 / 知识库的向量召回会降级为纯词法，需重新下载并启用嵌入模型才能恢复。";
+    } else if (isEmbed) {
+      body += "\n\n注：这是嵌入模型，若已用于向量记忆，删除后需重新启用。";
+    }
+    if (!(await askConfirm({ title: `删除本地模型「${label}」？`, body, danger: true }))) return;
+    setBusy(m.path);
+    try {
+      const { removed } = await getClient().deleteLocalModel(m.path);
+      setProgress(`已删除 ${removed.length} 个文件：${label}`);
+      await refreshLocal();
+      onChange();
+    } catch (e) {
+      setProgress(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(null);
+    }
+  };
   // 启用某个嵌入模型为向量记忆引擎（独立进程，不进 router）。
   const enableEmbed = async (m: LocalModel) => {
     setEmbedBusy(true);
@@ -244,7 +270,7 @@ export function Models({ onChange }: { onChange: () => void }) {
     }
   };
   const removeProvider = async (id: string) => {
-    if (!confirm(`删除云端 provider「${id}」？其下的模型将不再可用。`)) return;
+    if (!(await askConfirm({ title: `删除云端 provider「${id}」？`, body: "其下的模型将不再可用。", danger: true }))) return;
     try {
       await getClient().removeProvider(id);
       await refreshProviders();
@@ -468,6 +494,14 @@ export function Models({ onChange }: { onChange: () => void }) {
                         {isBusy ? "加载中…" : "加载"}
                       </button>
                     )}
+                    <button
+                      className="mcp-icon-btn danger"
+                      title="删除本地模型（从磁盘移除）"
+                      disabled={isBusy}
+                      onClick={() => void delLocal(m)}
+                    >
+                      <TrashIcon size={14} />
+                    </button>
                   </div>
                 );
               })}
@@ -509,6 +543,7 @@ export function Models({ onChange }: { onChange: () => void }) {
           )}
         </>
       )}
+      {confirmDialog}
     </div>
   );
 }

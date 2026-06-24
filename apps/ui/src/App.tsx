@@ -8,8 +8,6 @@ import { Workspace } from "./pages/Workspace.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { Titlebar } from "./components/Titlebar.js";
 import { Sidebar, type Mode } from "./components/Sidebar.js";
-import { PageOverlay } from "./components/PageOverlay.js";
-import { PluginsView } from "./pages/PluginsView.js";
 import { Settings } from "./pages/Settings.js";
 import { FolderTreeIcon, InboxIcon } from "./icons.js";
 
@@ -256,11 +254,9 @@ export function App() {
   const activeId = mode === "work" ? workThreadId : threadId;
   const activeTitle = threads.find((t) => t.id === activeId)?.title?.trim();
   const taskTitle =
-    mode === "plugins"
-      ? "插件"
-      : mode === "inbox"
-        ? "收件箱"
-        : activeTitle || (mode === "work" ? project?.name ?? "新任务" : "新任务");
+    mode === "inbox"
+      ? "收件箱"
+      : activeTitle || (mode === "work" ? project?.name ?? "新任务" : "新任务");
 
   return (
     <div className={`ad-app ${isDesktop() ? "is-desktop" : ""} ${sidebarOpen ? "" : "side-collapsed"}`}>
@@ -270,13 +266,14 @@ export function App() {
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
         taskTitle={taskTitle}
         isDesktop={isDesktop()}
-        showDock={mode === "chat" || inWorkChat}
+        showDock={overlay !== "settings" && (mode === "chat" || inWorkChat)}
         dockOpen={dockOpen}
         onToggleDock={() => setDockOpen((v) => !v)}
         {...(mode === "work" && project ? { projectName: project.name } : {})}
         {...(mode === "work" && workBranch ? { branch: workBranch } : {})}
       />
-      <div className="ad-body">
+      {/* ad-body 始终挂载（设置打开时 CSS 隐藏而非卸载）——否则会卸载 Chat/Workspace 并中断在途的流式运行。 */}
+      <div className={`ad-body ${overlay === "settings" ? "ad-hidden" : ""}`}>
         {sidebarOpen && (
           <>
             <div className="ad-sessions-wrap" style={{ width: sessionWidth }}>
@@ -298,7 +295,6 @@ export function App() {
                 onDelThread={(id, e) => void delThread(id, e)}
                 onDelProject={(id, e) => void delProject(id, e)}
                 onOpenFiles={openProjectFiles}
-                onOpenPlugins={() => changeMode("plugins")}
                 onOpenInbox={() => changeMode("inbox")}
                 onOpenSettings={() => setOverlay("settings")}
               />
@@ -354,14 +350,10 @@ export function App() {
               <p>连接 Telegram / 企业微信 / 飞书等 IM 渠道后，外部对话会汇入这里，由同一个大脑处理。</p>
             </div>
           )}
-          {mode === "plugins" && <PluginsView onModelsChange={check} />}
         </main>
       </div>
-
       {overlay === "settings" && (
-        <PageOverlay title="设置" onClose={() => setOverlay(null)}>
-          <Settings theme={theme} onThemeChange={changeTheme} />
-        </PageOverlay>
+        <Settings theme={theme} onThemeChange={changeTheme} onModelsChange={check} onBack={() => setOverlay(null)} />
       )}
     </div>
   );

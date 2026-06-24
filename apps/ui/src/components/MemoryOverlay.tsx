@@ -313,14 +313,9 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
 
         {/* 添加记忆弹层 */}
         {adding && (
-          <div className="kb-pick-mask" onClick={() => setAdding(null)}>
-            <div className="kb-confirm" onClick={(e) => e.stopPropagation()}>
-              <div className="kb-pick-head">
-                <span>{adding.pick ? "添加记忆" : `添加到「${adding.label}」`}</span>
-                <button className="kb-pv-btn" title="取消" onClick={() => setAdding(null)}>
-                  <XIcon size={15} />
-                </button>
-              </div>
+          <div className="confirm-mask" onClick={() => setAdding(null)}>
+            <div className="confirm-box wide" onClick={(e) => e.stopPropagation()}>
+              <div className="confirm-title">{adding.pick ? "添加记忆" : `添加到「${adding.label}」`}</div>
               {adding.pick && (
                 <div className="mem-add-pickers">
                   <select
@@ -358,13 +353,13 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                   else if (e.key === "Escape") setAdding(null);
                 }}
               />
-              <div className="kb-confirm-actions">
+              <div className="confirm-actions">
                 <span className="mem-add-hint">⌘↵ 保存</span>
                 <span className="ad-spacer" />
-                <button className="kb-confirm-cancel" onClick={() => setAdding(null)}>
+                <button className="confirm-cancel" onClick={() => setAdding(null)}>
                   取消
                 </button>
-                <button className="kb-confirm-del" onClick={() => void add()} disabled={!draft.trim()}>
+                <button className="confirm-ok" onClick={() => void add()} disabled={!draft.trim()}>
                   添加
                 </button>
               </div>

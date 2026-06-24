@@ -441,6 +441,16 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     if (!id) return reply.code(400).send({ error: "missing_id" });
     try {
       await local.unload(id);
+      // 若删的是当前向量记忆引擎的模型：停掉独立 `--embedding` 进程 + 清持久化设置，
+      // 否则 EmbeddingService 仍在跑（不归 router 管），状态会一直显示「运行中/已启用」。
+      if (embeddings.info.modelId === id) {
+        await embeddings.stop().catch(() => {});
+        try {
+          fs.rmSync(embedSettingPath, { force: true });
+        } catch {
+          /* ignore */
+        }
+      }
       const res = await models.deleteLocal(id);
       return { ok: true, removed: res.removed };
     } catch (e) {

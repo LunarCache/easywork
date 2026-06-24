@@ -8,11 +8,10 @@ import {
   ChevronIcon,
   TrashIcon,
   GearIcon,
-  PluginsIcon,
   InboxIcon,
 } from "../icons.js";
 
-export type Mode = "chat" | "work" | "inbox" | "plugins";
+export type Mode = "chat" | "work" | "inbox";
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
 
 interface ThreadItem {
@@ -34,9 +33,9 @@ function relTime(iso: string): string {
 }
 
 /**
- * 展开式侧栏（参考设计）：顶部快捷操作（新对话 / 打开工作区 / 收件箱 / 插件）+
+ * 展开式侧栏（参考设计）：顶部快捷操作（新对话 / 打开工作区 / 收件箱）+
  * 分区列表「项目」（工作区折叠组）与「对话」（独立聊天线程）+ 底部「设置」。
- * 「插件」直接打开主区的插件页（顶部标签切 模型/知识库/Skills/MCP/记忆），不再用下拉。
+ * 模型 / 知识库 / Skills / MCP / 记忆 已并入「设置」（齿轮）的左导航。
  */
 export function Sidebar({
   threads,
@@ -56,7 +55,6 @@ export function Sidebar({
   onDelThread,
   onDelProject,
   onOpenFiles,
-  onOpenPlugins,
   onOpenInbox,
   onOpenSettings,
 }: {
@@ -77,7 +75,6 @@ export function Sidebar({
   onDelThread: (id: string, e: React.MouseEvent) => void;
   onDelProject: (id: string, e: React.MouseEvent) => void;
   onOpenFiles: (pid: string) => void;
-  onOpenPlugins: () => void;
   onOpenInbox: () => void;
   onOpenSettings: () => void;
 }) {
@@ -100,10 +97,6 @@ export function Sidebar({
         <button className="ad-side-act" onClick={onOpenInbox}>
           <InboxIcon size={18} className="ad-side-act-ico" />
           <span>收件箱</span>
-        </button>
-        <button className={`ad-side-act ${mode === "plugins" ? "on" : ""}`} onClick={onOpenPlugins}>
-          <PluginsIcon size={18} className="ad-side-act-ico" />
-          <span>插件</span>
         </button>
       </div>
 

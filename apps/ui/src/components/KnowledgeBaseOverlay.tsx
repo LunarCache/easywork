@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileViewer } from "./FileViewer.js";
+import { useConfirm } from "./ConfirmDialog.js";
 import { getClient } from "../lib/client.js";
 import { fileType, type FileTypeInfo } from "../lib/filetype.js";
 import {
@@ -103,7 +104,8 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
   const [picking, setPicking] = useState(false);
   const [newName, setNewName] = useState(""); // 面板内「新建集合」输入
   // 删除确认（待删文档，null=不弹）。真删数据库内容，需二次确认防误触。
-  const [pendingDel, setPendingDel] = useState<{ id: string; source: string } | null>(null);
+  const [note, setNote] = useState("");
+  const { confirm: askConfirm, dialog: confirmDialog } = useConfirm();
   const fileRef = useRef<HTMLInputElement>(null);
   const pendingTarget = useRef<string>(""); // 选定的上传目标，文件选择器返回时读取
 
@@ -176,22 +178,16 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
       .catch(() => {});
   };
 
-  // 点删除：先弹确认（真删数据库内容，防误触）。
-  const del = (id: string, source: string, e: React.MouseEvent) => {
+  // 点删除：应用内确认（真删数据库内容，防误触）→ 执行真删 + 关预览 + 刷新。
+  const del = async (id: string, source: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setPendingDel({ id, source });
-  };
-  // 确认删除：执行真删 + 关预览 + 刷新。
-  const confirmDel = async () => {
-    const target = pendingDel;
-    if (!target) return;
-    setPendingDel(null);
+    if (!(await askConfirm({ title: `删除文档「${source}」？`, body: "该文档及其所有嵌入向量将被永久删除，无法撤销。", danger: true }))) return;
     try {
-      await getClient().kbDeleteDoc(target.id);
-      if (sel === target.id) closePreview();
+      await getClient().kbDeleteDoc(id);
+      if (sel === id) closePreview();
       await refresh();
-    } catch (e) {
-      alert(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+    } catch (err) {
+      setNote(`删除失败：${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -355,7 +351,7 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                           {b.label}
                         </span>
                         <span className="kb-doc-card-name">{d.source}</span>
-                        <span className="kb-doc-card-del" title="删除" onClick={(e) => del(d.id, d.source, e)}>
+                        <span className="kb-doc-card-del" title="删除" onClick={(e) => void del(d.id, d.source, e)}>
                           <TrashIcon size={14} />
                         </span>
                       </div>
@@ -419,14 +415,9 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
 
           {/* 上传目标选择面板（点「上传」先选/建目标集合，再选文件） */}
           {picking && (
-            <div className="kb-pick-mask" onClick={() => setPicking(false)}>
-              <div className="kb-pick" onClick={(e) => e.stopPropagation()}>
-                <div className="kb-pick-head">
-                  <span>上传到集合</span>
-                  <button className="kb-pv-btn" title="取消" onClick={() => setPicking(false)}>
-                    <XIcon size={15} />
-                  </button>
-                </div>
+            <div className="confirm-mask" onClick={() => setPicking(false)}>
+              <div className="confirm-box list-box" onClick={(e) => e.stopPropagation()}>
+                <div className="confirm-title">上传到集合</div>
                 <div className="kb-pick-list">
                   <button
                     className={`kb-pick-item ${currentKb ? "" : "on"}`}
@@ -464,26 +455,12 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
             </div>
           )}
 
-          {/* 删除确认弹层 */}
-          {pendingDel && (
-            <div className="kb-pick-mask" onClick={() => setPendingDel(null)}>
-              <div className="kb-confirm" onClick={(e) => e.stopPropagation()}>
-                <p className="kb-confirm-text">
-                  确定删除文档「{pendingDel.source}」？
-                  <br />
-                  <span className="kb-confirm-warn">该文档及其所有嵌入向量将被永久删除，无法撤销。</span>
-                </p>
-                <div className="kb-confirm-actions">
-                  <button className="kb-confirm-cancel" onClick={() => setPendingDel(null)}>
-                    取消
-                  </button>
-                  <button className="kb-confirm-del" onClick={() => void confirmDel()}>
-                    删除
-                  </button>
-                </div>
-              </div>
+          {note && (
+            <div className="kb-note" onClick={() => setNote("")} title="点击关闭">
+              {note}
             </div>
           )}
+          {confirmDialog}
         </div>
       </div>
     </div>

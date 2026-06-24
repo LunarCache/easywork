@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { McpServerConfig } from "@ew/shared";
 import { getClient } from "../lib/client.js";
+import { useConfirm } from "../components/ConfirmDialog.js";
 import { TrashIcon, RefreshIcon, PlusIcon, ArrowLeftIcon, GearIcon } from "../icons.js";
 
 type Kind = "stdio" | "http";
@@ -15,7 +16,7 @@ export function Mcp() {
   const [form, setForm] = useState({ id: "", command: "", args: "", url: "", headers: "" });
   const [importText, setImportText] = useState("");
   const [note, setNote] = useState("");
-  const [pendingDel, setPendingDel] = useState<string | null>(null); // 待删服务器 id（null=不弹确认）
+  const { confirm: askConfirm, dialog: confirmDialog } = useConfirm();
 
   const probeOne = useCallback(async (s: McpServerConfig) => {
     setProbe((m) => ({ ...m, [s.id]: "busy" }));
@@ -113,12 +114,9 @@ export function Mcp() {
     setView("add");
   };
 
-  // 点删除：先弹确认，确认后真删。
-  const remove = (id: string) => setPendingDel(id);
-  const confirmRemove = async () => {
-    const id = pendingDel;
-    if (!id) return;
-    setPendingDel(null);
+  // 点删除：应用内确认后真删。
+  const remove = async (id: string) => {
+    if (!(await askConfirm({ title: `删除服务器「${id}」？`, body: "该 MCP 服务器配置将被永久删除，无法撤销。", danger: true }))) return;
     await getClient().removeMcpServer(id);
     await refresh();
   };
@@ -295,7 +293,7 @@ export function Mcp() {
                 <button className="mcp-icon-btn" title="重新探测" onClick={() => void probeOne(s)}>
                   <RefreshIcon size={13} className={busy ? "spin" : ""} />
                 </button>
-                <button className="mcp-icon-btn danger" title="删除" onClick={() => remove(s.id)}>
+                <button className="mcp-icon-btn danger" title="删除" onClick={() => void remove(s.id)}>
                   <TrashIcon size={13} />
                 </button>
                 <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} title={err ? (res?.error ?? "") : ""}>
@@ -315,26 +313,7 @@ export function Mcp() {
         </div>
       )}
 
-      {/* 删除确认弹层 */}
-      {pendingDel && (
-        <div className="kb-pick-mask" onClick={() => setPendingDel(null)}>
-          <div className="kb-confirm" onClick={(e) => e.stopPropagation()}>
-            <p className="kb-confirm-text">
-              确定删除服务器「{pendingDel}」？
-              <br />
-              <span className="kb-confirm-warn">该 MCP 服务器配置将被永久删除，无法撤销。</span>
-            </p>
-            <div className="kb-confirm-actions">
-              <button className="kb-confirm-cancel" onClick={() => setPendingDel(null)}>
-                取消
-              </button>
-              <button className="kb-confirm-del" onClick={() => void confirmRemove()}>
-                删除
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {confirmDialog}
     </div>
   );
 }
