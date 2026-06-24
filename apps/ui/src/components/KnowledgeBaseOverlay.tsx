@@ -105,6 +105,8 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
   // 上传目标选择面板（点「上传」先选/建目标集合，再选文件）。
   const [picking, setPicking] = useState(false);
   const [newName, setNewName] = useState(""); // 面板内「新建集合」输入
+  // 删除确认（待删文档，null=不弹）。真删数据库内容，需二次确认防误触。
+  const [pendingDel, setPendingDel] = useState<{ id: string; source: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const pendingTarget = useRef<string>(""); // 选定的上传目标，文件选择器返回时读取
 
@@ -174,10 +176,18 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
       .catch(() => {});
   };
 
-  const del = async (id: string, e: React.MouseEvent) => {
+  // 点删除：先弹确认（真删数据库内容，防误触）。
+  const del = (id: string, source: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    await getClient().kbDeleteDoc(id);
-    if (sel === id) closePreview();
+    setPendingDel({ id, source });
+  };
+  // 确认删除：执行真删 + 关预览 + 刷新。
+  const confirmDel = async () => {
+    const target = pendingDel;
+    if (!target) return;
+    setPendingDel(null);
+    await getClient().kbDeleteDoc(target.id);
+    if (sel === target.id) closePreview();
     await refresh();
   };
 
@@ -341,7 +351,7 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                           {b.label}
                         </span>
                         <span className="kb-doc-card-name">{d.source}</span>
-                        <span className="kb-doc-card-del" title="删除" onClick={(e) => void del(d.id, e)}>
+                        <span className="kb-doc-card-del" title="删除" onClick={(e) => del(d.id, d.source, e)}>
                           <TrashIcon size={14} />
                         </span>
                       </div>
@@ -450,6 +460,27 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                   />
                   <button className="kb-pick-go" onClick={pickNew} disabled={!normalizeKbId(newName)}>
                     选择文件
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 删除确认弹层 */}
+          {pendingDel && (
+            <div className="kb-pick-mask" onClick={() => setPendingDel(null)}>
+              <div className="kb-confirm" onClick={(e) => e.stopPropagation()}>
+                <p className="kb-confirm-text">
+                  确定删除文档「{pendingDel.source}」？
+                  <br />
+                  <span className="kb-confirm-warn">该文档及其所有嵌入向量将被永久删除，无法撤销。</span>
+                </p>
+                <div className="kb-confirm-actions">
+                  <button className="kb-confirm-cancel" onClick={() => setPendingDel(null)}>
+                    取消
+                  </button>
+                  <button className="kb-confirm-del" onClick={() => void confirmDel()}>
+                    删除
                   </button>
                 </div>
               </div>

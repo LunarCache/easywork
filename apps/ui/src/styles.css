@@ -635,6 +635,15 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .kb-pick-go { flex: none; height: 32px; padding: 0 14px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .kb-pick-go:hover:not(:disabled) { filter: brightness(1.06); }
 .kb-pick-go:disabled { opacity: 0.4; cursor: not-allowed; }
+/* —— 删除确认弹层 —— */
+.kb-confirm { width: 340px; background: var(--color-bg-card); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow-md); padding: 18px 20px; }
+.kb-confirm-text { font-size: 13.5px; line-height: 1.6; color: var(--text); margin: 0 0 16px; }
+.kb-confirm-warn { font-size: 12px; color: var(--text-tertiary); }
+.kb-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.kb-confirm-cancel { height: 32px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 600; cursor: pointer; }
+.kb-confirm-cancel:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.kb-confirm-del { height: 32px; padding: 0 14px; border: none; border-radius: 8px; background: var(--color-error); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+.kb-confirm-del:hover { filter: brightness(1.08); }
 .kb-ov-doc { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 11px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--color-bg-card); cursor: pointer; }
 .kb-ov-doc:hover { border-color: var(--border-strong); }
 .kb-ov-doc.on { background: var(--accent-soft); border-color: var(--color-accent-border); }
