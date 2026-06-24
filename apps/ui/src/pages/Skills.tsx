@@ -6,7 +6,6 @@ import { SparkIcon, FolderIcon, PlusIcon, ArrowLeftIcon, CheckIcon, XIcon } from
 
 export function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [dir, setDir] = useState("");
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState("");
   const [disabled, setDisabled] = useState<string[]>(() => loadDisabledSkills());
@@ -19,7 +18,6 @@ export function Skills() {
     try {
       const info = await getClient().skillsInfo();
       setSkills(info.skills);
-      setDir(info.dir);
     } catch {
       /* ignore */
     } finally {
@@ -140,14 +138,7 @@ export function Skills() {
       )}
       {note && <div className="note">{note}</div>}
 
-      {!loading && skills.length === 0 && (
-        <div className="empty-models">
-          <SparkIcon size={26} />
-          <p>还没有 Skills</p>
-          <span>把 SKILL.md（含 name / description / whenToUse 的 frontmatter）放进技能目录后自动出现。</span>
-        </div>
-      )}
-
+      {!loading && skills.length === 0 ? null : (
       <div className="skill-list">
         {skills.map((s) => {
           const name = s.frontmatter.name;
@@ -179,11 +170,6 @@ export function Skills() {
           );
         })}
       </div>
-
-      {dir && (
-        <div className="sub" style={{ marginTop: 14 }}>
-          技能目录：<code>{dir}</code>
-        </div>
       )}
     </div>
   );

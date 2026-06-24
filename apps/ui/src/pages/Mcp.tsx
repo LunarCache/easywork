@@ -211,12 +211,7 @@ export function Mcp() {
       </div>
       {note && <div className="note">{note}</div>}
 
-      {servers.length === 0 ? (
-        <div className="empty-models">
-          <p>还没有 MCP 服务器</p>
-          <span>点右上「添加服务器」配置 stdio / HTTP，或粘贴 mcpServers JSON 批量导入。</span>
-        </div>
-      ) : (
+      {servers.length === 0 ? null : (
         <div className="mcp-list">
           {servers.map((s) => {
             const pr = probe[s.id];
