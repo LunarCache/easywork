@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { McpServerConfig } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { TrashIcon, RefreshIcon, PlusIcon, ArrowLeftIcon } from "../icons.js";
+import { TrashIcon, RefreshIcon, PlusIcon, ArrowLeftIcon, GearIcon } from "../icons.js";
 
 type Kind = "stdio" | "http";
 type Probe = { ok: boolean; toolCount: number; error?: string };
@@ -10,6 +10,7 @@ export function Mcp() {
   const [servers, setServers] = useState<McpServerConfig[]>([]);
   const [probe, setProbe] = useState<Record<string, Probe | "busy">>({});
   const [view, setView] = useState<"list" | "add">("list");
+  const [editing, setEditing] = useState<string | null>(null); // 编辑模式：正在编辑的服务器 id（null=添加）
   const [kind, setKind] = useState<Kind>("http");
   const [form, setForm] = useState({ id: "", command: "", args: "", url: "", headers: "" });
   const [importText, setImportText] = useState("");
@@ -66,13 +67,43 @@ export function Mcp() {
     };
   };
 
-  const add = async () => {
+  const save = async () => {
     const cfg = buildConfig();
     if (!cfg) return;
+    // 编辑时保留原有 enabled 状态；新增默认启用。
+    if (editing) {
+      const orig = servers.find((s) => s.id === editing);
+      if (orig) cfg.enabled = orig.enabled !== false;
+    }
     await getClient().upsertMcpServer(cfg);
     setForm({ id: "", command: "", args: "", url: "", headers: "" });
+    setEditing(null);
     setView("list");
     await refresh();
+  };
+
+  // 编辑：把现有服务器配置回填表单 → 进表单视图。
+  const editConfig = (s: McpServerConfig) => {
+    setEditing(s.id);
+    setView("add");
+    setNote("");
+    if (s.transport.kind === "stdio") {
+      setKind("stdio");
+      setForm({ id: s.id, command: s.transport.command, args: s.transport.args.join(" "), url: "", headers: "" });
+    } else {
+      setKind("http");
+      const headers = s.transport.headers
+        ? Object.entries(s.transport.headers).map(([k, v]) => `${k}: ${v}`).join("\n")
+        : "";
+      setForm({ id: s.id, command: "", args: "", url: s.transport.url, headers });
+    }
+  };
+
+  // 新增：清空表单 → 进表单视图。
+  const startAdd = () => {
+    setEditing(null);
+    setForm({ id: "", command: "", args: "", url: "", headers: "" });
+    setView("add");
   };
 
   // 点删除：先弹确认，确认后真删。
@@ -142,15 +173,15 @@ export function Mcp() {
     await refresh();
   };
 
-  // 添加 / 导入 子视图。
+  // 添加 / 编辑 / 导入 子视图。
   if (view === "add") {
     return (
       <div className="page mcp-page">
         <div className="skill-detail-head">
-          <button className="files-back" onClick={() => setView("list")}>
+          <button className="files-back" onClick={() => { setEditing(null); setView("list"); }}>
             <ArrowLeftIcon size={15} /> 返回
           </button>
-          <span className="skill-detail-name">添加 MCP 服务器</span>
+          <span className="skill-detail-name">{editing ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</span>
         </div>
         {note && <div className="note">{note}</div>}
 
@@ -163,7 +194,12 @@ export function Mcp() {
           </button>
         </div>
         <div className="form">
-          <input placeholder="id（如 filesystem）" value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value })} />
+          <input
+            placeholder="id（如 filesystem）"
+            value={form.id}
+            disabled={!!editing}
+            onChange={(e) => setForm({ ...form, id: e.target.value })}
+          />
           {kind === "stdio" ? (
             <>
               <input placeholder="command（如 npx）" value={form.command} onChange={(e) => setForm({ ...form, command: e.target.value })} />
@@ -172,7 +208,7 @@ export function Mcp() {
           ) : (
             <input placeholder="URL（https://…/mcp 或 /sse）" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
           )}
-          <button onClick={() => void add()}>添加</button>
+          <button onClick={() => void save()}>{editing ? "保存" : "添加"}</button>
         </div>
         {kind === "http" && (
           <textarea
@@ -183,19 +219,25 @@ export function Mcp() {
             onChange={(e) => setForm({ ...form, headers: e.target.value })}
           />
         )}
-        <p className="hint" style={{ marginTop: 6 }}>stdio 默认禁用，需设 EW_ALLOW_STDIO_MCP=1 后启用。</p>
+        <p className="hint" style={{ marginTop: 6 }}>
+          {editing ? "编辑模式下 id 不可修改。" : "stdio 默认禁用，需设 EW_ALLOW_STDIO_MCP=1 后启用。"}
+        </p>
 
-        <h3 style={{ fontSize: 13, margin: "22px 0 8px" }}>或粘贴 mcpServers JSON 批量导入</h3>
-        <textarea
-          placeholder={'{\n  "mcpServers": {\n    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"] },\n    "remote": { "url": "https://example.com/mcp" }\n  }\n}'}
-          rows={6}
-          style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: 12.5 }}
-          value={importText}
-          onChange={(e) => setImportText(e.target.value)}
-        />
-        <button className="btn" style={{ marginTop: 8 }} onClick={() => void importJson()} disabled={!importText.trim()}>
-          导入
-        </button>
+        {!editing && (
+          <>
+            <h3 style={{ fontSize: 13, margin: "22px 0 8px" }}>或粘贴 mcpServers JSON 批量导入</h3>
+            <textarea
+              placeholder={'{\n  "mcpServers": {\n    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"] },\n    "remote": { "url": "https://example.com/mcp" }\n  }\n}'}
+              rows={6}
+              style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: 12.5 }}
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+            />
+            <button className="btn" style={{ marginTop: 8 }} onClick={() => void importJson()} disabled={!importText.trim()}>
+              导入
+            </button>
+          </>
+        )}
       </div>
     );
   }
@@ -205,7 +247,7 @@ export function Mcp() {
       <div className="skills-head">
         <p className="skills-lead">接入 Model Context Protocol 工具服务器（stdio / HTTP），以 mcp__&lt;server&gt;__&lt;tool&gt; 暴露给模型。</p>
         <span className="bar-spacer" />
-        <button className="set-add icon" title="添加服务器" onClick={() => setView("add")}>
+        <button className="set-add icon" title="添加服务器" onClick={startAdd}>
           <PlusIcon size={16} />
         </button>
       </div>
@@ -236,6 +278,9 @@ export function Mcp() {
                     {detail}
                   </div>
                 </div>
+                <button className="mcp-icon-btn" title="编辑配置" onClick={() => editConfig(s)}>
+                  <GearIcon size={13} />
+                </button>
                 <button className="mcp-icon-btn" title="重新探测" onClick={() => void probeOne(s)}>
                   <RefreshIcon size={13} className={busy ? "spin" : ""} />
                 </button>
