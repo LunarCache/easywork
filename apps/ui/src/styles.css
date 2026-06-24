@@ -524,7 +524,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .ad-ov-close { width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border); background: var(--color-bg-card); color: var(--text-2); display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .ad-ov-close:hover { background: var(--color-bg-tertiary); color: var(--text); }
 .ad-ov-body { flex: 1; display: flex; min-height: 0; }
-.ad-ov-nav { width: 196px; flex: none; padding: 12px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.ad-ov-nav { width: clamp(150px, 20%, 196px); flex: none; padding: 12px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
 .ad-ov-nav-btn { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: none; border-radius: 8px; cursor: pointer; text-align: left; background: transparent; color: var(--text-2); font-size: 12.5px; font-weight: 600; }
 .ad-ov-nav-btn svg { flex: none; }
 .ad-ov-nav-btn:hover { background: var(--color-bg-tertiary); color: var(--text); }
@@ -576,7 +576,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .kb-ov-body { flex: 1; display: flex; min-height: 0; position: relative; overflow: hidden; }
 /* —— 知识库：左集合栏 + 右文档卡片网格 —— */
 /* 左：集合栏 */
-.kb-colls { width: 210px; flex: none; padding: 12px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.kb-colls { width: clamp(168px, 22%, 210px); flex: none; padding: 12px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
 .kb-colls-h { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); padding: 4px 6px 8px; }
 .kb-coll { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 10px; border: none; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 550; cursor: pointer; }
 .kb-coll:hover { background: var(--color-bg-tertiary); color: var(--text); }
@@ -730,7 +730,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mcp-card { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--color-bg-card); }
 .mcp-card:hover { border-color: var(--border-strong); }
 .mcp-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--text-tertiary); }
-.mcp-dot.ok { background: #1E9E58; }
+.mcp-dot.ok { background: var(--color-success); }
 .mcp-dot.err { background: var(--err); }
 .mcp-card-body { flex: 1; min-width: 0; }
 .mcp-card-name { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; color: var(--text); }
@@ -741,7 +741,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mcp-icon-btn:hover { background: var(--color-bg-tertiary); color: var(--text); }
 .mcp-icon-btn.danger:hover { background: var(--color-danger-soft); color: var(--err); }
 .mcp-status { flex: none; font-size: 12.5px; font-family: var(--font-mono); color: var(--text-tertiary); }
-.mcp-status.ok { color: #1E9E58; }
+.mcp-status.ok { color: var(--color-success); }
 .mcp-status.err { color: var(--err); }
 .set-pill.ghost { opacity: 0.65; font-weight: 500; }
 
@@ -757,7 +757,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mdl-name { font-size: 14px; font-weight: 650; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mdl-specs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--text-tertiary); margin-top: 4px; }
 .mdl-specs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.mdl-live { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: #1E9E58; }
+.mdl-live { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--color-success); }
 .set-add.primary { background: var(--accent); border-color: var(--accent); color: var(--color-text-inverse, #fff); }
 .set-add.primary:hover { background: var(--accent); filter: brightness(1.06); }
 .set-add:disabled { opacity: 0.55; cursor: default; }
@@ -1088,7 +1088,7 @@ details.toolcard[open] > summary .chev { transform: rotate(90deg); }
 .rt-banner.ok { background: var(--color-success-soft); border-color: var(--color-success-border); color: var(--ok); }
 .rt-banner.ok code { color: var(--ok); }
 .rt-banner.warn { background: var(--color-warning-soft, var(--accent-soft)); border-color: var(--color-warning-border, var(--border-strong)); color: var(--text); align-items: flex-start; }
-.rt-banner.warn > svg { color: var(--color-warning, #B5640A); flex: none; margin-top: 1px; }
+.rt-banner.warn > svg { color: var(--color-warning); flex: none; margin-top: 1px; }
 .rt-banner-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .rt-banner-cmd { color: var(--muted); font-size: 12px; }
 .rt-banner code { font-family: var(--font-mono); font-size: 11.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
@@ -1340,7 +1340,7 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
 .term-code { color: #ef7676; font-size: 11px; margin-left: 4px; }
 .term-out { margin: 3px 0 0; white-space: pre-wrap; word-break: break-word; color: #aeb7c4; background: transparent; padding: 0; }
 .term-ai .term-cmd { color: #9aa4b2; }
-.term-trunc { color: #c79a3a; font-size: 11px; margin-top: 2px; }
+.term-trunc { color: var(--color-warning); font-size: 11px; margin-top: 2px; }
 .term-input { flex: none; display: flex; align-items: center; gap: 7px; padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.08); background: #0d1117; }
 .term-input input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: #e8edf4; font-family: var(--font-mono); font-size: 12px; }
 .term-input input::placeholder { color: #5c6675; }
@@ -1396,3 +1396,19 @@ pre.exec-out { margin: 0; padding: 10px; background: var(--color-exec-bg); color
 .hljs-meta { color: var(--color-syntax-meta); }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 700; }
+
+/* ================================================================
+   响应式断点（桌面优先；Tauri minWidth=880）
+   窄窗口优先保主区可用宽度：先收工作台坞，再收侧栏。
+   ================================================================ */
+/* 中窄：工作台坞强制隐藏（主区优先），工作台开关钮也隐藏避免点了无反应 */
+@media (max-width: 1100px) {
+  .side-dock { display: none !important; }
+  .ad-tb-dock { display: none !important; }
+}
+/* 更窄：侧栏压到最小宽度（JS sessionWidth 仍生效，但容器 min-width 兜底） */
+@media (max-width: 980px) {
+  .ad-sessions-wrap { min-width: 180px !important; }
+  .kb-colls { width: 168px; }
+  .kb-search input { width: 110px; }
+}

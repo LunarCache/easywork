@@ -6,7 +6,7 @@ export function ContextRing({ pct, title }: { pct: number; title?: string }) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   // 用量偏高时环转为告警色（>85% 红、>65% 琥珀，否则强调色）。
-  const color = p > 85 ? "var(--err)" : p > 65 ? "var(--color-warning, #B5640A)" : "var(--accent)";
+  const color = p > 85 ? "var(--err)" : p > 65 ? "var(--color-warning)" : "var(--accent)";
   return (
     <span className="ctx-ring" title={title ?? `上下文已用 ${Math.round(p)}%`}>
       <span className="ctx-ring-svg">
