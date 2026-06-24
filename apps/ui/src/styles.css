@@ -688,7 +688,9 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mem-ov-scroll { flex: 1; overflow-y: auto; padding: 6px 20px 16px; }
 .mem-ov-group { margin-bottom: 18px; }
 .mem-ov-scope-h { font-size: 13px; font-weight: 650; color: var(--text); margin: 0 2px 10px; }
-.mem-ov-group-h { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); margin: 4px 2px 9px; }
+.mem-ov-group-h { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); margin: 4px 2px 9px; }
+.mem-ov-layer-add { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text-tertiary); cursor: pointer; }
+.mem-ov-layer-add:hover { background: var(--color-bg-tertiary); color: var(--accent); }
 .mem-ov-item { display: flex; align-items: flex-start; gap: 11px; padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--color-bg-card); margin-bottom: 8px; }
 .mem-ov-item:hover { border-color: var(--border-strong); }
 .mem-ov-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-top: 6px; }

@@ -23,8 +23,6 @@ const LAYER_LABEL: Record<string, string> = {
   decisions: "变动 / 决策",
   pitfalls: "坑 / 教训",
 };
-// 手动「添加」时落到的层（按作用域取一个合适的默认）。
-const ADD_LAYER: Record<string, string> = { [GLOBAL_SCOPE]: "agent-memory" };
 
 function relTime(iso: string): string {
   const t = Date.parse(iso);
@@ -73,15 +71,17 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
   }, []);
 
   const [draft, setDraft] = useState("");
-  const [adding, setAdding] = useState(false); // 添加记忆弹层（仿知识库上传目标选择）
+  // 添加记忆弹层：目标 scope + layer（由层标题的 + 按钮设定）。
+  const [adding, setAdding] = useState<{ scope: string; layer: string; label: string } | null>(null);
   const add = async () => {
+    if (!adding) return;
     const text = draft.trim();
     if (!text) return;
-    const layer = ADD_LAYER[GLOBAL_SCOPE] ?? "agent-memory";
-    setAdding(false);
+    const { scope, layer } = adding;
+    setAdding(null);
     setDraft("");
     try {
-      await getClient().writeMemory({ scope: GLOBAL_SCOPE, layer, text });
+      await getClient().writeMemory({ scope, layer, text });
       await refresh();
     } catch (e) {
       setNote(`添加失败：${e instanceof Error ? e.message : String(e)}`);
@@ -167,16 +167,6 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
             <span className="mem-ov-sub">Agent 跨会话记住的内容</span>
           </div>
           <span className="ad-spacer" />
-          <button
-            className="kb-ov-upload"
-            title="添加记忆"
-            onClick={() => {
-              setDraft("");
-              setAdding(true);
-            }}
-          >
-            <PlusIcon size={15} /> 添加
-          </button>
           {!embedded && (
             <button className="ad-ov-close" title="关闭" onClick={onClose}>
               <XIcon size={15} />
@@ -192,7 +182,16 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
               <div className="mem-ov-empty">
                 <BrainIcon size={26} />
                 <p>暂无记忆</p>
-                <span>点右上「添加」教 Agent 记住点什么，或随对话自动抽取。</span>
+                <button
+                  className="kb-ov-upload"
+                  onClick={() => {
+                    setDraft("");
+                    setAdding({ scope: GLOBAL_SCOPE, layer: "user-profile", label: "全局 · 用户画像 / 偏好" });
+                  }}
+                >
+                  <PlusIcon size={15} /> 添加用户画像
+                </button>
+                <span>或随对话自动抽取。</span>
               </div>
             ) : (
               scopeBlocks.map((blk) => (
@@ -200,7 +199,19 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                   <div className="mem-ov-scope-h">{blk.name}</div>
                   {blk.layers.map((g) => (
                     <div key={g.layer}>
-                      <div className="mem-ov-group-h">{LAYER_LABEL[g.layer] ?? g.layer}</div>
+                      <div className="mem-ov-group-h">
+                        <span>{LAYER_LABEL[g.layer] ?? g.layer}</span>
+                        <button
+                          className="mem-ov-layer-add"
+                          title={`添加到「${LAYER_LABEL[g.layer] ?? g.layer}」`}
+                          onClick={() => {
+                            setDraft("");
+                            setAdding({ scope: blk.sid, layer: g.layer, label: `${blk.name} · ${LAYER_LABEL[g.layer] ?? g.layer}` });
+                          }}
+                        >
+                          <PlusIcon size={13} />
+                        </button>
+                      </div>
                       {g.items.map((m) => (
                         <div key={m.id} className="mem-ov-item">
                           <span className="mem-ov-dot" />
@@ -246,11 +257,11 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
 
           {/* 添加记忆弹层（仿知识库上传目标选择） */}
           {adding && (
-            <div className="kb-pick-mask" onClick={() => setAdding(false)}>
+            <div className="kb-pick-mask" onClick={() => setAdding(null)}>
               <div className="kb-confirm" onClick={(e) => e.stopPropagation()}>
                 <div className="kb-pick-head">
-                  <span>添加到「全局」</span>
-                  <button className="kb-pv-btn" title="取消" onClick={() => setAdding(false)}>
+                  <span>添加到「{adding.label}」</span>
+                  <button className="kb-pv-btn" title="取消" onClick={() => setAdding(null)}>
                     <XIcon size={15} />
                   </button>
                 </div>
@@ -262,13 +273,13 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void add();
-                    else if (e.key === "Escape") setAdding(false);
+                    else if (e.key === "Escape") setAdding(null);
                   }}
                 />
                 <div className="kb-confirm-actions">
                   <span className="mem-add-hint">⌘↵ 保存</span>
                   <span className="ad-spacer" />
-                  <button className="kb-confirm-cancel" onClick={() => setAdding(false)}>
+                  <button className="kb-confirm-cancel" onClick={() => setAdding(null)}>
                     取消
                   </button>
                   <button className="kb-confirm-del" onClick={() => void add()} disabled={!draft.trim()}>
