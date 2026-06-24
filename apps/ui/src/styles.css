@@ -668,7 +668,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .kb-ov-empty span { font-size: 12px; }
 
 /* —— 记忆浮层（教 Agent 记住 + 分组卡片）—— */
-.mem-ov-card { width: 760px; }
+.mem-ov-card { width: 900px; }
 .mem-ov-head { gap: 11px; }
 .mem-ov-ico { width: 34px; height: 34px; border-radius: var(--r); background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
 .mem-ov-titles { display: flex; flex-direction: column; line-height: 1.25; }
@@ -677,38 +677,62 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 /* —— 添加记忆弹层（仿知识库上传目标选择） —— */
 .mem-add-textarea { width: 100%; min-height: 90px; resize: vertical; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r); background: var(--color-bg-primary); color: var(--text); font-size: 13px; font-family: var(--font); line-height: 1.5; outline: none; }
 .mem-add-textarea:focus { border-color: var(--accent); }
+.mem-ov-head-add { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: transparent; color: var(--text-2); font-size: 13px; font-weight: 600; cursor: pointer; }
+.mem-ov-head-add:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.mem-add-pickers { display: flex; gap: 8px; margin-top: 12px; }
+.mem-add-pickers select { flex: 1; min-width: 0; }
 .mem-add-hint { font-size: 11px; color: var(--text-tertiary); }
-.mem-ov-scopes { display: flex; flex-direction: column; gap: 10px; padding: 0 20px 14px; }
-.mem-ov-scope { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--color-bg-card); color: var(--text-2); font-size: 14px; font-weight: 550; cursor: pointer; }
-.mem-ov-scope:hover { border-color: var(--border-strong); }
-.mem-ov-scope.on { border-color: var(--color-accent-border); background: var(--accent-soft); color: var(--accent); }
-.mem-ov-scope svg { flex: none; color: var(--text-tertiary); }
-.mem-ov-scope.on svg { color: var(--accent); }
-.mem-ov-note { margin: 0 20px 8px; font-size: 12px; color: var(--text-2); background: var(--color-bg-tertiary); border-radius: var(--r); padding: 8px 12px; }
-.mem-ov-scroll { flex: 1; overflow-y: auto; padding: 6px 20px 16px; }
-.mem-ov-group { margin-bottom: 18px; }
-.mem-ov-scope-h { font-size: 13px; font-weight: 650; color: var(--text); margin: 0 2px 10px; }
-.mem-ov-group-h { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); margin: 4px 2px 9px; }
-.mem-ov-layer-add { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text-tertiary); cursor: pointer; }
-.mem-ov-layer-add:hover { background: var(--color-bg-tertiary); color: var(--accent); }
-.mem-ov-item { display: flex; align-items: flex-start; gap: 11px; padding: 13px 15px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--color-bg-card); margin-bottom: 8px; }
-.mem-ov-item:hover { border-color: var(--border-strong); }
-.mem-ov-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-top: 6px; }
-.mem-ov-item-body { flex: 1; min-width: 0; }
-.mem-ov-item-text { font-size: 13px; line-height: 1.5; color: var(--text); }
-.mem-ov-item-meta { font-size: 11px; color: var(--text-tertiary); margin-top: 5px; font-family: var(--font-mono); }
-.mem-ov-del { flex: none; display: grid; place-items: center; padding: 5px; border-radius: var(--r-sm); color: var(--muted); opacity: 0; background: transparent; border: none; cursor: pointer; }
-.mem-ov-item:hover .mem-ov-del { opacity: 1; }
-.mem-ov-del.show { opacity: 1; }
-.mem-ov-del:hover { background: var(--color-danger-soft); color: var(--err); }
-.mem-ov-edit { width: 100%; padding: 4px 8px; border-radius: var(--r-sm); border: 1px solid var(--accent); background: var(--color-bg-card); color: var(--text); font-size: 13px; line-height: 1.5; font-family: var(--font); }
-.mem-ov-clear { color: var(--err) !important; border-color: var(--color-danger-soft) !important; }
-.mem-ov-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text-tertiary); text-align: center; padding: 50px 20px; }
-.mem-ov-empty p { font-size: 13px; color: var(--text-2); }
-.mem-ov-empty span { font-size: 12px; }
-.mem-ov-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-tertiary); }
-.mem-ov-foot button { height: 28px; padding: 0 12px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--color-bg-card); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; }
-.mem-ov-foot button:disabled { opacity: 0.6; }
+/* —— 记忆页（档案 Dossier）—— */
+.mem-ov-note { margin: 10px 18px 0; font-size: 12px; color: var(--text-2); background: var(--color-bg-tertiary); border-radius: var(--r); padding: 8px 12px; }
+.mem-toolbar { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--border-soft); }
+.mem-search { flex: 1; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; background: var(--color-bg-card); border: 1px solid var(--border); border-radius: 9px; color: var(--text-tertiary); }
+.mem-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; color: var(--text); font-size: 13px; font-family: var(--font); }
+.mem-recall { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-family: var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
+.mem-recall-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary); }
+.mem-recall-dot[data-on="1"] { background: var(--ok, #3FB950); }
+.mem-recall-btn { height: 24px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border-strong); background: transparent; color: var(--text-2); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.mem-recall-btn:hover { color: var(--text); border-color: var(--text-tertiary); }
+.mem-add-btn { height: 34px; padding: 0 13px; display: inline-flex; align-items: center; gap: 6px; border: none; border-radius: 9px; background: var(--accent); color: var(--color-text-inverse, #fff); font-size: 13px; font-weight: 600; cursor: pointer; }
+.mem-add-btn:hover { filter: brightness(1.06); }
+
+.mem-doss { flex: 1; min-height: 0; display: flex; }
+.mem-rail { width: 230px; flex: none; border-right: 1px solid var(--border-soft); padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.mem-rail-h { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); padding: 6px 8px 4px; }
+.mem-scope { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: none; border-radius: 9px; background: transparent; color: var(--text-2); cursor: pointer; text-align: left; }
+.mem-scope:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.mem-scope.on { background: var(--accent-soft); color: var(--text); }
+.mem-scope.empty .mem-nm { color: var(--text-tertiary); }
+.mem-av { width: 28px; height: 28px; flex: none; border-radius: 8px; display: grid; place-items: center; background: var(--color-bg-tertiary); color: var(--text-2); }
+.mem-scope.on .mem-av { background: var(--accent); color: #fff; }
+.mem-nm { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mem-ct { flex: none; font-size: 11px; font-family: var(--font-mono); color: var(--text-tertiary); }
+
+.mem-main { flex: 1; min-width: 0; overflow-y: auto; padding: 18px 22px; }
+.mem-main-h h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.mem-main-sub { font-size: 12px; font-family: var(--font-mono); color: var(--text-tertiary); margin: 4px 0 18px; }
+.mem-sect { margin-bottom: 20px; }
+.mem-sect-h { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.mem-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.mem-sect-lbl { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.mem-sect-ct { font-size: 11px; font-family: var(--font-mono); color: var(--text-tertiary); }
+.mem-sect-add { margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; border: none; border-radius: 7px; background: transparent; color: var(--text-tertiary); cursor: pointer; }
+.mem-sect-add:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.mem-sect-empty { font-size: 12px; font-family: var(--font-mono); color: var(--text-tertiary); padding: 2px 2px 6px; }
+.mem-card { background: var(--color-bg-card); border: 1px solid var(--border-soft); border-radius: 10px; padding: 11px 13px; margin-bottom: 7px; }
+.mem-card:hover { border-color: var(--border); }
+.mem-card-txt { font-size: 13.5px; line-height: 1.55; color: var(--text); }
+.mem-card-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.mem-src { font-size: 10.5px; font-weight: 500; font-family: var(--font-mono); padding: 1px 7px; border-radius: 5px; }
+.mem-src.man { background: rgba(124, 132, 255, 0.14); color: #7C84FF; }
+.mem-src.auto { background: var(--color-bg-tertiary); color: var(--text-tertiary); }
+.mem-time { font-size: 11px; font-family: var(--font-mono); color: var(--text-tertiary); }
+.mem-card-act { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; border: none; background: transparent; color: var(--muted); opacity: 0; cursor: pointer; }
+.mem-card:hover .mem-card-act { opacity: 1; }
+.mem-card-act.show { opacity: 1; }
+.mem-card-act:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.mem-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text-tertiary); text-align: center; padding: 50px 20px; }
+.mem-empty p { font-size: 13px; color: var(--text-2); }
+.mem-ov-edit { width: 100%; padding: 4px 8px; border-radius: var(--r-sm); border: 1px solid var(--accent); background: var(--color-bg-card); color: var(--text); font-size: 13.5px; line-height: 1.55; font-family: var(--font); }
 
 /* —— Skills 简约卡片 + SKILL.md 详情 —— */
 .skills-head { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }

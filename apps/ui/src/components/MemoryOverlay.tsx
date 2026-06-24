@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Project } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { BrainIcon, TrashIcon, XIcon, EditIcon, CheckIcon, PlusIcon } from "../icons.js";
+import { BrainIcon, TrashIcon, XIcon, EditIcon, CheckIcon, PlusIcon, SearchIcon, UserIcon, FolderClosedIcon } from "../icons.js";
 
 interface MemItem {
   id: string;
@@ -23,6 +23,16 @@ const LAYER_LABEL: Record<string, string> = {
   decisions: "变动 / 决策",
   pitfalls: "坑 / 教训",
 };
+// 层语义色（小圆点 / 分区标识；两套主题下都用显式色值）。
+const LAYER_COLOR: Record<string, string> = {
+  "user-profile": "#3B82F6",
+  "agent-memory": "#7C84FF",
+  skills: "#A06CF5",
+  conventions: "#3FB950",
+  decisions: "#D29922",
+  pitfalls: "#F85149",
+};
+const layerOrder = (scope: string) => (scope === GLOBAL_SCOPE ? GLOBAL_ORDER : WS_ORDER);
 
 function relTime(iso: string): string {
   const t = Date.parse(iso);
@@ -35,13 +45,19 @@ function relTime(iso: string): string {
   return `${Math.floor(s / (86400 * 30))} 个月前`;
 }
 
-/** 记忆浮层：教 Agent 记住 + 按层分组浏览/删除（作用域切换：全局 / 各工作区）。 */
+/**
+ * 记忆页（档案 Dossier）：左侧作用域栏（全局 / 你 + 各工作区，带计数），
+ * 右侧是选中作用域的「档案」—— 按层分区（语义色 + 计数 + 行内添加），
+ * 记忆项含来源徽章（手动 / 自动抽取）+ 时间 + 行内编辑/删除。顶部搜索 + 向量召回状态。
+ */
 export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; embedded?: boolean }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [allMem, setAllMem] = useState<MemItem[]>([]);
   const [note, setNote] = useState("");
   const [emb, setEmb] = useState<{ ready: boolean; modelId?: string; dim: number } | null>(null);
   const [embBusy, setEmbBusy] = useState(false);
+  const [selectedScope, setSelectedScope] = useState<string>(GLOBAL_SCOPE);
+  const [query, setQuery] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -70,9 +86,9 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
     })();
   }, []);
 
+  // 添加记忆弹层：目标 scope + layer。pick=true 时弹层内可自选 scope/层（给空作用域/空层加第一条）。
   const [draft, setDraft] = useState("");
-  // 添加记忆弹层：目标 scope + layer（由层标题的 + 按钮设定）。
-  const [adding, setAdding] = useState<{ scope: string; layer: string; label: string } | null>(null);
+  const [adding, setAdding] = useState<{ scope: string; layer: string; label: string; pick?: boolean } | null>(null);
   const add = async () => {
     if (!adding) return;
     const text = draft.trim();
@@ -82,6 +98,7 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
     setDraft("");
     try {
       await getClient().writeMemory({ scope, layer, text });
+      setSelectedScope(scope);
       await refresh();
     } catch (e) {
       setNote(`添加失败：${e instanceof Error ? e.message : String(e)}`);
@@ -122,27 +139,32 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
     }
   };
 
-  // 记忆按 scope 分组 → 每组内按层分组（scope 标题 > 层标题 > 记忆项）。
-  // scope 顺序：全局在前，工作区按项目顺序。
-  const wsOrder = projects.map((p) => `ws:${p.id}`);
-  const wsName = new Map(projects.map((p) => [`ws:${p.id}`, p.name]));
-  const scopeIds = [...new Set([...wsOrder, ...allMem.map((m) => m.scope ?? GLOBAL_SCOPE)])];
-  // 全局排到最前。
-  scopeIds.sort((a, b) => {
-    if (a === GLOBAL_SCOPE) return -1;
-    if (b === GLOBAL_SCOPE) return 1;
-    return wsOrder.indexOf(a) - wsOrder.indexOf(b);
+  // —— 派生数据 ——
+  const scopeOf = (m: MemItem) => m.scope ?? GLOBAL_SCOPE;
+  const scopeName = (sid: string) =>
+    sid === GLOBAL_SCOPE ? "全局 / 你" : projects.find((p) => `ws:${p.id}` === sid)?.name ?? "工作区";
+  const scopeIds = [GLOBAL_SCOPE, ...projects.map((p) => `ws:${p.id}`)];
+  const sel = scopeIds.includes(selectedScope) ? selectedScope : GLOBAL_SCOPE;
+  const q = query.trim().toLowerCase();
+
+  const openAdd = (scope: string, layer?: string) => {
+    setDraft("");
+    setAdding(
+      layer
+        ? { scope, layer, label: `${scopeName(scope) === "全局 / 你" ? "全局" : scopeName(scope)} · ${LAYER_LABEL[layer] ?? layer}` }
+        : { scope, layer: layerOrder(scope)[0]!, label: "", pick: true },
+    );
+  };
+
+  // 选中作用域内、按层分组（保留层顺序，搜索时仅留命中层）。
+  const layers = layerOrder(sel).map((layer) => {
+    const items = allMem
+      .filter((m) => scopeOf(m) === sel && m.layer === layer)
+      .filter((m) => !q || m.text.toLowerCase().includes(q))
+      .sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1));
+    return { layer, items };
   });
-  const scopeBlocks = scopeIds
-    .map((sid) => {
-      const mem = allMem.filter((m) => (m.scope ?? GLOBAL_SCOPE) === sid);
-      const order = sid === GLOBAL_SCOPE ? GLOBAL_ORDER : WS_ORDER;
-      const layers = [...new Set([...order, ...mem.map((m) => m.layer)])]
-        .map((layer) => ({ layer, items: mem.filter((m) => m.layer === layer) }))
-        .filter((g) => g.items.length > 0);
-      return { sid, name: sid === GLOBAL_SCOPE ? "全局 / 对话" : wsName.get(sid) ?? "工作区", layers };
-    })
-    .filter((b) => b.layers.length > 0);
+  const selHasAny = layers.some((l) => l.items.length > 0);
 
   return (
     <div className={embedded ? "ad-page-embed" : "ad-overlay"} onClick={embedded ? undefined : onClose}>
@@ -163,133 +185,192 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
           )}
         </div>
 
-        <div className="mem-ov-body">
-          {note && <div className="mem-ov-note">{note}</div>}
-
-          <div className="mem-ov-scroll">
-            {scopeBlocks.length === 0 ? (
-              <div className="mem-ov-empty">
-                <BrainIcon size={26} />
-                <p>暂无记忆</p>
-                <button
-                  className="kb-ov-upload"
-                  onClick={() => {
-                    setDraft("");
-                    setAdding({ scope: GLOBAL_SCOPE, layer: "user-profile", label: "全局 · 用户画像 / 偏好" });
-                  }}
-                >
-                  <PlusIcon size={15} /> 添加用户画像
-                </button>
-                <span>或随对话自动抽取。</span>
-              </div>
-            ) : (
-              scopeBlocks.map((blk) => (
-                <div key={blk.sid} className="mem-ov-group">
-                  <div className="mem-ov-scope-h">{blk.name}</div>
-                  {blk.layers.map((g) => (
-                    <div key={g.layer}>
-                      <div className="mem-ov-group-h">
-                        <span>{LAYER_LABEL[g.layer] ?? g.layer}</span>
-                        <button
-                          className="mem-ov-layer-add"
-                          title={`添加到「${LAYER_LABEL[g.layer] ?? g.layer}」`}
-                          onClick={() => {
-                            setDraft("");
-                            setAdding({ scope: blk.sid, layer: g.layer, label: `${blk.name} · ${LAYER_LABEL[g.layer] ?? g.layer}` });
-                          }}
-                        >
-                          <PlusIcon size={13} />
-                        </button>
-                      </div>
-                      {g.items.map((m) => (
-                        <div key={m.id} className="mem-ov-item">
-                          <span className="mem-ov-dot" />
-                          <div className="mem-ov-item-body">
-                            {editing?.id === m.id ? (
-                              <input
-                                className="mem-ov-edit"
-                                autoFocus
-                                value={editing.text}
-                                onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") void saveEdit();
-                                  else if (e.key === "Escape") setEditing(null);
-                                }}
-                              />
-                            ) : (
-                              <div className="mem-ov-item-text">{m.text}</div>
-                            )}
-                            <div className="mem-ov-item-meta">
-                              {m.sessionId ? "本会话" : blk.name} · {relTime(m.updatedAt)}
-                            </div>
-                          </div>
-                          {editing?.id === m.id ? (
-                            <button className="mem-ov-del show" title="保存" onClick={() => void saveEdit()}>
-                              <CheckIcon size={14} />
-                            </button>
-                          ) : (
-                            <button className="mem-ov-del" title="编辑" onClick={() => setEditing({ id: m.id, text: m.text })}>
-                              <EditIcon size={14} />
-                            </button>
-                          )}
-                          <button className="mem-ov-del" title="删除" onClick={() => void del(m.id)}>
-                            <TrashIcon size={14} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              ))
+        {/* 工具栏：搜索 + 向量召回状态 + 添加 */}
+        <div className="mem-toolbar">
+          <div className="mem-search">
+            <SearchIcon size={15} />
+            <input placeholder="搜索记忆…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+          <span className="mem-recall">
+            <span className="mem-recall-dot" data-on={emb?.ready ? "1" : "0"} />
+            {emb?.ready ? `向量召回 · ${emb.dim} 维` : "向量召回未启用"}
+            {!emb?.ready && (
+              <button className="mem-recall-btn" onClick={() => void enableEmbedding()} disabled={embBusy}>
+                {embBusy ? "处理中…" : "启用"}
+              </button>
             )}
+          </span>
+          <button className="mem-add-btn" onClick={() => openAdd(sel)}>
+            <PlusIcon size={15} /> 添加
+          </button>
+        </div>
+
+        {note && <div className="mem-ov-note">{note}</div>}
+
+        {/* 档案：左作用域栏 + 右层分区 */}
+        <div className="mem-doss">
+          <div className="mem-rail">
+            <div className="mem-rail-h">作用域</div>
+            <button className={`mem-scope ${sel === GLOBAL_SCOPE ? "on" : ""}`} onClick={() => setSelectedScope(GLOBAL_SCOPE)}>
+              <span className="mem-av">
+                <UserIcon size={15} />
+              </span>
+              <span className="mem-nm">全局 / 你</span>
+              <span className="mem-ct">{allMem.filter((m) => scopeOf(m) === GLOBAL_SCOPE).length}</span>
+            </button>
+            {projects.length > 0 && <div className="mem-rail-h">工作区</div>}
+            {projects.map((p) => {
+              const sid = `ws:${p.id}`;
+              const ct = allMem.filter((m) => scopeOf(m) === sid).length;
+              return (
+                <button
+                  key={p.id}
+                  className={`mem-scope ${sel === sid ? "on" : ""} ${ct === 0 ? "empty" : ""}`}
+                  title={p.workspaceDir}
+                  onClick={() => setSelectedScope(sid)}
+                >
+                  <span className="mem-av">
+                    <FolderClosedIcon size={14} />
+                  </span>
+                  <span className="mem-nm">{p.name}</span>
+                  <span className="mem-ct">{ct}</span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* 添加记忆弹层（仿知识库上传目标选择） */}
-          {adding && (
-            <div className="kb-pick-mask" onClick={() => setAdding(null)}>
-              <div className="kb-confirm" onClick={(e) => e.stopPropagation()}>
-                <div className="kb-pick-head">
-                  <span>添加到「{adding.label}」</span>
-                  <button className="kb-pv-btn" title="取消" onClick={() => setAdding(null)}>
-                    <XIcon size={15} />
-                  </button>
-                </div>
-                <textarea
-                  className="mem-add-textarea"
-                  autoFocus
-                  placeholder="教 Agent 记住点什么…"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void add();
-                    else if (e.key === "Escape") setAdding(null);
-                  }}
-                />
-                <div className="kb-confirm-actions">
-                  <span className="mem-add-hint">⌘↵ 保存</span>
-                  <span className="ad-spacer" />
-                  <button className="kb-confirm-cancel" onClick={() => setAdding(null)}>
-                    取消
-                  </button>
-                  <button className="kb-confirm-del" onClick={() => void add()} disabled={!draft.trim()}>
-                    添加
-                  </button>
-                </div>
-              </div>
+          <div className="mem-main">
+            <div className="mem-main-h">
+              <h2>{scopeName(sel)}</h2>
             </div>
-          )}
+            <div className="mem-main-sub">
+              {sel === GLOBAL_SCOPE ? "所有对话共享 · 助手跨会话记住的关于你的内容" : "本工作区私有池 · 与全局隔离"}
+            </div>
 
-          <div className="mem-ov-foot">
-            <span>
-              向量召回：{emb?.ready ? `已启用 · ${emb.dim} 维` : "未启用（词法召回）"}
-            </span>
-            {!emb?.ready && (
-              <button onClick={() => void enableEmbedding()} disabled={embBusy}>
-                {embBusy ? "处理中…" : "启用向量召回"}
-              </button>
+            {q && !selHasAny ? (
+              <div className="mem-empty">
+                <SearchIcon size={24} />
+                <p>无匹配「{query}」</p>
+              </div>
+            ) : (
+              layers.map(({ layer, items }) => {
+                if (q && items.length === 0) return null; // 搜索时隐藏空层
+                return (
+                  <div key={layer} className="mem-sect">
+                    <div className="mem-sect-h">
+                      <span className="mem-dot" style={{ background: LAYER_COLOR[layer] ?? "var(--accent)" }} />
+                      <span className="mem-sect-lbl">{LAYER_LABEL[layer] ?? layer}</span>
+                      <span className="mem-sect-ct">{items.length}</span>
+                      <button className="mem-sect-add" title={`添加到「${LAYER_LABEL[layer] ?? layer}」`} onClick={() => openAdd(sel, layer)}>
+                        <PlusIcon size={14} />
+                      </button>
+                    </div>
+                    {items.length === 0 ? (
+                      <div className="mem-sect-empty">暂无 · 点 + 添加</div>
+                    ) : (
+                      items.map((m) => (
+                        <div key={m.id} className="mem-card">
+                          {editing?.id === m.id ? (
+                            <input
+                              className="mem-ov-edit"
+                              autoFocus
+                              value={editing.text}
+                              onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") void saveEdit();
+                                else if (e.key === "Escape") setEditing(null);
+                              }}
+                            />
+                          ) : (
+                            <div className="mem-card-txt">{m.text}</div>
+                          )}
+                          <div className="mem-card-meta">
+                            <span className={`mem-src ${m.sessionId ? "auto" : "man"}`}>{m.sessionId ? "自动抽取" : "手动"}</span>
+                            <span className="mem-time">{relTime(m.updatedAt)}</span>
+                            <span className="ad-spacer" />
+                            {editing?.id === m.id ? (
+                              <button className="mem-card-act show" title="保存" onClick={() => void saveEdit()}>
+                                <CheckIcon size={14} />
+                              </button>
+                            ) : (
+                              <button className="mem-card-act" title="编辑" onClick={() => setEditing({ id: m.id, text: m.text })}>
+                                <EditIcon size={14} />
+                              </button>
+                            )}
+                            <button className="mem-card-act" title="删除" onClick={() => void del(m.id)}>
+                              <TrashIcon size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
+
+        {/* 添加记忆弹层 */}
+        {adding && (
+          <div className="kb-pick-mask" onClick={() => setAdding(null)}>
+            <div className="kb-confirm" onClick={(e) => e.stopPropagation()}>
+              <div className="kb-pick-head">
+                <span>{adding.pick ? "添加记忆" : `添加到「${adding.label}」`}</span>
+                <button className="kb-pv-btn" title="取消" onClick={() => setAdding(null)}>
+                  <XIcon size={15} />
+                </button>
+              </div>
+              {adding.pick && (
+                <div className="mem-add-pickers">
+                  <select
+                    value={adding.scope}
+                    onChange={(e) => {
+                      const scope = e.target.value;
+                      const layer = layerOrder(scope)[0]!;
+                      setAdding((a) => (a ? { ...a, scope, layer } : a));
+                    }}
+                  >
+                    <option value={GLOBAL_SCOPE}>全局 / 对话</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={`ws:${p.id}`}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select value={adding.layer} onChange={(e) => setAdding((a) => (a ? { ...a, layer: e.target.value } : a))}>
+                    {layerOrder(adding.scope).map((l) => (
+                      <option key={l} value={l}>
+                        {LAYER_LABEL[l] ?? l}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <textarea
+                className="mem-add-textarea"
+                autoFocus
+                placeholder="教 Agent 记住点什么…"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void add();
+                  else if (e.key === "Escape") setAdding(null);
+                }}
+              />
+              <div className="kb-confirm-actions">
+                <span className="mem-add-hint">⌘↵ 保存</span>
+                <span className="ad-spacer" />
+                <button className="kb-confirm-cancel" onClick={() => setAdding(null)}>
+                  取消
+                </button>
+                <button className="kb-confirm-del" onClick={() => void add()} disabled={!draft.trim()}>
+                  添加
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

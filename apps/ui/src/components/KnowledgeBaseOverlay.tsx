@@ -143,14 +143,17 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
     return () => clearInterval(id);
   }, [polling, refresh]);
 
+  const docReqRef = useRef<string | null>(null);
   const openDoc = async (id: string) => {
+    docReqRef.current = id;
     setSel(id);
     setContent(null);
     try {
       const { doc } = await getClient().kbDocContent(id);
-      setContent(doc);
+      // 时序保护：快速切换文档时，只接受「最后一次请求」的响应，避免后到的旧响应串台。
+      if (docReqRef.current === id) setContent(doc);
     } catch {
-      setContent(null);
+      if (docReqRef.current === id) setContent(null);
     }
   };
   const closePreview = () => {
@@ -186,9 +189,13 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
     const target = pendingDel;
     if (!target) return;
     setPendingDel(null);
-    await getClient().kbDeleteDoc(target.id);
-    if (sel === target.id) closePreview();
-    await refresh();
+    try {
+      await getClient().kbDeleteDoc(target.id);
+      if (sel === target.id) closePreview();
+      await refresh();
+    } catch (e) {
+      alert(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   // 规范化为合法 kbId：转小写、非 [a-z0-9-] 折成连字符、去首尾连字符。
@@ -215,8 +222,8 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
   const collIds = [
     ...new Set<string>([...kbs.map((k) => k.kbId), ...activeJobs.map((j) => j.kbId)]),
   ];
-  // 无选中集合时默认选第一个。
-  const currentKb = selectedKb ?? collIds[0];
+  // 无选中集合、或选中的集合已失效（最后一篇文档被删→掉出 collIds）时，回落到第一个，避免右栏空白。
+  const currentKb = selectedKb && collIds.includes(selectedKb) ? selectedKb : collIds[0];
   // 当前集合文档 + 处理中任务。
   const collDocs = currentKb ? allDocs.filter((d) => d.kbId === currentKb) : [];
   const jobsHere = currentKb ? activeJobs.filter((j) => j.kbId === currentKb) : [];

@@ -14,6 +14,15 @@ import { realConnect, type ConnectFn, type McpConnection, type McpContentPart, t
 /** 探测超时（防假死 server 挂住请求）。 */
 const PROBE_TIMEOUT_MS = 15_000;
 
+/** 给 promise 套超时；无论成功/失败/超时都清掉定时器（避免每次成功探测泄漏一个挂到 15s 的 timer）。 */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`探测超时（${ms / 1000}s）`)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
 /** McpToolSpec → McpToolInfo（只取 name + description，供 UI 预览）。 */
 function toToolInfo(t: McpToolSpec): McpToolInfo {
   return { name: t.name, ...(t.description ? { description: t.description } : {}) };
@@ -142,12 +151,7 @@ export class McpClientManager {
       const conn = await this.connect(cfg);
       let tools: McpToolSpec[];
       try {
-        tools = await Promise.race([
-          conn.listTools(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`探测超时（${PROBE_TIMEOUT_MS / 1000}s）`)), PROBE_TIMEOUT_MS),
-          ),
-        ]);
+        tools = await withTimeout(conn.listTools(), PROBE_TIMEOUT_MS);
       } finally {
         await conn.close().catch(() => {});
       }
@@ -167,12 +171,7 @@ export class McpClientManager {
       const conn = await this.connect(s.config);
       let tools: McpToolSpec[];
       try {
-        tools = await Promise.race([
-          conn.listTools(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`探测超时（${PROBE_TIMEOUT_MS / 1000}s）`)), PROBE_TIMEOUT_MS),
-          ),
-        ]);
+        tools = await withTimeout(conn.listTools(), PROBE_TIMEOUT_MS);
       } finally {
         await conn.close().catch(() => {});
       }
@@ -237,7 +236,9 @@ export class McpClientManager {
               },
               source: "mcp",
               requiresApproval: "first-use",
-              execute: (args) => this.callTool(s.config.id, spec.name, args, ctx.signal),
+              // 用「每次调用」的 ctx.signal（pi 经 toPiTool 传入），而非 provider 级 tools(ctx) 的 ctx
+              // —— 后者在宿主层是个永不 abort 的占位 signal，否则取消/超时无法中断在途 MCP 调用。
+              execute: (args, exec) => this.callTool(s.config.id, spec.name, args, exec?.signal ?? ctx.signal),
             });
           }
         }

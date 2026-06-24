@@ -70,10 +70,17 @@ export function Mcp() {
   const save = async () => {
     const cfg = buildConfig();
     if (!cfg) return;
-    // 编辑时保留原有 enabled 状态；新增默认启用。
+    // 编辑时保留表单不覆盖的原有字段（enabled / 自定义 displayName / OAuth / stdio env），避免静默丢失。
     if (editing) {
       const orig = servers.find((s) => s.id === editing);
-      if (orig) cfg.enabled = orig.enabled !== false;
+      if (orig) {
+        cfg.enabled = orig.enabled !== false;
+        if (orig.displayName) cfg.displayName = orig.displayName;
+        if (orig.transport.kind === "http" && cfg.transport.kind === "http" && orig.transport.useOAuth !== undefined)
+          cfg.transport.useOAuth = orig.transport.useOAuth;
+        if (orig.transport.kind === "stdio" && cfg.transport.kind === "stdio" && orig.transport.env)
+          cfg.transport.env = orig.transport.env;
+      }
     }
     await getClient().upsertMcpServer(cfg);
     setForm({ id: "", command: "", args: "", url: "", headers: "" });
