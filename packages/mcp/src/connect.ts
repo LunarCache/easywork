@@ -10,7 +10,7 @@ export type McpContentPart = { type: "text"; text: string } | { type: string; [k
 
 export interface McpConnection {
   listTools(): Promise<McpToolSpec[]>;
-  callTool(name: string, args: unknown): Promise<{ content: McpContentPart[]; isError?: boolean }>;
+  callTool(name: string, args: unknown, signal?: AbortSignal): Promise<{ content: McpContentPart[]; isError?: boolean }>;
   close(): Promise<void>;
 }
 
@@ -53,8 +53,8 @@ export const realConnect: ConnectFn = async (cfg) => {
         inputSchema: t.inputSchema,
       }));
     },
-    async callTool(name, args) {
-      const res = await client.callTool({ name, arguments: (args ?? {}) as Record<string, unknown> });
+    async callTool(name, args, signal) {
+      const res = await client.callTool({ name, arguments: (args ?? {}) as Record<string, unknown> }, undefined, signal ? { signal } : undefined);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return { content: (res.content ?? []) as McpContentPart[], isError: (res as any).isError };
     },

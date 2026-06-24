@@ -25,9 +25,17 @@ export const McpServerConfigSchema = z.object({
 });
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 
+/** MCP 工具清单条目（name + description，供 UI 预览）。 */
+export const McpToolInfoSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+});
+export type McpToolInfo = z.infer<typeof McpToolInfoSchema>;
+
 export const McpProbeResultSchema = z.object({
   ok: z.boolean(),
   toolCount: z.number().int().nonnegative(),
+  tools: z.array(McpToolInfoSchema).default([]),
   error: z.string().optional(),
 });
 export type McpProbeResult = z.infer<typeof McpProbeResultSchema>;

@@ -10,6 +10,8 @@ import type {
   LocalLoadOptions,
   LocalModel,
   McpServerConfig,
+  McpProbeResult,
+  McpToolInfo,
   Project,
   SamplingParams,
   Skill,
@@ -526,8 +528,14 @@ export class EasyWorkClient {
     });
   }
 
-  async probeMcpServer(config: McpServerConfig): Promise<{ ok: boolean; toolCount: number; error?: string }> {
+  async probeMcpServer(config: McpServerConfig): Promise<McpProbeResult> {
     return this.postJSON("/mcp/probe", config);
+  }
+
+  /** 列出某 MCP 服务器的工具清单（供 UI 预览）。 */
+  async listMcpTools(id: string): Promise<McpToolInfo[]> {
+    const { tools } = await this.getJSON<{ tools: McpToolInfo[] }>(`/mcp/servers/${encodeURIComponent(id)}/tools`);
+    return tools;
   }
 
   /** 手动写入一条记忆（教 Agent 记住）。layer 决定归类。 */

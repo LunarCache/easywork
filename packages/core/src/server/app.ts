@@ -727,6 +727,10 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     }
     return mcp.probe(parsed.data);
   });
+  app.get("/mcp/servers/:id/tools", async (req) => {
+    const tools = await mcp.listToolsOf((req.params as { id: string }).id);
+    return { tools };
+  });
 
   // ---- 知识库 RAG ----
   const KbIngestSchema = z.object({

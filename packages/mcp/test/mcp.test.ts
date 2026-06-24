@@ -115,6 +115,43 @@ describe("McpClientManager", () => {
     expect(call.isError).toBe(true);
   });
 
+  it("probe 成功返回工具清单（tools 字段）", async () => {
+    const mgr = new McpClientManager({ allowStdio: true, connect: async () => fakeConn() });
+    const probe = await mgr.probe(cfg);
+    expect(probe.ok).toBe(true);
+    expect(probe.toolCount).toBe(2);
+    expect(probe.tools).toHaveLength(2);
+    expect(probe.tools.map((t) => t.name).sort()).toEqual(["list-files", "read"]);
+    expect(probe.tools[0]).toHaveProperty("description");
+  });
+
+  it("listToolsOf 返回工具清单（供 UI 预览）", async () => {
+    const mgr = new McpClientManager({ allowStdio: true, connect: async () => fakeConn() });
+    await mgr.upsert(cfg);
+    const tools = await mgr.listToolsOf("fs");
+    expect(tools).toHaveLength(2);
+    expect(tools.map((t) => t.name).sort()).toEqual(["list-files", "read"]);
+  });
+
+  it("callTool 透传 AbortSignal 给底层连接", async () => {
+    let seenSignal: AbortSignal | undefined;
+    const conn: McpConnection = {
+      async listTools() {
+        return [{ name: "read", description: "读" }];
+      },
+      async callTool(_name, _args, signal) {
+        seenSignal = signal;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+      async close() {},
+    };
+    const ac = new AbortController();
+    const mgr = new McpClientManager({ allowStdio: true, connect: async () => conn });
+    await mgr.upsert(cfg);
+    await mgr.callTool("fs", "read", {}, ac.signal);
+    expect(seenSignal).toBe(ac.signal);
+  });
+
   it("调用前按 inputSchema 校验参数（缺必填 / 类型错）", async () => {
     const conn: McpConnection = {
       async listTools() {

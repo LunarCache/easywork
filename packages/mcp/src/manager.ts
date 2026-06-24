@@ -4,11 +4,20 @@ import {
   mcpToolName,
   type McpProbeResult,
   type McpServerConfig,
+  type McpToolInfo,
   type Tool,
   type ToolProvider,
   type ToolResult,
 } from "@ew/shared";
 import { realConnect, type ConnectFn, type McpConnection, type McpContentPart, type McpToolSpec } from "./connect.js";
+
+/** 探测超时（防假死 server 挂住请求）。 */
+const PROBE_TIMEOUT_MS = 15_000;
+
+/** McpToolSpec → McpToolInfo（只取 name + description，供 UI 预览）。 */
+function toToolInfo(t: McpToolSpec): McpToolInfo {
+  return { name: t.name, ...(t.description ? { description: t.description } : {}) };
+}
 
 interface ServerState {
   config: McpServerConfig;
@@ -128,14 +137,48 @@ export class McpClientManager {
 
   async probe(cfg: McpServerConfig): Promise<McpProbeResult> {
     const blocked = this.stdioBlocked(cfg);
-    if (blocked) return { ok: false, toolCount: 0, error: blocked };
+    if (blocked) return { ok: false, toolCount: 0, tools: [], error: blocked };
     try {
       const conn = await this.connect(cfg);
-      const tools = await conn.listTools();
-      await conn.close().catch(() => {});
-      return { ok: true, toolCount: tools.length };
+      let tools: McpToolSpec[];
+      try {
+        tools = await Promise.race([
+          conn.listTools(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`探测超时（${PROBE_TIMEOUT_MS / 1000}s）`)), PROBE_TIMEOUT_MS),
+          ),
+        ]);
+      } finally {
+        await conn.close().catch(() => {});
+      }
+      return { ok: true, toolCount: tools.length, tools: tools.map(toToolInfo) };
     } catch (e) {
-      return { ok: false, toolCount: 0, error: e instanceof Error ? e.message : String(e) };
+      return { ok: false, toolCount: 0, tools: [], error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** 列出某服务器工具（用于 UI 预览，总是真连、不走 cooloff 门控）。 */
+  async listToolsOf(id: string): Promise<McpToolInfo[]> {
+    const s = this.servers.get(id);
+    if (!s) return [];
+    const blocked = this.stdioBlocked(s.config);
+    if (blocked) return [];
+    try {
+      const conn = await this.connect(s.config);
+      let tools: McpToolSpec[];
+      try {
+        tools = await Promise.race([
+          conn.listTools(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`探测超时（${PROBE_TIMEOUT_MS / 1000}s）`)), PROBE_TIMEOUT_MS),
+          ),
+        ]);
+      } finally {
+        await conn.close().catch(() => {});
+      }
+      return tools.map(toToolInfo);
+    } catch {
+      return s.toolsCache?.map(toToolInfo) ?? [];
     }
   }
 
@@ -157,7 +200,7 @@ export class McpClientManager {
     }
   }
 
-  async callTool(id: string, name: string, args: unknown): Promise<ToolResult> {
+  async callTool(id: string, name: string, args: unknown, signal?: AbortSignal): Promise<ToolResult> {
     const s = this.servers.get(id);
     if (!s) return { content: `未知 MCP 服务器: ${id}`, isError: true };
     const blocked = this.stdioBlocked(s.config);
@@ -168,7 +211,7 @@ export class McpClientManager {
     if (invalid) return { content: `参数校验失败：${invalid}`, isError: true };
     try {
       const conn = await this.ensureConn(s);
-      const res = await conn.callTool(name, args);
+      const res = await conn.callTool(name, args, signal);
       return { content: flattenContent(res.content), isError: res.isError };
     } catch (e) {
       this.recordFailure(s);
@@ -179,7 +222,7 @@ export class McpClientManager {
   /** 作为 ToolProvider 暴露所有启用服务器的工具（mcp__ 命名空间）。 */
   toolProvider(): ToolProvider {
     return {
-      tools: async () => {
+      tools: async (ctx) => {
         const result: Tool[] = [];
         for (const s of this.servers.values()) {
           if (!s.config.enabled || this.inCooloff(s)) continue;
@@ -194,7 +237,7 @@ export class McpClientManager {
               },
               source: "mcp",
               requiresApproval: "first-use",
-              execute: (args) => this.callTool(s.config.id, spec.name, args),
+              execute: (args) => this.callTool(s.config.id, spec.name, args, ctx.signal),
             });
           }
         }
