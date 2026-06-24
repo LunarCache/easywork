@@ -10,11 +10,9 @@ import {
   TrashIcon,
   XIcon,
   LoaderIcon,
-  PlusIcon,
   KbIcon,
   MaximizeIcon,
   ArrowLeftIcon,
-  CheckIcon,
 } from "../icons.js";
 
 interface KbDoc {
@@ -89,25 +87,26 @@ function relTime(iso: string): string {
 }
 
 /**
- * 知识库页：左集合栏（常驻，默认选第一个集合）+ 右文档卡片网格（角标 + 文件名 + 片段数·时间）；
- * 文档区头部内置前端文件名搜索（输入即过滤）。点卡片从右侧滑出预览（md 渲染 / 其余纯文本）。
+ * 知识库页：左集合栏（只显示有文档/有任务的集合，空集合不显示）+ 右文档卡片网格。
+ * 渐进式披露——文档区仅在当前集合有文档/任务时显示标题、搜索框与卡片，否则完全空白。
+ * 点「上传」先弹目标选择面板（已有集合 / 新建），选定后选文件，集合在有文件那一刻才诞生。
  */
 export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => void; embedded?: boolean }) {
   const [kbs, setKbs] = useState<{ kbId: string; docs: number; chunks: number }[]>([]);
   const [allDocs, setAllDocs] = useState<KbDoc[]>([]);
   const [totalChunks, setTotalChunks] = useState(0);
-  const [selectedKb, setSelectedKb] = useState<string | undefined>(undefined); // 当前选中/上传目标集合
+  const [selectedKb, setSelectedKb] = useState<string | undefined>(undefined); // 当前选中集合
   const [q, setQ] = useState(""); // 前端搜索（仅文件名）
   const [sel, setSel] = useState<string | null>(null);
   const [content, setContent] = useState<DocContent | null>(null);
   const [maxed, setMaxed] = useState(false);
   const [jobs, setJobs] = useState<KbJob[]>([]);
   const [polling, setPolling] = useState(false);
-  // 本地新建但尚无文档的集合（上传第一篇文档后由后端 kbList 接管）。
-  const [extraKbs, setExtraKbs] = useState<string[]>([]);
-  const [creating, setCreating] = useState(false); // 新建集合的行内输入（Tauri webview 无 window.prompt）
-  const [newName, setNewName] = useState("");
+  // 上传目标选择面板（点「上传」先选/建目标集合，再选文件）。
+  const [picking, setPicking] = useState(false);
+  const [newName, setNewName] = useState(""); // 面板内「新建集合」输入
   const fileRef = useRef<HTMLInputElement>(null);
+  const pendingTarget = useRef<string>(""); // 选定的上传目标，文件选择器返回时读取
 
   // 一次取全部文档（含 kbId）→ 客户端分组算每集合计数 / 主导类型 / 文档列表，避免按集合多次请求。
   const refresh = useCallback(async () => {
@@ -160,7 +159,7 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
 
   const onFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const target = currentKb || "default";
+    const target = pendingTarget.current || "default";
     for (const f of Array.from(files)) {
       try {
         await getClient().kbUpload({ source: f.name, contentBase64: toBase64(await f.arrayBuffer()), kbId: target });
@@ -182,36 +181,31 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
     await refresh();
   };
 
-  const newColl = () => {
+  // 规范化为合法 kbId：转小写、非 [a-z0-9-] 折成连字符、去首尾连字符。
+  const normalizeKbId = (raw: string): string =>
+    raw.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+
+  // 选定上传目标后打开文件选择器。
+  const pickTarget = (target: string) => {
+    pendingTarget.current = target;
+    setPicking(false);
     setNewName("");
-    setCreating(true);
+    fileRef.current?.click();
   };
-  const cancelColl = () => {
-    setCreating(false);
-    setNewName("");
-  };
-  const confirmColl = () => {
-    // 规范化为合法 kbId：转小写、非 [a-z0-9-] 折成连字符、去首尾连字符。
-    const id = newName
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, "-")
-      .replace(/^-+|-+$/g, "");
+  // 面板内新建集合名 → 校验非空且不重名 → 作为目标打开文件选择器。
+  const pickNew = () => {
+    const id = normalizeKbId(newName);
     if (!id) return; // 空名：保持输入态
-    if (!kbs.some((k) => k.kbId === id) && !extraKbs.includes(id)) setExtraKbs((cur) => [...cur, id]);
-    setSelectedKb(id); // 选中并成为上传目标
-    setQ(""); // 切集合清空搜索
-    closePreview();
-    setCreating(false);
-    setNewName("");
+    pickTarget(id);
   };
 
   const activeJobs = jobs.filter((j) => ACTIVE.includes(j.status));
-  // 集合全集 = 后端集合 ∪ 本地新建 ∪ 有处理中任务的集合（新集合首传时其 job 的 kbId 可能尚未进 kbs）。
+  // 集合列表 = 后端集合 ∪ 有处理中任务的集合（新集合首传时其 job 的 kbId 可能尚未进 kbs）。
+  // 空集合（0 文档）不显示——有文件/有任务才进列表。
   const collIds = [
-    ...new Set<string>([...kbs.map((k) => k.kbId), ...extraKbs, ...activeJobs.map((j) => j.kbId)]),
+    ...new Set<string>([...kbs.map((k) => k.kbId), ...activeJobs.map((j) => j.kbId)]),
   ];
-  // 无选中集合时默认选第一个（去掉「全部文档」入口，集合为唯一组织维度）。
+  // 无选中集合时默认选第一个。
   const currentKb = selectedKb ?? collIds[0];
   // 当前集合文档 + 处理中任务。
   const collDocs = currentKb ? allDocs.filter((d) => d.kbId === currentKb) : [];
@@ -234,13 +228,13 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
             </span>
           </div>
           <span className="ad-spacer" />
-          <button className="kb-ov-newcoll" title="新建集合" onClick={newColl}>
-            <PlusIcon size={15} /> 新建
-          </button>
           <button
             className="kb-ov-upload"
-            title={`上传到集合「${currentKb || "default"}」`}
-            onClick={() => fileRef.current?.click()}
+            title="上传文档"
+            onClick={() => {
+              setNewName("");
+              setPicking(true);
+            }}
           >
             <UploadIcon size={15} /> 上传
           </button>
@@ -262,134 +256,111 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
         </div>
 
         <div className="kb-ov-body">
-          {/* 左：集合导航 */}
-          <div className="kb-colls">
-            <div className="kb-colls-h">集合</div>
-            {creating && (
-              <div className="kb-coll-new">
-                <input
-                  className="kb-coll-new-input"
-                  autoFocus
-                  placeholder="集合名（英文 / 数字 / 连字符）"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") confirmColl();
-                    else if (e.key === "Escape") cancelColl();
-                  }}
-                />
-                <button className="kb-pv-btn" title="创建" onClick={confirmColl}>
-                  <CheckIcon size={15} />
-                </button>
-                <button className="kb-pv-btn" title="取消" onClick={cancelColl}>
-                  <XIcon size={15} />
-                </button>
-              </div>
-            )}
-            {collIds.length === 0 && !creating && <div className="kb-colls-empty">还没有集合</div>}
-            {collIds.map((id) => {
-              const docs = allDocs.filter((d) => d.kbId === id);
-              const ft = dominantType(docs.map((d) => d.source));
-              const Icon = ft?.Icon ?? KbIcon;
-              const isSel = currentKb === id;
-              const procHere = activeJobs.some((j) => j.kbId === id);
-              return (
-                <button
-                  key={id}
-                  className={`kb-coll ${isSel ? "on" : ""}`}
-                  onClick={() => {
-                    setSelectedKb(id);
-                    setQ("");
-                  }}
-                >
-                  <span className="kb-coll-ico" style={{ background: ft?.color ?? "var(--accent)" }}>
-                    <Icon size={14} />
-                  </span>
-                  <span className="kb-coll-name">{id}</span>
-                  {procHere && <span className="kb-coll-proc" title="处理中" />}
-                  <span className="kb-coll-n">{docs.length}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* 右：文档区（标题 + 搜索 + 卡片网格） */}
-          <div className="kb-docs">
-            <div className="kb-docs-h">
-              <span className="kb-docs-h-name">{currentKb ?? "—"}</span>
-              <span className="kb-docs-h-n">· {filteredDocs.length} 文档</span>
-              <div className="kb-search">
-                <input placeholder="搜索文件名…" value={q} onChange={(e) => setQ(e.target.value)} />
-              </div>
-            </div>
-
-            <div className="kb-doc-grid">
-              {/* 处理中卡片 */}
-              {jobsHere.map((j) => (
-                <div key={j.id} className="kb-doc-card proc">
-                  <div className="kb-doc-card-top">
-                    <span className="kb-ov-badge" style={{ background: fileBadge(j.source).color }}>
-                      {fileBadge(j.source).label}
-                    </span>
-                    <span className="kb-doc-card-name">{j.source}</span>
-                  </div>
-                  <div className="kb-proc-bar">
-                    <div
-                      className="kb-proc-fill"
-                      style={
-                        j.status === "embedding" && j.total
-                          ? { width: `${Math.round(((j.done ?? 0) / j.total) * 100)}%` }
-                          : { width: "35%", animation: "proc-indet 1.2s ease-in-out infinite" }
-                      }
-                    />
-                  </div>
-                  <div className="kb-doc-card-meta">
-                    <LoaderIcon size={11} className="spin" /> {STATUS_LABEL[j.status] ?? j.status}
-                    {j.status === "embedding" && j.total ? ` ${j.done ?? 0}/${j.total}` : ""}
-                  </div>
-                </div>
-              ))}
-
-              {/* 文档卡片 */}
-              {filteredDocs.map((d) => {
-                const b = fileBadge(d.source);
+          {/* 左：集合导航（空集合不显示——只有有文档/有任务的集合） */}
+          {collIds.length > 0 && (
+            <div className="kb-colls">
+              <div className="kb-colls-h">集合</div>
+              {collIds.map((id) => {
+                const docs = allDocs.filter((d) => d.kbId === id);
+                const ft = dominantType(docs.map((d) => d.source));
+                const Icon = ft?.Icon ?? KbIcon;
+                const isSel = currentKb === id;
+                const procHere = activeJobs.some((j) => j.kbId === id);
                 return (
                   <button
-                    key={d.id}
-                    className={`kb-doc-card ${sel === d.id ? "on" : ""}`}
-                    onClick={() => void openDoc(d.id)}
+                    key={id}
+                    className={`kb-coll ${isSel ? "on" : ""}`}
+                    onClick={() => {
+                      setSelectedKb(id);
+                      setQ("");
+                    }}
                   >
-                    <div className="kb-doc-card-top">
-                      <span className="kb-ov-badge" style={{ background: b.color }}>
-                        {b.label}
-                      </span>
-                      <span className="kb-doc-card-name">{d.source}</span>
-                      <span className="kb-doc-card-del" title="删除" onClick={(e) => void del(d.id, e)}>
-                        <TrashIcon size={14} />
-                      </span>
-                    </div>
-                    <div className="kb-doc-card-meta">
-                      {d.chunks} 片段 · {relTime(d.createdAt)}
-                    </div>
+                    <span className="kb-coll-ico" style={{ background: ft?.color ?? "var(--accent)" }}>
+                      <Icon size={14} />
+                    </span>
+                    <span className="kb-coll-name">{id}</span>
+                    {procHere && <span className="kb-coll-proc" title="处理中" />}
+                    <span className="kb-coll-n">{docs.length}</span>
                   </button>
                 );
               })}
-
-              {/* 空态 */}
-              {collDocs.length === 0 && jobsHere.length === 0 && !creating && (
-                <div className="kb-ov-empty grid-empty">
-                  <BookIcon size={26} />
-                  <p>空集合</p>
-                  <span>点右上「上传」导入文档到此集合。</span>
-                </div>
-              )}
-              {collDocs.length > 0 && filteredDocs.length === 0 && (
-                <div className="kb-ov-empty grid-empty">
-                  <BookIcon size={22} />
-                  <p>没有匹配「{q}」的文档</p>
-                </div>
-              )}
             </div>
+          )}
+
+          {/* 右：文档区（渐进式披露——无文档无任务时完全空白） */}
+          <div className="kb-docs">
+            {collDocs.length > 0 && (
+              <div className="kb-docs-h">
+                <span className="kb-docs-h-name">{currentKb ?? "—"}</span>
+                <span className="kb-docs-h-n">· {filteredDocs.length} 文档</span>
+                <div className="kb-search">
+                  <input placeholder="搜索文件名…" value={q} onChange={(e) => setQ(e.target.value)} />
+                </div>
+              </div>
+            )}
+
+            {(collDocs.length > 0 || jobsHere.length > 0) && (
+              <div className="kb-doc-grid">
+                {/* 处理中卡片 */}
+                {jobsHere.map((j) => (
+                  <div key={j.id} className="kb-doc-card proc">
+                    <div className="kb-doc-card-top">
+                      <span className="kb-ov-badge" style={{ background: fileBadge(j.source).color }}>
+                        {fileBadge(j.source).label}
+                      </span>
+                      <span className="kb-doc-card-name">{j.source}</span>
+                    </div>
+                    <div className="kb-proc-bar">
+                      <div
+                        className="kb-proc-fill"
+                        style={
+                          j.status === "embedding" && j.total
+                            ? { width: `${Math.round(((j.done ?? 0) / j.total) * 100)}%` }
+                            : { width: "35%", animation: "proc-indet 1.2s ease-in-out infinite" }
+                        }
+                      />
+                    </div>
+                    <div className="kb-doc-card-meta">
+                      <LoaderIcon size={11} className="spin" /> {STATUS_LABEL[j.status] ?? j.status}
+                      {j.status === "embedding" && j.total ? ` ${j.done ?? 0}/${j.total}` : ""}
+                    </div>
+                  </div>
+                ))}
+
+                {/* 文档卡片 */}
+                {filteredDocs.map((d) => {
+                  const b = fileBadge(d.source);
+                  return (
+                    <button
+                      key={d.id}
+                      className={`kb-doc-card ${sel === d.id ? "on" : ""}`}
+                      onClick={() => void openDoc(d.id)}
+                    >
+                      <div className="kb-doc-card-top">
+                        <span className="kb-ov-badge" style={{ background: b.color }}>
+                          {b.label}
+                        </span>
+                        <span className="kb-doc-card-name">{d.source}</span>
+                        <span className="kb-doc-card-del" title="删除" onClick={(e) => void del(d.id, e)}>
+                          <TrashIcon size={14} />
+                        </span>
+                      </div>
+                      <div className="kb-doc-card-meta">
+                        {d.chunks} 片段 · {relTime(d.createdAt)}
+                      </div>
+                    </button>
+                  );
+                })}
+
+                {/* 搜索无结果 */}
+                {collDocs.length > 0 && filteredDocs.length === 0 && (
+                  <div className="kb-ov-empty grid-empty">
+                    <BookIcon size={22} />
+                    <p>没有匹配「{q}」的文档</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 文档预览（右侧滑出，复用工作台视觉） */}
@@ -437,6 +408,53 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
               </>
             )}
           </div>
+
+          {/* 上传目标选择面板（点「上传」先选/建目标集合，再选文件） */}
+          {picking && (
+            <div className="kb-pick-mask" onClick={() => setPicking(false)}>
+              <div className="kb-pick" onClick={(e) => e.stopPropagation()}>
+                <div className="kb-pick-head">
+                  <span>上传到集合</span>
+                  <button className="kb-pv-btn" title="取消" onClick={() => setPicking(false)}>
+                    <XIcon size={15} />
+                  </button>
+                </div>
+                <div className="kb-pick-list">
+                  <button
+                    className={`kb-pick-item ${currentKb ? "" : "on"}`}
+                    onClick={() => pickTarget("default")}
+                  >
+                    default
+                  </button>
+                  {collIds.filter((id) => id !== "default").map((id) => (
+                    <button
+                      key={id}
+                      className={`kb-pick-item ${currentKb === id ? "on" : ""}`}
+                      onClick={() => pickTarget(id)}
+                    >
+                      {id}
+                    </button>
+                  ))}
+                </div>
+                <div className="kb-pick-sep">或新建集合</div>
+                <div className="kb-pick-new">
+                  <input
+                    autoFocus
+                    placeholder="集合名（英文 / 数字 / 连字符）"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") pickNew();
+                      else if (e.key === "Escape") setPicking(false);
+                    }}
+                  />
+                  <button className="kb-pick-go" onClick={pickNew} disabled={!normalizeKbId(newName)}>
+                    选择文件
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
