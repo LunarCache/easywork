@@ -92,6 +92,7 @@ npm run app:build --workspace @ew/desktop  # 出 macOS dmg + .app
 
 | 文档 | 内容 |
 |---|---|
+| [docs/DESIGN.md](docs/DESIGN.md) | **系统设计与功能详解（学习向）** —— 整体架构 + 各子系统原理 + 关键数据流 + 为什么这样设计 |
 | [docs/FEATURES.md](docs/FEATURES.md) | 功能与设计详解（模型 / Agent / 记忆 / RAG / UI / `/v1` 端点） |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构（Core Daemon 模型）/ Monorepo / 技术栈 / 环境变量 / 平台说明 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 状态总览（已完成 / 待做）+ 里程碑日志 |

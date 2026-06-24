@@ -1,0 +1,427 @@
+# EasyWork · 系统设计与功能详解（学习向）
+
+> 这是一份**讲透原理**的长文：把整体架构与各子系统的功能设计、关键数据流、以及"为什么这样设计"一并讲清，供学习与上手。
+> 速查功能清单见 [FEATURES](FEATURES.md)；架构/环境变量见 [ARCHITECTURE](ARCHITECTURE.md)；开发约定与正确性约束的权威来源是 [CLAUDE.md](../CLAUDE.md)。
+> 文中 `file:line` 形式的锚点便于跳转源码核对。
+
+---
+
+## 0. 心智模型：一个大脑 + 一群瘦客户端
+
+EasyWork 是**纯推理（无训练/微调）的跨平台本地 AI 工作台**。理解全局只需记住一句话：
+
+> **一个无头 Node 守护进程 `@ew/core` 拥有全部"大脑"，其余一切都是它的瘦客户端。**
+
+"大脑"包含：托管的 pi Agent 内核、统一 `llama serve` router 进程、云端 provider、工具/Skills/MCP、记忆/知识库、SQLite。对外暴露 **Fastify HTTP + SSE + `/v1` 网关**。
+
+谁是瘦客户端？
+- **Tauri 桌面 webview**（`apps/ui`，React）——应用内聊天；
+- **CLI**（`easywork`，`apps/daemon`）——终端里 repl/run/管理；
+- **IM 连接器**（Telegram 等）——外部渠道汇入同一个大脑；
+- **任意 `/v1` 客户端**（Claude Code、openai SDK……）——把 EasyWork 当本地模型端点。
+
+这种"单大脑"架构的好处：同一套会话/记忆/工具逻辑，**同时服务应用内、外部渠道、无头脚本**，不重复实现。`@ew/core` 是**库**，被 `apps/daemon`（`easywork serve`）与 `apps/desktop`（Tauri sidecar）共同 `createCore()` 起来。
+
+```
+┌─────────── 瘦客户端 ───────────┐         ┌──────────── 大脑：@ew/core 守护进程 ────────────┐
+│ Tauri webview (apps/ui)        │  HTTP   │ Fastify 路由 + SSE + /v1 网关                   │
+│ CLI (easywork)                 │  +SSE   │ SessionHost(托管 pi AgentSession，按 thread 串行)│
+│ IM 连接器 (Telegram…)          │ ──────▶ │ RouterServerManager(单 llama serve 多模型路由)  │
+│ 任意 /v1 客户端 (Claude Code…) │  /v1    │ 记忆 / 知识库 / Skills / MCP / 云端 provider     │
+└────────────────────────────────┘         │ SQLite(node:sqlite) + sqlite-vec               │
+                                            └─────────────────────────────────────────────────┘
+```
+
+---
+
+## 1. 仓库与包结构（Monorepo）
+
+统一 **npm workspaces + turbo**（环境无 pnpm）。包之间单向依赖，`shared` 是所有人的底座：
+
+| 包 | 角色 |
+|---|---|
+| `@ew/shared` | **纯契约层**：zod schema + TS 类型，零运行时依赖（除 zod）。所有包依赖它，它谁都不依赖。 |
+| `@ew/core` | 守护进程库：装配全部子系统，`createCore()` → `CoreServer`。 |
+| `@ew/providers` | 推理引擎实现：OpenAI-兼容引擎、llama-server 引擎、Harmony 解析。 |
+| `@ew/memory` | 记忆 provider（本地分层 + sqlite-vec ⊕ 词法）+ Mem0 适配骨架。 |
+| `@ew/skills` | Skills 发现/管理（SKILL.md frontmatter）。 |
+| `@ew/mcp` | MCP 客户端管理（stdio/http、探测、cooloff、桥成工具）。 |
+| `@ew/im-connectors` | 渠道连接器（Telegram 已实现，WeCom/飞书待补）。 |
+| `@ew/sdk` | 瘦客户端用的 HTTP/SSE 客户端。 |
+| `apps/ui` | React 桌面前端。 |
+| `apps/daemon` | `easywork` CLI（既是 `serve` 守护，也是终端客户端）。 |
+| `apps/desktop` | Tauri 2 Rust 壳 + daemon sidecar。 |
+
+**唯一原生件 = `sqlite-vec`** 可加载扩展（各平台预编译二进制随包；缺失则向量召回降级纯词法，不崩）。本地推理走外部统一 `llama` 二进制（[llama.app](https://llama.app)）的 router 模式；DB 用 Node 内置 `node:sqlite`。
+
+---
+
+## 2. 契约层 `@ew/shared` —— "OpenAI-shaped 通用语言"
+
+贯穿全系统的设计选择：**契约镜像 OpenAI 的请求/响应形状**。原因有三：(a) 云端 provider 平凡映射；(b) `/v1` 网关进出翻译成本低；(c) 外部 OpenAI/Anthropic SDK 可直连。
+
+核心契约（`packages/shared/src/*`）：
+
+- **`ChatMessage` / `ContentPart`**（`message.ts`）：角色 `system/user/assistant/tool`；内容是 string 或 `ContentPart[]`（判别联合 `text/reasoning/image/audio/file`）。
+  - **关键不变量**：`reasoning`（思考）片段**仅用于持久化与回放，绝不发给模型**。`messageText()` 只取 `text` 片段，所有"喂给模型"的转换器（pi-adapt / ew-extensions / openai-messages）都显式剔除 reasoning。**新增任何模型侧转换器必须同样处理。**
+  - 工具调用的 `arguments` **始终是原始 JSON 字符串，绝不预解析**——模型常吐坏 JSON，解析在 loop 里带 try 进行、失败作为 tool 错误喂回自纠。
+- **`InferenceEngine` / `ChatStreamEvent`**（`provider.ts`）：引擎统一接口 `chat / chatStream / embed? + capabilities`。`ChatStreamEvent` 是**判别联合**（`text-delta / reasoning-delta / tool-call-start|args-delta|end / usage / done / error`）。**为什么不用裸字符串流**：一次助手轮里 prose 与 tool call 会交织（先文本、再起一个工具调用、名字先到、参数 JSON 增量到……），裸字符串无法表达；每种关切给一个独立帧。`error` 是**一等终止事件**，不可伪装成 `done`。
+- **`Tool` / `ToolProvider` / `ToolExecContext`**（`tool.ts`）：内置/MCP/Skill 工具统一成 `Tool`，含 `definition / source / requiresApproval / execute`。`ToolResult` 区分 `content`（喂模型）与 `display?`（更丰富的 UI 载荷，不喂模型）。审批模型：`ApprovalPolicy`（never/always/first-use 或谓词）+ `ApprovalGate.request()`（UI 弹窗/IM 确认/自动策略的抽象）。
+- **`MemoryProvider`**（`memory.ts`）：`recall/write/edit/list/delete/deleteBySession/deleteByScope/observe`，全带 scope。语义见第 6 节。
+- **`AgentEvent`**（`events.ts`）：**对外 SSE 联合**（agent loop → UI/IM/SSE，渠道无关、只认 threadId）：`text / reasoning / tool-start / tool-end / tool-progress / approval-request / memory-recall / usage / final / error`。
+- **`ConversationRepo` / `Project` / `Thread`**（`conversation.ts`）：`ApprovalMode`（read-only/approve-each/auto-edits/full-auto，工程级档位）、Project（含 `workspaceDir` 决定是否工作区项目）、`resolveThreadForChannel(kind, channelUserId)`（渠道身份→稳定 thread）。
+- **`ChannelConnector`**（`im.ts`）：`start/stop/onInbound/reply`。
+
+---
+
+## 3. 核心守护进程 `@ew/core`
+
+入口 `createCore(opts): CoreServer`（`app.ts:107`）装配并接线所有子系统，返回带 `start()/stop()` + 各 manager 引用的句柄。中枢对象是 **`SessionHost`**（`app.ts:184`），注入 `local` 后端 / `providers` / `memory` / `repo` / `kb` / `mcp` / `builtins`。
+
+**鉴权 / CORS**：先 CORS 钩子（`app.ts:291`，必须先于鉴权；OPTIONS 直接 204），再 Bearer-token 钩子（`app.ts:303`）守住除 `/health` 外的一切。body 上限 32MB。
+
+**存储**：SQLite（`node:sqlite`，经 `createRequire` 运行时引入以躲过打包器静态解析）。`ConversationRepo` 存项目/线程/消息（含 FTS5 全文检索）；设置（providers / mcp.servers / local.bindHost / embed 路径等）存键值。记忆与知识库各有自己的表（见第 6、7 节）。
+
+---
+
+## 4. Agent 内核 = 托管 pi `AgentSession`
+
+> **自研 agent loop / tool-registry / tool-healing 已删除**，agent 内核 = 托管 [`@earendil-works/pi`](https://github.com/earendil-works/pi) 的 `AgentSession`（无头嵌入）。EasyWork 退化为它的宿主/集成层。
+
+### 4.1 SessionHost 与"每 thread 串行化"
+
+`SessionHost`（`session-host.ts`）按 `threadId` 复用 `HostedSession`（缓存键 = `modelId,cwd,workspace,memoryScope,excludeSkills`，**任一变化即重建会话**）。
+
+**每 thread 串行化 run**（`session-host.ts:426`）用 promise 链实现——同一会话同时只跑一轮：
+
+```
+prev = runChain.get(threadId) ?? resolve()
+runChain.set(threadId, prev.then(() => mine))   // mine 在 finally resolve
+await prev.catch(()=>{})                         // 等上一轮收尾
+yield* runOne(input)
+```
+
+**为什么**（正确性约束 #1）：pi 的 `subscribe` 是**会话级**，两轮并发会跨请求串流事件 + 审批错配（IM 连发/双击/重连可触发）。
+
+### 4.2 一次 run 的端到端生命周期
+
+```
+POST /agent/run (app.ts:525)
+  → 校验 + registry.resolve(model)
+  → 解析 project/workspace（isWorkspace = !!project.workspaceDir）
+  → cwd = workspaceDir(工作区) 或 chatWorkspaceDir(threadId)(聊天，每会话隔离工件目录)
+  → 确保 thread 行存在（消息行延迟到成功才落库）
+  → hijack reply 为裸 SSE：AbortController 绑 raw.on("close")；raw.on("error") 吞掉；
+     send() 每次 write 前守 !writableEnded && !destroyed
+  → 抽出本轮用户文本 + 图片(base64)（仅当前轮；历史图在 pi 会话上下文里）
+  → sessionHost.run({ threadId, model, text, images, cwd, workspace, memoryScope,
+                       approval, approvalMode, signal, sampling, think, excludeSkills })
+        → getOrCreate → createAgentSession(...) + 采样注入 wrapper + 权限/记忆扩展
+        → 快照 messages（用于取消回滚）
+        → session.subscribe(ev => mapSessionEvent(ev) → 队列)
+        → session.prompt(text + /think|/no_think 指令, { images })
+        → 事件泵 yield AgentEvent
+  → 每个 AgentEvent: recorder.push + send() 给客户端
+  → 成功(!aborted)才落库：user 消息 + recorder 重建的 assistant/tool 消息 + 最终助手消息
+  → finally: 写 data:[DONE] + 结束 socket
+```
+
+**取消是两层回滚**：① pi 进程内 messages 从快照恢复（取消轮不计入模型上下文）；② HTTP 层若 aborted 则**整轮不落库**（user 消息 + 部分助手输出 + 工具往返全丢，与 pi 上下文回滚一致）；首轮取消且无历史则删掉空 thread。
+
+### 4.3 事件映射唯一边界
+
+`mapSessionEvent(ev): AgentEvent[]`（`session-host.ts:588`）是 pi→SSE 的**唯一**翻译边界（另一个边界是 `pi-adapt.ts` 给 `/v1` 网关）。映射：`message_update`→text/reasoning/error；`tool_execution_start`→tool-start；`tool_execution_end`→tool-end（把 `result.details` 提到 `result.display` 供 UI 渲染来源/引用/HTML 工件/diff）；`message_end`→usage；`agent_end`→final。`error` pi 事件必须映成 `AgentEvent.error`，**绝不伪装成正常结束**。
+
+### 4.4 工具审批（4 档）+ 挂起/恢复
+
+分类（`ew-extensions.ts:229`）：READ `{read,ls,grep,find}` / WRITE `{edit,write}` / `bash` / `mcp__*` / 其余 safe。决策矩阵：
+
+| 档位 | read/safe | write(edit/write) | bash | mcp__ |
+|---|---|---|---|---|
+| read-only | 放行 | 阻断 | 阻断 | 阻断 |
+| approve-each | 放行 | 审批 | 审批 | 审批 |
+| auto-edits | 放行 | 放行 | 审批 | 审批 |
+| full-auto | 放行 | 放行 | 放行 | 放行 |
+
+**挂起/恢复跨请求**：危险工具经 `SseApprovalGate.request`（`approval-sse.ts`）生成 UUID、发 `approval-request` SSE、注册 resolver、返回挂起的 promise（超时默认 120s 或 abort → 视为 deny）。客户端经 `POST /agent/approve {id,verdict}` 唤醒。**无 UI 连接时**（headless/IM 无人应答），本应审批的工具**直接放行**避免死锁。聊天模式跑 `auto-edits`（写在工件目录内放行、bash 逐条审批），工作区模式用项目的 `approvalMode`。
+
+### 4.5 工作区路径限定
+
+pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork 兜底（`ew-extensions.ts:282`）：`escapesCwd` 检查含路径的参数（`path/file_path/dir/...`），经 **`realResolve`（realpath 解软链后再拼不存在的尾部）** 与 cwd 根比较，越界返回该字符串。在权限扩展里**先于档位决策**执行 → **所有档位都拦**。`bash` 豁免静态路径检查（任意 shell 无法路径沙箱）→ 纯靠审批把守。权限扩展**聊天与工作区都装载**，故聊天模式 fs 工具也被 cwd 限定。
+
+### 4.6 模型解析 + 采样注入 + 图片能力
+
+`resolveModel`（`session-host.ts:186`）：**先本地**（`local.baseUrlFor(modelId)` 命中 → `provider:"local"`, `input:["text","image"]`, ctx 来自 `local.contexts()`），**再云端**（`providers.findByModel` → pi `ModelRegistry`）。本地 server 设了 `--api-key`（0.0.0.0 暴露）时把 key 注入 pi auth，连回环也带 Bearer。
+
+**采样注入**：pi 不在 `createAgentSession` 暴露采样，故包装 `session.agent.streamFn`：`temperature/maxTokens` 走 StreamOptions，其余经 `onPayload` 注入请求体；`top_k/min_p/repeat_penalty` 是 llama.cpp 扩展，**仅 `provider==="local"` 注入**。
+
+**图片**：本地/云端模型都标 `input:["text","image"]`——pi 仅在用户实际附图时下发；非视觉模型收到图由引擎报错（属用户误操作），纯文本路径不受影响。
+
+### 4.7 跨重启 resume / 上下文用量 / dispose
+
+- **SessionManager resume**（`session-host.ts:278`）：每 thread 一个 `<agentDir>/sessions/<threadId>.jsonl`，存在则 `open`（恢复含 compaction 状态），否则 `create`+lazy `setSessionFile`。**daemon 重启后模型仍保留重启前上下文**。注意这是**与 SQLite repo 平行的另一条持久化轨**：repo 是 UI/检索/渠道映射/项目元数据的真相源，pi JSONL 只承载"喂给模型的上下文"——别混淆。
+- **lastUsage**（`session-host.ts:291`）：扫 JSONL 取最后一条 assistant usage，重开历史会话时回填上下文用量环（归档消息文本没有 token 计数，也不含 system/记忆/工具 schema 开销，必须来自 pi 测得的 usage）。
+- **dispose**：丢弃抽取缓冲 + dispose pi 会话 + **删 JSONL 文件**（不留可恢复上下文）。MCP 工具集变更或本地网络绑定变更会 `invalidateAll` 重建全部会话（customTools 在会话创建时固定）。
+- **pi 设置调优**（`session-host.ts:133`）：pi 默认 `compaction.reserveTokens=16384` 会让 4k/8k 本地上下文**每轮都触发 compaction**（每次回复后白跑一次总结 LLM）→ 启动时写 `reserveTokens:2048`。
+
+---
+
+## 5. 推理引擎
+
+### 5.1 InferenceEngine 契约
+
+`InferenceEngine`（`provider.ts:122`）：`chat / chatStream(): AsyncIterable<ChatStreamEvent> / embed? + capabilities`。`ChatRequest` 引擎无关但镜像 OpenAI，外加 llama/vLLM 采样扩展 `topK/minP/repeatPenalty` 与 `reasoningEffort`，并带 out-of-band `signal`。
+
+`OpenAICompatibleEngine`（`providers/openai-compatible.ts`）是主力：`buildBody` 映射成 OpenAI JSON；`chatStream` 解析 SSE，累积 `delta.content/reasoning_content`→text/reasoning-delta，累积 `delta.tool_calls[idx]`→tool-call-start/args-delta/end，末尾 usage+done；非 200 直接 yield 一个 `error` 帧。**Harmony 回退**（`harmony.ts`）：某些 llama-server 把 gpt-oss `<|channel|>analysis<|message|>…` 控制 token 漏进 content → 流式状态机路由到 reasoning/text 并剥离控制 token、缓冲半 token。**自连接恒走 127.0.0.1**（即便绑 0.0.0.0），有 key 则带 Bearer。
+
+### 5.2 本地推理：统一 `llama serve` router 模式
+
+中心是 `RouterServerManager`（`engine/router-server-manager.ts`），`LocalBackend` 的唯一实现。
+
+- **一个进程、多模型**：`ensureRouter` 起**单个** `llama serve --models-dir <dir> --models-max <N> --models-autoload --host <h> --port <freePort> [--api-key]`，poll `/health` 就绪后构造**一个**内层 `OpenAICompatibleEngine` 指向 `127.0.0.1:<port>/v1`。
+- **按 `model` 字段路由 = 子目录名（routerId）**：router 按 `--models-dir` 下子目录名发现模型，该名即客户端传的 `model`。`syncRoutes` 拉 `/v1/models`，每个非嵌入 id 包成 **`RouterModelEngine`**（唯一职责：把出站 `model` 固定为该 routerId）注册进 `EngineRegistry`。
+- **按需 auto-load + 预热**：`--models-autoload` 首次请求懒加载；`load()` 额外调管理 API `POST /v1/models/load` 预热（更快首 token）。
+- **`--models-max` LRU**：直接传给 router，**淘汰由 router 自己做**。
+- **上下文**：默认用模型**原生最大上下文长度**（不传 `-c`）；UI 进度环分母由 GGUF header 的 `context_length` 提供。
+- `baseUrlFor(modelId)` 命中返回回环 `/v1`、否则 undefined——这是**守护进程判定本地 vs 云端**的依据。所有变更操作走 `serialize()` promise 链防 race。
+
+### 5.3 嵌入：独立 `llama serve -m --embedding` 进程
+
+嵌入模型**刻意不进聊天 router**：`EMBED_RE = /embed|bert|bge|gte|e5|nomic|minilm/i` 在 `syncRoutes` 里过滤掉。它跑成自己的 `LlamaServerEngine`（`--embedding --pooling mean`，跳过 `--jinja`），独立端口。启动时若磁盘已有嵌入 GGUF（或持久化路径）则 `autoEnableEmbedding` 自动拉起，设模型 + reindex 记忆。**缺失则记忆/KB 降级纯词法，不崩**——嵌入是 markdown/文本真相源之上的派生缓存，永不硬依赖。
+
+### 5.4 云端 provider
+
+`ProviderManager`（`providers/manager.ts`）统一处理所有云端，无每厂商代码。`CloudProviderConfig = {id, baseUrl, apiKey?, headers?, models[], contextWindow?}`，每个 declared model 路由到一个 `OpenAICompatibleEngine`。"预设"（OpenAI/OpenRouter/DeepSeek/硅基流动…）只是 `baseUrl/headers` 不同的配置对象。**上下文窗口必须手填**（远端不可靠探测；缺省 32768），用于 compaction 阈值 + 进度环。配置序列化进 SQLite `providers` 键，开机恢复。
+
+### 5.5 模型管理（HF / 下载 / 扫描 / GGUF / 删除）
+
+`ModelManager`（`models/manager.ts`）+ `hf.ts/download.ts/gguf.ts`：
+
+- **HF 搜索 + 变体分组**（`hf.ts`）：`groupVariants`（纯函数、可单测）过滤 `.gguf`、把 **mmproj** 当视觉投影器单列、把多分片 `*-00001-of-00003.gguf` 合成一个逻辑变体（summed size + shardCount）、按量化 `IQx/Qx/BF16/F16/F32` 提取、按 size 升序（最小量化先出）。
+- **断点续传下载**（`download.ts`）：异步生成器 yield `DownloadEvent`（queued/progress/shard/verifying/done/error）。逐分片用 HTTP `Range` 从 `.part` 大小续传；**短读保护**——流早闭或写入 < 预期则**不把 `.part` 改名为最终文件**，保留续传；重试带退避；只有完整分片才 `rename`。完成后重读 GGUF magic 校验。
+- **本地扫描**（`scanInventory`）：递归走 `modelsDir`+`extraDirs`，跳过 mmproj、多分片只取首片、GGUF magic 失败丢弃；`routerId` = `modelsDir` 下首段目录名；从 header 取 `contextDefault/arch/hasVision`。
+- **GGUF header 解析**（`gguf.ts`）：只读前 2MiB、不抛错的最小解析；`general.architecture`→arch、`<arch>.context_length`→ctx、`<arch>.vision.embedding_length` 或 arch 含 clip→hasVision。
+- **删除带受管目录硬校验**（`deleteLocal`）：目标必须 resolve 到 `modelsDir/extraDirs` 内且 `.gguf` 结尾否则抛错；删全部分片；repo 目录无其它非 mmproj gguf 则整目录删（清 mmproj 残留）。这是后端唯一改数据的 CLI 路由 `models rm` 背后的安全栏。
+
+### 5.6 本地端口暴露：127.0.0.1 vs 0.0.0.0
+
+默认 `127.0.0.1`。切 `0.0.0.0` **强制 api-key**：`POST /settings/local-net` 对 0.0.0.0 + 空 key 直接 **400 `api_key_required`**。应用变更会**重启单 router**（新 `--host/--api-key` 立即生效）+ `invalidateAll` 重建 pi 会话。**自连接恒走回环**且内部调用者（pi、router 自己的 mgmt/health）都带 Bearer。`/models` 还回 `lanIp` 供其它设备拼直连 URL。
+
+### 5.7 runtime 解析与安装
+
+`resolve-llama.ts`：候选顺序**统一 `llama` 优先**、经典 `llama-server` 仅探测回退（GUI 应用 PATH 稀疏，故搜 PATH + `~/.local/bin` + 常见包目录）。**router 只认 `kind==="llama"`**：只有统一 `llama` 才把 binaryPath 传给 `RouterServerManager`；只找到经典 `llama-server` 则 router 抛引导错误（经典 per-model server 对聊天**已弃用**，只在嵌入侧进程里苟活，且发现统一二进制时会自动升级为 `llama serve`）。缺失时经 [llama.app](https://llama.app) 一键安装（`/local/install-runtime`）。
+> **勿重新引入 node-llama-cpp，也勿回退每模型一进程的经典 llama-server。**（少数 doc 注释仍提 node-llama-cpp，是陈旧注释，无代码路径使用。）
+
+---
+
+## 6. 记忆系统（作用域化分层 + 渐进式披露）
+
+### 6.1 作用域 × 层 + 可见性
+
+- **作用域**：`global`（所有对话共享，"关于你"）+ `ws:<projectId>`（每工作区私有、互相隔离，"关于这个工程"）。
+- **层**（按作用域不同）：全局 = `user-profile / agent-memory / skills`；工作区 = `conventions / decisions / pitfalls`。
+- **`visibleScopes(scope)`**（`memory.ts:38`）决定会话**看到什么**：全局会话只看 global；**工作区会话看自己的 `ws:`（3 个工作区层）+ global 的 `user-profile`（只读叠加）**——这样项目里也知道"你是谁"，又不把项目约定泄漏到别的项目。**`visibleScopes[0]` 是写入目标**。
+
+存储：`memory_items(id, scope, layer, session_id, text, embedding BLOB, updated_at, meta)`，每行可带 Float32 嵌入 blob（派生缓存）。
+
+### 6.2 渐进式披露（清单 + recall_memory）
+
+借鉴 Skill 的核心设计：
+
+1. **清单（常驻索引）**：`buildMemoryManifest`（`ew-extensions.ts:66`）按可见 scope+层只列**一行截断标题**（≤80 字），经 `before_agent_start` 钩子注入系统提示词。工作区会话给全局层加 `全局·` 前缀。模型**知道有哪些记忆**，按需取全文。
+2. **按需全文**：`recall_memory` 工具按可见 scope 做语义/词法检索（`minScore:0.1` 去纯词法零分噪声），按分排序、去重、`topK`（默认 6）。
+
+### 6.3 写入两路
+
+- **Agent 主动（`manage_memory` 工具）**：`add/replace/remove`，`replace/remove` 按**子串 match** 定位（0 或 >1 命中报错）。**每层字符上限**（Hermes 风）：接近上限时 `add/replace` **报错逼模型合并/删除**而非无声膨胀。
+- **被动批量抽取**（非每轮）：`agent_end` 钩子把完成轮（含关键工具调用摘要 `[写文件 path]/[改文件 path]/[执行命令 cmd]`）转给 `ExtractionScheduler`（**被宿主 SessionHost 持有**，故跨 run 存活）。增量缓冲、≥24 轮立即 flush、否则 idle 90s debounce；失败 unshift 重试；删会话则 discard 缓冲；关停前 flushAll。抽取复用**当轮已加载的聊天模型**（temperature 0、json_object），按 scope 切 GLOBAL/WORKSPACE 提示词；模型不可解析则安全返回 `[]`。**取消的轮跳过抽取**。
+
+### 6.4 混合召回 + markdown 真相源
+
+- **混合打分**（`local.ts:261`）：取 scope∩layers 全部行 → 嵌入 query → sqlite-vec **cosine KNN** 取语义分 → 每行算 `lexicalScore`（token 重叠）→ **组合分 = 0.75·sem + 0.25·lex**（无嵌入则纯词法）→ `minScore` 下限 + `topK` 上限**防 context 稀释**。（注：记忆用定权混合，知识库用 RRF。）
+- **markdown 真相源（仅全局）**：全局三层有人可编辑的 `*.md` 镜像（工作区记忆 DB-only）。DB→md：任何写/改/删后 `regenerateMarkdown`（`- <text> <!-- id -->`，id 注释是回链）。md→DB：`syncFromMarkdown` 解析行，id 变文→更新+重嵌、无 id 新行→插入、消失的 id→删除；幂等防 watcher 自触发。文件 watcher debounce 300ms。
+- **嵌入是派生缓存、变更才重嵌**：write 总嵌；edit 仅 `patch.text` 变才重嵌；md-sync 仅变行重嵌；启用/切换嵌入模型时 `reindex` 批量补嵌（批 16）。
+- **来源 manual vs auto**：自动抽取的事实带 `session_id`，`deleteBySession` 删会话时一并清；**手动事实 `session_id=NULL`，不被 deleteBySession 删**。`deleteByScope` 删工作区时清整个私有池。
+
+---
+
+## 7. 知识库 RAG（`packages/core/src/rag/`）
+
+- **Schema**：`kb_docs(id, kb_id, source, created_at)` + `kb_chunks(id, kb_id, doc_id, source, chunk_index, text, embedding BLOB)`。`kb_id` 分多集合（默认 `default`）。**只存解析后的文本/分块/嵌入，不存原始文件**。
+- **Pipeline**：`POST /kb/upload {source, contentBase64, kbId}` 建内存 `KbJob`（queued→parsing→embedding→done|error）**后台异步**跑，返回 `jobId`，`GET /kb/jobs` 轮询。
+  - **解析**（`parse.ts`）：一大票文本/标记/代码扩展名白名单；HTML 去标签；**PDF/docx/xlsx/二进制显式拒绝**（无二进制文档支持）。
+  - **分块**（`chunking.ts`）：标题/段落感知的递归切分（`\n# / \n## / \n\n / \n / 。 / . / 空格`），贪心合并到 token 预算；默认 **350 token、50 overlap**；无真 tokenizer，**3 字 ≈ 1 token**（对中文保守）。
+  - **嵌入入库**：批 8，失败批留空嵌入（该块退化词法）。
+- **RRF 混合检索**（`store.ts:218`，与记忆不同）：dense（cosine）与 lexical（词存在率）两个排名列表，**RRF 融合 `score = Σ 1/(K + rank)`，K=60**；相关度下限用**原始 dense/lexical 分**（非 RRF 分）过滤；按 RRF 排序取 `topK`（默认 4）。
+- **工具 + 引用**：`search_knowledge_base`（`requiresApproval:"never"`）渲染 `<chunk id source>` 块 + 指示引用 `[来源 N]`，sources 进 `citations` 显示载荷。**工具按请求 + 选中集合注入**（非全局常驻），`kb.count()>0` 才暴露。
+> `ragAutoInject`（首轮自动预检索注入）函数存在但**当前无调用方**——线上走的是工具，不是自动注入。
+
+---
+
+## 8. Skills（两套机制）
+
+关键非显然事实：**有两套 skill 机制**。
+
+1. **pi 自带 skills（agent 真正执行的）**：由 pi `DefaultResourceLoader` 扫描 agent 目录/cwd 的 `SKILL.md` 暴露给内核。EasyWork 只注入 `skillsOverride` 按名过滤禁用项（`excludeSkills`），变更即重建会话。
+2. **应用内 `@ew/skills` SkillManager（UI 管理 + 备用 open_skill）**：自己实现渐进式披露——`discover()` 扫子目录的 `SKILL.md` 只解析 frontmatter（第一层），记 `scripts`/`resources`；frontmatter `name/description/whenToUse`（必填）+ `version/allowedTools`（选填），靠零依赖 mini-YAML 解析；`open_skill` 工具按需读全文（第二层）。路由 `GET /skills`、`/skills/:id/body`、`POST /skills/open|template`。
+
+---
+
+## 9. MCP（`packages/mcp/`）
+
+- **配置**：`McpServerConfig = {id, displayName, transport, enabled}`；transport = stdio `{command, args[], env?}` 或 http `{url, headers?, useOAuth?}`。工具命名空间 **`mcp__<serverId>__<toolName>`**。
+- **连接**（`connect.ts`）：**动态 import** `@modelcontextprotocol/sdk`（测试/无 SDK 环境可注入）；stdio→StdioClientTransport，http→StreamableHTTPClientTransport；`callTool(name,args,signal)` 把 AbortSignal 透传进 SDK。
+- **安全/探测/cooloff**（`manager.ts`）：**stdio 默认禁用**（跑任意本地命令），仅 `EW_ALLOW_STDIO_MCP=1` 开；probe 用 `withTimeout`（15s，`.finally(clearTimeout)` 不泄漏定时器）；失败 cooloff（普通 60s / OAuth HTTP 300s），cooloff 期内返回**缓存**工具列表不破坏注册表；`callTool` 先按缓存的 `inputSchema` 轻量校验参数、再扁平化 MCP content 为模型可读字符串。
+- **桥成 pi customTools**（`toolProvider`）：每个启用、非 cooloff 的工具变 EW `Tool`（`requiresApproval:"first-use"`）。**关键 signal 细节**：`execute` 用**每次调用的 `exec.signal`**（pi 经 toPiTool 传入），而非 provider 级永不 abort 的占位 signal——否则取消/超时无法中断在途 MCP 调用。
+- **路由**：`GET/POST/DELETE /mcp/servers`、`POST /mcp/probe`、`GET /mcp/servers/:id/tools`。**任何 server 变更 `invalidateAll`** 重建会话刷新 customTools。`mcpServers` JSON 批量导入在 **UI 端**翻译成逐个 upsert（无服务端 import 路由）。
+
+---
+
+## 10. `/v1` 网关（OpenAI + Anthropic）
+
+`registerOpenAICompat`（`openai-compat/router.ts`）挂载，目标：把 Claude Code / openai SDK 指向 `http://127.0.0.1:<port>/v1`。端点：`/v1/models`、`/v1/chat/completions`、`/v1/messages`（Anthropic）、`/v1/embeddings`。
+
+**二级路由（`model` 字段是通用二级路由器）**：
+
+```
+请求 model →
+  ├─ 本地已加载？(localBaseUrl(model) 命中)
+  │    → proxyToLocal：把原始 body 转发到该 llama-server 的原生 /chat/completions 或 /messages，
+  │      字节级流回，绕过我们的翻译层（llama-server 因 --jinja 原生支持两种协议含 Anthropic tool_use）
+  ├─ 云端模型？
+  │    → cloudStream/completeCloud → pi-ai streamSimple/completeSimple
+  │      （经 pi 统一 ModelRegistry/AuthStorage 继承 OAuth/原生 Anthropic 鉴权；非云端返回 null）
+  └─ 回退 → registry.resolve(model)（解析不到 404）
+```
+
+**pi ↔ ChatStreamEvent ↔ 协议翻译**（`pi-adapt.ts` + `translate.ts` + `anthropic.ts`）：把 pi 事件流**翻译成我们的 `ChatStreamEvent` 一次**，再复用 `streamEventToOpenAIChunks` 与 `AnthropicStreamTranslator`——**一个输入流 → 两种协议输出**。pi 工具调用是原子交付（参数一次性 JSON.stringify 成一个 delta）。
+
+**错误帧不可伪装 end_turn**（正确性约束 #2）：OpenAI 侧中途 error 发可见 `{error:{type:"upstream_error"}}` 帧而非静默截断；Anthropic 侧 `AnthropicStreamTranslator.errored=true` 后 `end()` **只发块关闭、不发 `message_delta/message_stop`**——否则会把错误伪装成成功 `end_turn`。
+
+`GET /models` 回 `endpoints`（各模型 llama-server 直连 baseUrl）+ `bindHost` + `lanIp`，供外部客户端直连或经 `/v1`。
+
+---
+
+## 11. CLI —— `easywork`
+
+单二进制，**既是守护（`serve`）也是瘦终端客户端**，经 `@ew/sdk` 打 HTTP，**后端零改动**（唯一例外：`models rm` 的 `POST /models/local/delete`）。
+
+- **命令**：无命令 + TTY→`repl`；`serve/status/stop`；`models [ls|pull|rm]`、`thread [ls|show|rm]`、`mem [ls|search|rm]`、`kb [ls|search|add|rm]`；`run <prompt>`；`repl|chat`。选项 `-m/-w/-t/-y`，环境 `EW_BASEURL/EW_TOKEN`（连远端、抑制自启）、`EW_MODEL`。
+- **守护发现/自启**（`cli/daemon.ts`）：读 `~/.easywork/daemon.json`（`{baseUrl,token,pid}`）→ **HTTP 探活 `/health`（1.5s，而非信 pid，因文件易 crash-stale）** → 没活且 autostart 则 detached spawn `serve`、轮询直到 20s。`EW_BASEURL` 时永不自启。
+- **SSE 渲染**（`cli/agent.ts`）：**约定——助手 `text` → stdout（可管道捕获）、所有装饰（工具/思考/状态）→ stderr**。审批：`--yes` 自动 approve，否则提示 `y/n/a`。Ctrl-C 中断本轮。
+- `run` 支持 **stdin 管道**作提问；`repl`/`run` **每轮只发当前行**，靠守护按 threadId 重建上下文。`models pull` 流式进度、`pickVariant` 偏好 `Q4_K_M`。
+
+---
+
+## 12. IM 连接器
+
+`ChannelConnector`（`im.ts:43`）：`kind/start/stop/onInbound/reply`。**`ConnectorHost`**（`host.ts`）把任意连接器接到同一个大脑：`resolveThreadForChannel(channel, channelUserId)` 映射渠道身份→稳定 thread → 载历史 + 追加用户消息 → 跑 agent → `AgentEvent`→`OutboundChunk` → `reply` → 落库助手消息。
+
+**已实现 = Telegram**（纯 HTTP Bot API，long-poll；**reply 累积全文再发**，多数 IM 不能逐 token 流）。**WeCom/飞书/Discord 待补**（仅枚举值）。**个人微信无官方机器人 API → 仅实验性占位、默认关闭**；只做企业微信（WeCom）。
+
+---
+
+## 13. 桌面 UI（`apps/ui`，"Agent Tasks" 设计）
+
+**瘦客户端**：零大脑，全部经 `@ew/sdk` 的 HTTP+SSE 打守护。同一 bundle 跑浏览器（dev）与 Tauri 壳。
+
+### 13.1 设计语言 + 主题 token
+
+- 字体：IBM Plex Sans（UI/prose）+ JetBrains Mono（机器数据：分支/时间戳/token/diff 统计/CWD/模型名），`@fontsource` 内置离线。
+- **Tailwind v4 `@theme` + 别名层**（最重要的样式架构）：`@theme` 定义深色默认 `--color-*` token（取自设计稿）；**单一强调色固定蓝**（accent 切换已移除，只留明暗）；**别名层**把新旧两代命名（`--bg-elev/--tx-0/--prose`、legacy `--bg/--surface/--text/--accent/--ok/--err`）重映射到 `--color-*`。因 `var()` 在使用点解析，**一处 `[data-theme="light"]` 覆盖 `--color-*` 就级联到所有别名**，存量组件自动换肤（浅色刻意保留终端/代码井深色）。
+- `applyTheme()` 设 `<html>` `data-theme`，`system` 读 `prefers-color-scheme` 并实时订阅；`main.tsx` 在 render 前应用避免首屏闪烁；prefs 存 localStorage。
+
+### 13.2 外壳（App.tsx）
+
+- **两段式 Titlebar（46px）**：段 A 宽 = 实时侧栏宽（右边框与分隔线像素对齐）+ macOS 红绿灯让位（desktop 左 pad 88px）+ 侧栏开关；段 B 面包屑（任务名 + 工作区/分支 pill）+ 工作台开关（动态图标，仅聊天/工作区会话显示）。
+- **展开式侧栏**：快捷操作（新对话 ⌘N / 打开工作区 / 收件箱 / 插件）+「项目」折叠组（CWD 角标 / 文件树 / 删除 / 新建会话）+「对话」分区 + 底部设置 + 连接状态点。可拖拽列宽（200–460，持久化）。
+- **dockOpen 是 App 级共享态**，切模式/会话/工作区时重置（面板不跨会话"跟着"）。
+- 主区按 `mode` 切换 Chat（按 threadId 重挂载）/ Workspace / FilesPage / inbox 占位 / PluginsView；设置走 PageOverlay。
+- **⌘N** 全局 keydown 新建对话。
+
+### 13.3 Chat vs Workspace + SSE
+
+共用 MessageStream / SideDock / ModelSelect / composer / 审批卡。
+- **Chat**：composer `+` 菜单（上传图片 + 思考/联网/知识库 开关，KB 开可选集合）；右侧 ContextRing + ModelSelect + 参数 + 发送；工件面板（fs 工具后刷新、首件自动开 dock）。
+- **Workspace**：composer 有**审批策略 pill**（改档 PATCH `project.approvalMode`，`send()` 前 await 在途 PATCH 防"切档即发"）；SideDock 带 git 上下文；mutating 工具后刷 git + ws 文件 + 上报分支给标题栏。
+- **SSE 处理**：`runAgent` 流 → `usage`(驱动环)/`approval-request`(审批卡)/`final`/`error`/其余→`applyAgentEvent` reducer。`AbortController` 卸载或停止时取消（后端回滚 + 不落库，UI 标"已停止·本轮不计入上下文")。**图片**经 FileReader→base64→`{type:"image",mimeType,data}` 内容片段。采样参数**按模型**存。
+- **ContextRing**：20px SVG，`promptTokens/contexts[model]`，accent→琥珀>65%→红>85%。
+
+### 13.4 MessageStream
+
+用户右对齐气泡；**助手无逐行头像、纯 prose**（react-markdown + remark-gfm + rehype-highlight，外链改路由到 dock 内嵌预览而非跳走 webview）。按有序 `blocks`（reasoning|tool|text）保留真实交织。**行内工具调用**（`<details>` 行）：思考/编辑〔文件类型角标 + `+/-`〕/运行〔命令 + 终端输出〕/读取/搜索〔favicon 来源〕。**diff 统计**：`lineDiffStat`（滚动 Int32Array LCS，`n*m>250_000` 退化行数差防流式卡顿）、`diffStat`（优先 unified、否则 before/after）、`editStat`（str_replace 行级 diff 防虚高）、`aggregateEdits`（按路径合并、过滤 `+0 −0` 幽灵）。**文件改动汇总卡**点击跳 dock 对应文件 diff。
+
+### 13.5 插件页
+
+顶部标签 模型/知识库/Skills/MCP/记忆，**lazy keep-alive**（访问过的标签 `display:none` 保活，避免 KB 上传/索引轮询中断）。KB/记忆以 `embedded` 模式无遮罩铺满。
+- **知识库（卡片网格）**：左集合栏（主导文件类型图标 + 计数 + 处理中脉冲点）+ 中文档卡片网格 + 右滑出预览（md 渲染 / `<pre>`，`docReqRef` 时序保护）；顶部两步上传（先选/建目标集合，kbId 规范化）；900ms job 轮询。
+- **记忆（档案 Dossier）**：左作用域栏（全局/你 + 各工作区，带计数、空作用域变灰）+ 右按层分区（层语义色点 + 计数 + 行内添加）；记忆卡带**来源徽章（手动 / 自动抽取，按 `sessionId` 区分）** + 时间 + 行内编辑/删除；顶部搜索（作用域内过滤）+ 向量召回状态（含一键启用 nomic）；空作用域/空层可从「+ 添加」选目标加第一条。
+- **模型**：本地/云端分页；本地按 kind（文本/嵌入/视觉）显示，load/unload 或"启用向量"；无 llama 二进制时一键安装 banner；HF 搜索下载（流式 %）；云端 provider 预设 + 手填上下文窗口。
+- **Skills/MCP**：SKILL.md frontmatter 卡 + 启停；MCP server 列表自动探测 + 增删改导入。
+
+### 13.6 文件类型体系 + Tauri prompt 规避
+
+`lib/filetype.ts` 统一扩展名→`{label,color,Icon}`（工具行/KB/文件树/汇总卡共用）；`BY_NAME` 处理整名配置（Dockerfile/.gitignore→GIT，避免 `.gitignore`→GITI）。**Tauri webview 无 `window.prompt`** → 新建集合/技能等改**行内输入**（仅浏览器回退仍用 prompt；桌面走 Rust 原生目录选择）。
+
+### 13.7 瘦客户端连接 + Tauri sidecar
+
+连接解析优先级（`client.ts`）：Tauri runtime config（守护每次随机端口，不可持久化）> URL `?baseUrl=&token=`（持久化到 localStorage）> localStorage > `window.ewConfig` > Vite env / 默认 `127.0.0.1:8788`。**Tauri 壳启动时把守护当子进程拉起**（打包→Node-SEA 单文件 `daemon/easywork serve --port 0`，dev→`node $EW_DAEMON_ENTRY serve`），读其 stdout 首行 JSON `{baseUrl,token,pid}` 供 `get_config`；前端 `initRuntimeConfig()` 轮询拿到后 pin。
+
+---
+
+## 14. 打包与发布
+
+- **daemon → Node SEA 单文件二进制**（`scripts/build-daemon-sea.mjs`）：turbo build（SEA 内联各包 dist）→ tsup 全内联 CJS → `--experimental-sea-config` 生成 blob → 复制 node + postject 注入（macOS 必须先去签名、注入后 ad-hoc 重签）→ 捆 `sqlite-vec` 各平台 `vec0.{dylib|dll|so}`。**运行免 Node**。
+- **llama runtime**：缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime`）。
+- **发布**：`v*` tag 触发 `.github/workflows/release.yml`，macOS-14（Apple Silicon）runner `npm run app:build` 出 dmg 发到公开 Releases（初版 ad-hoc 未签名；Intel/Windows/Linux 后续）。
+
+---
+
+## 15. 数据存储总览
+
+| 存储 | 内容 | 真相源 |
+|---|---|---|
+| SQLite `ConversationRepo` | 项目 / 线程 / 消息（含 FTS5 全文检索）/ 设置键值 | UI/检索/渠道映射/项目元数据 |
+| pi `SessionManager` JSONL | 每 thread"喂给模型的上下文"（含 compaction 状态） | 模型上下文（跨重启 resume） |
+| `memory_items` 表 + 全局 `*.md` | 记忆（scope×layer，嵌入 blob 派生）；全局有 markdown 镜像 | 全局：markdown 可手改回灌；工作区：DB-only |
+| `kb_docs` + `kb_chunks` 表 | 知识库（解析文本 + 分块 + 嵌入，**不存原文件**） | DB |
+| `<table>_vec`（sqlite-vec vec0） | 记忆/KB 的向量查询加速结构 | 派生自行的 embedding blob，写/改/删时同步 |
+
+**sqlite-vec 要点**：经 `node:sqlite` + `{allowExtension:true}` 加载；vec0 虚表 `distance_metric=cosine`，维度存 `<table>_meta` 跨重启；**rowid 必须 `BigInt`**；KNN 返回整索引（≤4096）由调用方按分区（kbId/scope）过滤；维度变更 drop+rebuild 从源 blob 重灌。**扩展为可选依赖**：路径给定则加载失败 fail-loud（视为打包 bug），路径缺失则降级纯词法。
+
+---
+
+## 16. 关键正确性约束（横切，务必遵守）
+
+> tool-call 解析/交织、调用去重、max-iterations 由 pi 内核负责（自研 loop/healing 已删）。以下是宿主层必须守住的：
+
+1. **每 thread 串行化 run**（promise 链）——pi `subscribe` 是会话级，并发会跨请求串流 + 审批错配。
+2. **事件映射唯一边界**——`mapSessionEvent`（pi→SSE）+ `pi-adapt.ts`（pi↔OpenAI/Anthropic）。协议翻译器必须处理 `error` 并正确终止（**不可伪装 end_turn**）。
+3. **工作区路径限定**——`escapesCwd` 经 realpath 解软链硬拦越界（所有审批档），bash 靠审批把守。
+4. **0.0.0.0 暴露强制 api-key**——切换重启 router；内部回环调用一并带 Bearer；自连接恒走 127.0.0.1。
+5. **SSE 健壮性**——所有写口 `raw.on("error")` + `writableEnded/destroyed` 守卫，避免客户端断开后 write-after-end 崩。
+6. **记忆召回**——相关度下限 + topK 上限防稀释；markdown 真相源、embedding 派生（变更才重嵌）。
+7. **sqlite-vec**——vec0 rowid `BigInt`；`cosine`；可选依赖，无二进制降级纯词法。
+8. **个人微信无官方 API** → 只做企业微信；个人微信仅带警告的实验项。
+
+---
+
+## 附：源码导航锚点（按子系统）
+
+- **守护装配 / 路由 / SSE**：`packages/core/src/server/app.ts`
+- **Agent 内核**：`packages/core/src/agent/{session-host,ew-extensions,approval-sse,turn-recorder}.ts`
+- **推理引擎**：`packages/core/src/engine/{router-server-manager,resolve-llama,local-backend,net,registry}.ts` · `packages/providers/src/{openai-compatible,llama-server,harmony,sse,openai-messages}.ts`
+- **模型管理**：`packages/core/src/models/{manager,hf,download,gguf}.ts`
+- **记忆**：`packages/shared/src/memory.ts` · `packages/memory/src/{local,vec-index,mem0}.ts` · `packages/core/src/memory/{memory-tool,recall-memory-tool,fact-extractor,extraction-scheduler,embedding-service}.ts`
+- **知识库**：`packages/core/src/rag/{store,chunking,parse,tool}.ts`
+- **Skills / MCP**：`packages/skills/src/{manager,frontmatter}.ts` · `packages/mcp/src/{manager,connect}.ts`
+- **/v1 网关**：`packages/core/src/openai-compat/{router,pi-adapt,translate,anthropic}.ts`
+- **契约**：`packages/shared/src/{message,provider,tool,memory,conversation,events,im,model,mcp,skill}.ts`
+- **CLI**：`apps/daemon/src/cli.ts` + `apps/daemon/src/cli/*`
+- **IM**：`packages/im-connectors/src/{host,telegram,index}.ts`
+- **UI**：`apps/ui/src/{App,main}.tsx` · `apps/ui/src/components/*` · `apps/ui/src/pages/*` · `apps/ui/src/lib/{prefs,filetype,client,desktop}.ts` · `apps/ui/src/styles.css`
+- **打包/发布**：`scripts/build-daemon-sea.mjs` · `.github/workflows/release.yml`
+
+---
+
+*本文为学习向综述；如与代码不符以代码为准，并欢迎据实修订。最后同步：基于 `feat/kb-redesign` 合并入 main 后的状态。*

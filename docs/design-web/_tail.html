@@ -1,0 +1,112 @@
+
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script>
+  (function(){
+    var src = document.getElementById('src').textContent;
+    var content = document.getElementById('content');
+
+    // —— 渲染（marked 在线则用之，离线回退迷你解析器） ——
+    function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    function renderMarkdownFallback(md){
+      // 极简回退：标题 / 代码块 / 段落，保证离线也可读
+      var lines = md.split('\n'), out='', i=0;
+      while(i<lines.length){
+        var l=lines[i];
+        if(/^```/.test(l)){ i++; var c=[]; while(i<lines.length&&!/^```/.test(lines[i])){c.push(lines[i]);i++;} i++; out+='<pre><code>'+escHtml(c.join('\n'))+'</code></pre>'; continue; }
+        var h=l.match(/^(#{1,6})\s+(.*)/); if(h){ var n=h[1].length; out+='<h'+n+'>'+escHtml(h[2])+'</h'+n+'>'; i++; continue; }
+        if(!l.trim()){ i++; continue; }
+        var p=[]; while(i<lines.length&&lines[i].trim()&&!/^(#{1,6}\s|```)/.test(lines[i])){p.push(lines[i]);i++;} out+='<p>'+escHtml(p.join(' '))+'</p>';
+      }
+      return out;
+    }
+    if(window.marked){
+      try{ marked.setOptions({gfm:true,breaks:false}); }catch(e){}
+      content.innerHTML = marked.parse(src);
+    } else {
+      content.innerHTML = renderMarkdownFallback(src);
+      var w=document.createElement('div'); w.className='foot'; w.textContent='（离线模式：未加载 marked，使用简化渲染。联网刷新可得完整排版。）'; content.appendChild(w);
+    }
+
+    // —— 给标题生成稳定 id ——
+    function slug(t){ return t.replace(/<[^>]+>/g,'').replace(/`/g,'').trim().toLowerCase().replace(/[^\w一-龥]+/g,'-').replace(/^-+|-+$/g,'')||'h'; }
+    var used={};
+    var heads = content.querySelectorAll('h1,h2,h3,h4');
+    heads.forEach(function(h){
+      var id = slug(h.textContent);
+      if(used[id]) id = id+'-'+(++used[id]); else used[id]=1;
+      h.id = id;
+      // h2 数字前缀着色
+      if(h.tagName==='H2'){ var m=h.textContent.match(/^(\d+\.)\s/); if(m){ h.innerHTML = '<span class="num">'+m[1]+'</span>'+h.innerHTML.replace(/^\d+\.\s/,''); } }
+      // 锚点
+      if(h.tagName==='H2'||h.tagName==='H3'){ var a=document.createElement('a'); a.className='anchor'; a.href='#'+id; a.textContent='#'; h.appendChild(a); }
+    });
+
+    // —— 构建目录（h2 + h3） ——
+    var toc = document.getElementById('toc');
+    var links = [];
+    content.querySelectorAll('h2,h3').forEach(function(h){
+      var a=document.createElement('a');
+      a.href='#'+h.id;
+      a.textContent = h.textContent.replace(/#$/,'').trim();
+      a.className = (h.tagName==='H3'?'lv3':'lv2');
+      a.dataset.id = h.id;
+      a.addEventListener('click', function(){ document.getElementById('aside').classList.remove('open'); });
+      toc.appendChild(a);
+      links.push(a);
+    });
+
+    // —— 滚动高亮（scroll-spy） ——
+    var byId = {}; links.forEach(function(a){ byId[a.dataset.id]=a; });
+    var spy = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(en.isIntersecting){
+          links.forEach(function(a){a.classList.remove('active');});
+          var a = byId[en.target.id]; if(a){ a.classList.add('active'); a.scrollIntoView({block:'nearest'}); }
+        }
+      });
+    }, {rootMargin:'-60px 0px -70% 0px', threshold:0});
+    content.querySelectorAll('h2,h3').forEach(function(h){ spy.observe(h); });
+
+    // —— 搜索过滤目录 ——
+    document.getElementById('q').addEventListener('input', function(e){
+      var q = e.target.value.trim().toLowerCase();
+      links.forEach(function(a){ a.classList.toggle('hide', q && a.textContent.toLowerCase().indexOf(q)<0); });
+    });
+
+    // —— 代码块复制按钮 ——
+    content.querySelectorAll('pre').forEach(function(pre){
+      var b=document.createElement('button'); b.className='copy'; b.textContent='复制';
+      b.addEventListener('click', function(){
+        var code = pre.querySelector('code'); var txt = code?code.innerText:pre.innerText;
+        navigator.clipboard.writeText(txt).then(function(){ b.textContent='已复制'; setTimeout(function(){b.textContent='复制';},1200); });
+      });
+      pre.appendChild(b);
+    });
+
+    // —— 页脚 ——
+    var f=document.createElement('div'); f.className='foot';
+    f.innerHTML='源文档：<code>docs/DESIGN.md</code>（本页据其渲染）· 如与代码不符以代码为准。';
+    content.appendChild(f);
+
+    // —— 主题切换 ——
+    var THEME_KEY='ewdoc.theme';
+    var saved = localStorage.getItem(THEME_KEY);
+    if(saved) document.documentElement.setAttribute('data-theme', saved);
+    document.getElementById('theme').addEventListener('click', function(){
+      var cur = document.documentElement.getAttribute('data-theme')==='light'?'dark':'light';
+      document.documentElement.setAttribute('data-theme', cur);
+      localStorage.setItem(THEME_KEY, cur);
+    });
+
+    // —— 移动端目录开关 ——
+    document.getElementById('menuBtn').addEventListener('click', function(){
+      document.getElementById('aside').classList.toggle('open');
+    });
+
+    // 进入时若有 hash，滚到位
+    if(location.hash){ var el=document.getElementById(decodeURIComponent(location.hash.slice(1))); if(el) el.scrollIntoView(); }
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EasyWork · 系统设计与功能详解</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0D0E12; --panel:#16181E; --hover:#1E212A; --inset:#0A0B0E; --page:#070809;
+    --border:#23262F; --bsoft:#1A1D24;
+    --t0:#E7E9ED; --t1:#9AA0AB; --t2:#5F656F; --prose:#C9CDD4;
+    --acc:#3B82F6; --acc-weak:rgba(59,130,246,.15); --acc-bd:rgba(59,130,246,.42);
+    --grn:#3FB950; --red:#F85149; --amber:#D29922; --iris:#7C84FF; --violet:#A06CF5;
+    --font:"IBM Plex Sans",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  [data-theme="light"]{
+    --bg:#F4F5F7; --panel:#FFFFFF; --hover:#EBEDF1; --inset:#0A0B0E; --page:#E6E8EC;
+    --border:#DDE1E6; --bsoft:#E8EBEF;
+    --t0:#15171C; --t1:#5A626E; --t2:#8A919C; --prose:#2A2E37;
+    --acc-weak:rgba(59,130,246,.12);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--t0);font-family:var(--font);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;}
+  a{color:var(--acc);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre{font-family:var(--mono)}
+
+  /* topbar */
+  .top{position:sticky;top:0;z-index:20;height:54px;display:flex;align-items:center;gap:12px;padding:0 18px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--bsoft);}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;white-space:nowrap}
+  .brand .logo{width:26px;height:26px;border-radius:7px;background:var(--acc-weak);color:var(--acc);display:grid;place-items:center;font-size:15px}
+  .top .sub{font:400 12px/1 var(--mono);color:var(--t2);white-space:nowrap}
+  .spacer{flex:1}
+  .search{display:flex;align-items:center;gap:7px;height:34px;padding:0 11px;background:var(--panel);border:1px solid var(--border);border-radius:9px;color:var(--t2);min-width:180px}
+  .search input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--t0);font:400 13px var(--font)}
+  .iconbtn{height:34px;min-width:34px;padding:0 10px;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:9px;background:transparent;color:var(--t1);font:600 13px var(--font);cursor:pointer}
+  .iconbtn:hover{color:var(--t0);border-color:var(--t2)}
+
+  .wrap{display:flex;align-items:flex-start;max-width:1240px;margin:0 auto}
+  /* sidebar TOC */
+  aside{position:sticky;top:54px;flex:none;width:288px;height:calc(100vh - 54px);overflow-y:auto;padding:18px 12px 60px;border-right:1px solid var(--bsoft)}
+  .toc-h{font:600 10.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--t2);padding:6px 10px}
+  .toc a{display:block;padding:5px 10px;border-radius:7px;color:var(--t1);font-size:13px;line-height:1.4;border-left:2px solid transparent}
+  .toc a:hover{background:var(--hover);color:var(--t0);text-decoration:none}
+  .toc a.lv3{padding-left:22px;font-size:12.5px;color:var(--t2)}
+  .toc a.active{color:var(--t0);background:var(--acc-weak);border-left-color:var(--acc)}
+  .toc a.hide{display:none}
+
+  /* content */
+  main{flex:1;min-width:0;padding:8px 40px 120px;max-width:920px}
+  main h1{font-size:30px;font-weight:700;letter-spacing:-.01em;margin:24px 0 6px}
+  main h2{font-size:22px;font-weight:600;margin:42px 0 12px;padding-top:8px;border-top:1px solid var(--bsoft)}
+  main h2:first-of-type{border-top:none}
+  main h3{font-size:17px;font-weight:600;margin:26px 0 8px;color:var(--t0)}
+  main h4{font-size:14.5px;font-weight:600;margin:18px 0 6px;color:var(--t1)}
+  main h1,main h2,main h3,main h4{scroll-margin-top:70px}
+  main h2 .num{color:var(--acc);font-family:var(--mono);font-weight:600;margin-right:4px}
+  .anchor{opacity:0;margin-left:8px;color:var(--t2);font-weight:400;text-decoration:none}
+  h2:hover .anchor,h3:hover .anchor{opacity:1}
+  main p{color:var(--prose);margin:11px 0}
+  main li{color:var(--prose);margin:5px 0}
+  main ul,main ol{padding-left:24px}
+  main strong{color:var(--t0);font-weight:600}
+  main code{background:var(--hover);color:var(--t0);font-size:.86em;padding:1.5px 6px;border-radius:5px;border:1px solid var(--bsoft)}
+  main blockquote{margin:14px 0;padding:10px 16px;border-left:3px solid var(--acc-bd);background:var(--panel);border-radius:0 8px 8px 0;color:var(--t1)}
+  main blockquote p{color:var(--t1);margin:6px 0}
+  main hr{border:none;border-top:1px solid var(--bsoft);margin:30px 0}
+  main pre{position:relative;background:var(--inset);border:1px solid var(--border);border-radius:11px;padding:16px 18px;overflow:auto;margin:14px 0}
+  main pre code{background:none;border:none;padding:0;color:var(--prose);font-size:12.5px;line-height:1.6}
+  .copy{position:absolute;top:8px;right:8px;height:24px;padding:0 9px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--t2);font:600 11px var(--font);cursor:pointer;opacity:0;transition:opacity .12s}
+  main pre:hover .copy{opacity:1}
+  .copy:hover{color:var(--t0)}
+  main table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px;display:block;overflow-x:auto}
+  main th,main td{border:1px solid var(--border);padding:8px 11px;text-align:left;vertical-align:top}
+  main th{background:var(--panel);color:var(--t0);font-weight:600;white-space:nowrap}
+  main td{color:var(--prose)}
+  main td code,main th code{font-size:.84em}
+  .foot{margin-top:50px;padding-top:18px;border-top:1px solid var(--bsoft);color:var(--t2);font-size:12.5px;font-family:var(--mono)}
+
+  .menu-btn{display:none}
+  @media(max-width:900px){
+    aside{position:fixed;left:0;top:54px;z-index:18;background:var(--bg);width:300px;transform:translateX(-101%);transition:transform .2s;box-shadow:0 16px 40px rgba(0,0,0,.4)}
+    aside.open{transform:translateX(0)}
+    .menu-btn{display:inline-flex}
+    main{padding:8px 20px 100px}
+  }
+</style>
+</head>
+<body>
+  <div class="top">
+    <button class="iconbtn menu-btn" id="menuBtn" title="目录">☰</button>
+    <span class="brand"><span class="logo">⚙</span> EasyWork 设计详解</span>
+    <span class="sub" id="meta">学习向 · 交互文档</span>
+    <span class="spacer"></span>
+    <label class="search"><span>🔍</span><input id="q" placeholder="搜索章节…" autocomplete="off" /></label>
+    <button class="iconbtn" id="theme" title="切换明暗">🌓</button>
+  </div>
+  <div class="wrap">
+    <aside id="aside"><div class="toc-h">目录</div><nav class="toc" id="toc"></nav></aside>
+    <main id="content"></main>
+  </div>
+  <script id="src" type="text/markdown">
