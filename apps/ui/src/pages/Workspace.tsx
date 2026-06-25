@@ -405,6 +405,8 @@ export function Workspace({
               placeholder={`在「${project.name}」里让 AI 干活…（/ 唤起命令）`}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
+                // 输入法组词中按回车只确认候选词，不发送（中文/日文等 IME）
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                 if (slash.onKeyDown(e)) return;
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();

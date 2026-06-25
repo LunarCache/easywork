@@ -530,6 +530,8 @@ export function Chat({
               autoGrow(e.target);
             }}
             onKeyDown={(e) => {
+              // 输入法组词中按回车只确认候选词，不发送（中文/日文等 IME）
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (slash.onKeyDown(e)) return; // 斜杠命令面板优先消费方向/回车/Esc
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

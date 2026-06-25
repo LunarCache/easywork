@@ -922,10 +922,14 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .cv-tline-ico { color: var(--tx-2); flex: none; }
 .cv-tool.error .cv-tline-ico { color: var(--red); }
 .cv-tline-verb { font-weight: 600; color: var(--tx-1); flex: none; }
+.cv-tool.error .cv-tline-verb { color: var(--red); }
 .cv-tname { font-family: var(--font-mono); font-size: 12px; color: var(--tx-0); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cv-tcmd { font-family: var(--font-mono); font-size: 12px; color: var(--tx-1); background: var(--bg-elev); border: 1px solid var(--border-soft); border-radius: var(--r-sm); padding: 2px 8px; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 运行折叠态命令预览：纯灰 mono 文本（无 pill），单行省略；展开后由正文 $ 行接管故隐藏 */
+.cv-tcmd { font-family: var(--font-mono); font-size: 12px; color: var(--tx-1); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-tool[open] > summary .cv-tcmd { display: none; }
+.cv-tool[open] > summary .cv-tline-chev { margin-left: auto; }
 .cv-tfile { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
-.cv-fbadge { width: 20px; height: 20px; border-radius: var(--r-sm); color: #fff; font-family: var(--font-mono); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex: none; }
+.cv-fbadge { width: 20px; height: 20px; border-radius: var(--r-sm); color: #fff; font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; letter-spacing: -0.02em; display: flex; align-items: center; justify-content: center; flex: none; }
 .cv-tstat { font-family: var(--font-mono); font-size: 12px; flex: none; }
 .cv-tstat .add { color: var(--grn); }
 .cv-tstat .del { color: var(--red); }
@@ -935,16 +939,25 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .cv-tline-chev { color: var(--tx-2); flex: none; margin-left: auto; opacity: 0; transition: transform 0.15s var(--ease), opacity 0.15s var(--ease); }
 .cv-tool > summary:hover .cv-tline-chev { opacity: 0.6; }
 .cv-tool[open] > summary .cv-tline-chev { transform: rotate(90deg); opacity: 0.6; }
-.cv-tool-body { margin: 2px 0 8px 23px; border: 1px solid var(--border-soft); border-radius: var(--r-lg); background: var(--bg-inset); overflow: hidden; }
-.cv-kv { padding: 8px 12px; }
+/* 折叠体改为扁平：不再套暗井外框，仅靠缩进；代码 / 终端 / diff 各自带圆角井（见下）。 */
+.cv-tool-body { margin: 3px 0 10px 23px; border: none; border-radius: 0; background: transparent; overflow: visible; }
+.cv-kv { padding: 6px 0; }
 .cv-kv > span { display: block; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 4px; }
 .cv-kv > code { display: block; font-family: var(--font-mono); font-size: 12px; color: var(--text-2); white-space: pre-wrap; word-break: break-all; }
-.cv-term { margin: 0; padding: 11px 14px; background: var(--color-exec-bg); color: var(--color-exec-text); font-family: var(--font-mono); font-size: 11px; line-height: 1.7; overflow-x: auto; max-height: 340px; white-space: pre-wrap; word-break: break-all; }
-.cv-diff { font-family: var(--font-mono); font-size: 11px; line-height: 1.65; overflow-x: auto; padding: 4px 0; }
-.cv-diff-row { display: flex; padding: 0 12px; white-space: pre; }
-.cv-diff-row.add { background: var(--color-diff-add-bg); }
-.cv-diff-row.del { background: var(--color-diff-del-bg); }
+/* 运行正文：浅底圆角卡，内含 $ 命令行（亮、悬挂缩进换行）+ 输出（灰）—— 同卡 */
+.cv-term { margin: 0; padding: 12px 15px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
+.cv-term-cmd { font-family: var(--font-mono); font-size: 12px; line-height: 1.65; color: var(--tx-0); white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; padding-left: 1.5em; text-indent: -1.5em; }
+.cv-term-dollar { color: var(--tx-2); user-select: none; }
+.cv-term-out { margin: 12px 0 0; padding: 0; background: transparent; color: var(--tx-2); font-family: var(--font-mono); font-size: 11px; line-height: 1.7; overflow-x: auto; max-height: 340px; white-space: pre-wrap; word-break: break-all; }
+.cv-diff { font-family: var(--font-mono); font-size: 11px; line-height: 1.65; overflow: hidden; padding: 5px 0; background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--r-lg); }
+.cv-diff-row { display: flex; padding: 0 12px 0 0; white-space: pre; border-left: 2px solid transparent; }
+.cv-diff-row.add { background: var(--color-diff-add-bg); border-left-color: var(--grn); }
+.cv-diff-row.del { background: var(--color-diff-del-bg); border-left-color: var(--red); }
 .cv-diff-row.hunk { color: var(--accent); }
+.cv-diff-ln { width: 34px; flex: none; text-align: right; padding-right: 10px; color: var(--tx-2); user-select: none; font-variant-numeric: tabular-nums; }
+.cv-diff-row.add .cv-diff-ln { color: var(--color-diff-add-text); opacity: 0.75; }
+.cv-diff-row.del .cv-diff-ln { color: var(--color-diff-del-text); opacity: 0.75; }
+.cv-diff-code .hljs-keyword, .cv-diff-code .hljs-selector-tag { font-weight: 600; }
 .cv-diff-sign { width: 14px; flex: none; text-align: center; color: var(--text-tertiary); user-select: none; }
 .cv-diff-row.add .cv-diff-sign { color: var(--color-diff-add-text); }
 .cv-diff-row.del .cv-diff-sign { color: var(--color-diff-del-text); }
@@ -953,9 +966,38 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 /* 思考过程正文（套用工具卡折叠体 cv-tool-body） */
 .cv-reason { padding: 9px 13px; white-space: pre-wrap; color: var(--muted); font-size: 13px; line-height: 1.6; font-style: italic; }
 
+/* —— 探索组 / 扁平思考（Codex Flat：左竖线 + 过去式步骤，零卡片零暗井）—— */
+.cv-xwrap { margin: 3px 0; }
+.cv-x { border: none; background: transparent; }
+.cv-xhead { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--tx-2); }
+.cv-xhead::-webkit-details-marker { display: none; }
+.cv-xico { color: var(--tx-2); flex: none; }
+.cv-xverb { font-weight: 600; color: var(--tx-1); flex: none; }
+.cv-xsum { color: var(--tx-2); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-x.error .cv-xverb { color: var(--red); }
+.cv-x.error .cv-xico { color: var(--red); }
+.cv-xchev { color: var(--tx-2); flex: none; margin-left: auto; opacity: 0; transition: transform 0.15s var(--ease), opacity 0.15s var(--ease); }
+.cv-xhead:hover .cv-xchev { opacity: 0.6; }
+.cv-x[open] > .cv-xhead .cv-xchev { transform: rotate(90deg); opacity: 0.6; }
+.cv-xbody { margin: 2px 0 10px 7px; padding-left: 15px; border-left: 1px solid var(--border); }
+.cv-step { display: flex; align-items: baseline; gap: 9px; padding: 3px 0; font-size: 12.5px; min-width: 0; }
+.cv-slabel { color: var(--tx-2); flex: none; font-size: 12px; }
+.cv-scontent { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--tx-1); }
+.cv-fname { color: var(--tx-0); font-family: var(--font-mono); font-size: 12px; flex: none; }
+.cv-fpath { color: var(--tx-2); font-family: var(--font-mono); font-size: 11.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-q { color: var(--tx-1); font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-fbadge.sm { width: 20px; height: 20px; }
+/* 扁平思考：复用探索壳，左竖线换 accent，正文非斜体淡灰 */
+.cv-x.think .cv-xbody.reason { white-space: pre-wrap; color: var(--tx-1); font-size: 13px; line-height: 1.62; border-left-color: var(--acc-bd); padding: 1px 0 1px 15px; }
+
 /* —— 文件改动汇总卡（助手消息底部，点击行跳转看 diff）—— */
 .cv-changes { margin: 16px 0 6px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-elev); overflow: hidden; }
-.cv-changes-h { display: flex; align-items: center; gap: 11px; padding: 12px 14px; }
+.cv-changes-h { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 11px; padding: 12px 14px; }
+.cv-changes-h::-webkit-details-marker { display: none; }
+.cv-changes[open] .cv-changes-h { border-bottom: 1px solid var(--border-soft); }
+.cv-changes-chev { color: var(--tx-2); flex: none; opacity: 0.6; transition: transform 0.15s var(--ease); }
+.cv-changes[open] .cv-changes-chev { transform: rotate(90deg); }
+.cv-changes-tot { margin-left: auto; }
 .cv-changes-title { font-size: 13px; font-weight: 600; color: var(--tx-0); }
 .cv-changes-tot { font-family: var(--font-mono); font-size: 12px; }
 .cv-changes-tot .add, .cv-changes-stat .add { color: var(--grn); }

@@ -2,14 +2,16 @@ import { isValidElement, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { splitThink, type UiMsg, type UiTool } from "../lib/agent-stream.js";
+import hljs from "highlight.js/lib/common";
+import { splitThink, type UiBlock, type UiMsg, type UiTool } from "../lib/agent-stream.js";
 import { fileType } from "../lib/filetype.js";
 import {
   BrainIcon,
   ChevronIcon,
+  SearchIcon,
   GlobeIcon,
   WrenchIcon,
-  TerminalIcon,
+  SquareTerminalIcon,
   EditIcon,
   FileIcon,
   CodeIcon,
@@ -105,16 +107,71 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   );
 }
 
-function DiffLines({ unified }: { unified: string }) {
+/** 扩展名 → highlight.js 语言（仅 common 构建已注册者，未知返回 undefined → 不高亮）。 */
+function hljsLang(path?: string): string | undefined {
+  if (!path) return undefined;
+  const ext = (path.split(".").pop() || "").toLowerCase();
+  const map: Record<string, string> = {
+    ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
+    js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+    json: "json", css: "css", scss: "scss", less: "less",
+    html: "xml", xml: "xml", svg: "xml", vue: "xml",
+    md: "markdown", py: "python", rs: "rust", go: "go", java: "java",
+    c: "c", h: "c", cpp: "cpp", cc: "cpp", hpp: "cpp", cs: "csharp",
+    rb: "ruby", php: "php", sh: "bash", bash: "bash", zsh: "bash",
+    yml: "yaml", yaml: "yaml", toml: "ini", ini: "ini", sql: "sql",
+    swift: "swift", kt: "kotlin", lua: "lua",
+  };
+  const lang = map[ext];
+  return lang && hljs.getLanguage(lang) ? lang : undefined;
+}
+function highlightLine(code: string, lang: string): { __html: string } {
+  try {
+    return { __html: hljs.highlight(code, { language: lang, ignoreIllegals: true }).value || " " };
+  } catch {
+    return { __html: " " };
+  }
+}
+
+function DiffLines({ unified, path }: { unified: string; path?: string }) {
   const lines = unified.split("\n").filter((l) => !/^(diff --git|index |--- |\+\+\+ )/.test(l));
+  const lang = hljsLang(path);
+  // 行号双栏（旧 | 新）：优先解析 @@ hunk 头取真实起始行；合成 diff 无 hunk 头则从 1 起。
+  let oldNo = 1, newNo = 1;
   return (
     <div className="cv-diff">
       {lines.map((l, i) => {
-        const kind = l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : "ctx";
+        if (l.startsWith("@@")) {
+          const m = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l);
+          if (m) {
+            oldNo = parseInt(m[1]!, 10);
+            newNo = parseInt(m[2]!, 10);
+          }
+          return (
+            <div key={i} className="cv-diff-row hunk">
+              <span className="cv-diff-ln" />
+              <span className="cv-diff-ln" />
+              <span className="cv-diff-sign" />
+              <span className="cv-diff-code">{l}</span>
+            </div>
+          );
+        }
+        const kind = l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : "ctx";
+        const o = kind === "add" ? "" : String(oldNo);
+        const n = kind === "del" ? "" : String(newNo);
+        if (kind !== "add") oldNo++;
+        if (kind !== "del") newNo++;
+        const code = l.replace(/^[+-]/, "") || " ";
         return (
           <div key={i} className={`cv-diff-row ${kind}`}>
+            <span className="cv-diff-ln">{o}</span>
+            <span className="cv-diff-ln">{n}</span>
             <span className="cv-diff-sign">{kind === "add" ? "+" : kind === "del" ? "-" : ""}</span>
-            <span className="cv-diff-code">{kind === "hunk" ? l : l.replace(/^[+-]/, "") || " "}</span>
+            {lang ? (
+              <span className="cv-diff-code" dangerouslySetInnerHTML={highlightLine(code, lang)} />
+            ) : (
+              <span className="cv-diff-code">{code}</span>
+            )}
           </div>
         );
       })}
@@ -174,6 +231,146 @@ function diffStat(diff?: { before: string | null; after: string; unified: string
 
 function isEditTool(name: string): boolean {
   return /^(fs_)?(write|edit|apply_patch|str_replace_editor|create_file)$/i.test(name);
+}
+
+/** 从 old/new 文本合成 unified（旧行 − / 新行 +）；write 类只有新内容时整块呈现为新增。 */
+function synthUnified(oldStr: string, newStr: string): string {
+  const o = oldStr ? oldStr.replace(/\n$/, "").split("\n") : [];
+  const n = newStr ? newStr.replace(/\n$/, "").split("\n") : [];
+  return [...o.map((l) => "-" + l), ...n.map((l) => "+" + l)].join("\n");
+}
+
+/** 编辑工具展开体：优先真实 diff 载荷；缺失则从 args 合成内容 diff（patch / old+new / 仅 content）。 */
+function editPreview(t: UiTool): ReactNode {
+  const path = t.diff?.path || toolSubject(t.args);
+  if (t.diff?.unified) return <DiffLines unified={t.diff.unified} path={path} />;
+  if (t.diff && (t.diff.before != null || t.diff.after)) {
+    return <DiffLines unified={synthUnified(t.diff.before ?? "", t.diff.after ?? "")} path={path} />;
+  }
+  try {
+    const a = JSON.parse(t.args || "{}") as Record<string, unknown>;
+    const pick = (...keys: string[]) => {
+      for (const k of keys) if (typeof a[k] === "string") return a[k] as string;
+      return null;
+    };
+    const patch = pick("patch", "diff", "unified", "input");
+    if (patch) return <DiffLines unified={patch} path={path} />;
+    const oldStr = pick("old_str", "old_string", "oldText", "old");
+    const newStr = pick("new_str", "new_string", "newText", "new", "content", "text", "contents");
+    if (oldStr != null || newStr != null) {
+      return <DiffLines unified={synthUnified(oldStr ?? "", newStr ?? "")} path={path} />;
+    }
+  } catch {
+    /* args 非 JSON：落到参数兜底 */
+  }
+  return (
+    <div className="cv-kv">
+      <span>参数</span>
+      <code>{t.args || "{}"}</code>
+    </div>
+  );
+}
+function isRunTool(name: string): boolean {
+  return /^(run_command|bash|shell|exec)$/i.test(name);
+}
+function isReadTool(name: string): boolean {
+  return /^(fs_)?(read|view|cat|open_file|read_file)$/i.test(name);
+}
+function isCodeSearchTool(name: string): boolean {
+  return /^(fs_)?(grep|rg|ripgrep|search|search_files|search_code|glob|find)$/i.test(name);
+}
+function isListTool(name: string): boolean {
+  return /^(fs_)?(ls|list|list_dir|list_files)$/i.test(name);
+}
+/** 「探索」类工具：本地只读勘探（读 / 搜 / 列 / 找），可聚合成一组；不含 web_search / 编辑 / 运行。 */
+function isExploreTool(name: string): boolean {
+  return isReadTool(name) || isCodeSearchTool(name) || isListTool(name);
+}
+
+/** 探索组里一步的过去式标签 + 内容节点（读=徽章+文件名+路径；搜/找=查询；列=路径）。 */
+function exploreStep(t: UiTool): { label: string; node: ReactNode } {
+  if (isReadTool(t.name)) {
+    const full = t.diff?.path || toolSubject(t.args) || "";
+    const name = full.split(/[/\\]/).pop() || full;
+    const dir = full.slice(0, full.length - name.length);
+    const ft = fileType(full);
+    return {
+      label: "已读取",
+      node: (
+        <>
+          <span className="cv-fbadge sm" style={{ background: ft.color }}>{ft.label}</span>
+          <span className="cv-fname">{name || "(文件)"}</span>
+          {dir && <span className="cv-fpath">{dir}</span>}
+        </>
+      ),
+    };
+  }
+  if (isListTool(t.name)) {
+    return { label: "已列出", node: <span className="cv-q">{toolSubject(t.args) || "."}</span> };
+  }
+  // 搜索 / 查找
+  const q = toolQuery(t.args) || toolSubject(t.args);
+  const find = /find|glob/i.test(t.name);
+  return { label: find ? "已查找" : "已搜索", node: <span className="cv-q">{q || "(无)"}</span> };
+}
+
+/** 渲染项：把连续的探索类工具块聚合成一个 explore 组，其余块原样透传（保留原始下标供光标定位）。 */
+type RenderItem =
+  | { kind: "explore"; tools: UiTool[]; lastBi: number }
+  | { kind: "block"; block: UiBlock; bi: number };
+function groupExplore(blocks: UiBlock[]): RenderItem[] {
+  const out: RenderItem[] = [];
+  let run: { tools: UiTool[]; lastBi: number } | null = null;
+  const flush = () => {
+    if (run) out.push({ kind: "explore", tools: run.tools, lastBi: run.lastBi });
+    run = null;
+  };
+  blocks.forEach((block, bi) => {
+    if (block.kind === "tool" && isExploreTool(block.tool.name)) {
+      if (!run) run = { tools: [], lastBi: bi };
+      run.tools.push(block.tool);
+      run.lastBi = bi;
+    } else {
+      flush();
+      out.push({ kind: "block", block, bi });
+    }
+  });
+  flush();
+  return out;
+}
+
+/** 探索组（聚合的连续只读勘探）：扁平左竖线 + 过去式步骤，默认折叠、运行中展开。 */
+function ExploreGroup({ tools }: { tools: UiTool[] }) {
+  const running = tools.some((t) => t.status === "running");
+  const err = tools.some((t) => t.status === "error");
+  const files = tools.filter((t) => isReadTool(t.name)).length;
+  const probes = tools.length - files;
+  const summary =
+    [probes ? `${probes} 搜索` : null, files ? `${files} 文件` : null].filter(Boolean).join(", ") ||
+    `${tools.length} 步`;
+  return (
+    <div className="cv-xwrap">
+      <details className={`cv-x${err ? " error" : ""}`} open={running}>
+        <summary className="cv-xhead">
+          <SearchIcon size={14} className="cv-xico" />
+          <span className="cv-xverb">探索</span>
+          <span className="cv-xsum">· {running ? "勘探中…" : summary}</span>
+          <ChevronIcon size={12} className="cv-xchev" />
+        </summary>
+        <div className="cv-xbody">
+          {tools.map((t, j) => {
+            const { label, node } = exploreStep(t);
+            return (
+              <div key={t.id || j} className="cv-step">
+                <span className="cv-slabel">{label}</span>
+                <span className="cv-scontent">{node}</span>
+              </div>
+            );
+          })}
+        </div>
+      </details>
+    </div>
+  );
 }
 
 export interface FileChange {
@@ -283,13 +480,27 @@ export function ToolView({ t, onOpenUrl }: { t: UiTool; onOpenUrl?: (url: string
     );
   }
 
-  const run = /^(run_command|bash|shell|exec)$/i.test(t.name);
+  const run = isRunTool(t.name);
   const edit = isEditTool(t.name);
   const read = /^(fs_)?(read|view|cat|open_file)$/i.test(t.name);
   const subject = toolSubject(t.args) || t.diff?.path || "";
-  const Icon = run ? TerminalIcon : edit ? EditIcon : read ? FileIcon : WrenchIcon;
-  const verb = run ? "运行" : edit ? "编辑" : read ? "读取" : t.name;
+  const Icon = run ? SquareTerminalIcon : edit ? EditIcon : read ? FileIcon : WrenchIcon;
+  const verb = run
+    ? t.status === "running"
+      ? "执行中"
+      : t.status === "error"
+        ? "执行失败"
+        : "已执行"
+    : edit
+      ? t.status === "running"
+        ? "编辑中"
+        : "已编辑"
+      : read
+        ? "已读取"
+        : t.name;
   const filePath = t.diff?.path || subject;
+  const fileName = filePath.split(/[/\\]/).pop() || filePath;
+  const fileDir = filePath.slice(0, filePath.length - fileName.length);
   const { adds, dels } = edit ? editStat(t) : { adds: 0, dels: 0 };
   const fb = edit ? fileType(filePath) : null;
 
@@ -300,14 +511,16 @@ export function ToolView({ t, onOpenUrl }: { t: UiTool; onOpenUrl?: (url: string
           <Icon size={14} className="cv-tline-ico" />
           <span className="cv-tline-verb">{verb}</span>
           {edit && fb ? (
-            <span className="cv-tfile">
+            <span className="cv-tfile" title={filePath}>
               <span className="cv-fbadge" style={{ background: fb.color }}>
                 {fb.label}
               </span>
-              <span className="cv-tname">{filePath}</span>
+              <span className="cv-fname">{fileName}</span>
+              {fileDir && <span className="cv-fpath">{fileDir}</span>}
             </span>
           ) : run ? (
-            <code className="cv-tcmd">{subject || "命令"}</code>
+            // 折叠态显示命令预览（单行省略）；展开后由正文 $ 提示行接管，故展开时隐藏（见 css）
+            <code className="cv-tcmd" title={subject}>{subject || "命令"}</code>
           ) : (
             subject && <span className="cv-tname">{subject}</span>
           )}
@@ -316,14 +529,20 @@ export function ToolView({ t, onOpenUrl }: { t: UiTool; onOpenUrl?: (url: string
               <span className="add">+{adds}</span> <span className="del">−{dels}</span>
             </span>
           )}
-          {(t.status === "error" || run || (!edit && !read)) && statusChip("完成")}
+          {!run && (t.status === "error" || (!edit && !read)) && statusChip("完成")}
           <ChevronIcon size={12} className="cv-tline-chev" />
         </summary>
         <div className="cv-tool-body">
           {run ? (
-            <pre className="cv-term">{t.output || t.result || "（无输出）"}</pre>
-          ) : edit && t.diff?.unified ? (
-            <DiffLines unified={t.diff.unified} />
+            <div className="cv-term">
+              <div className="cv-term-cmd">
+                <span className="cv-term-dollar">$ </span>
+                {subject || "命令"}
+              </div>
+              {(t.output || t.result) && <pre className="cv-term-out">{t.output || t.result}</pre>}
+            </div>
+          ) : edit ? (
+            editPreview(t)
           ) : (
             <>
               <div className="cv-kv">
@@ -432,6 +651,7 @@ export function MessageStream({
                       rows={Math.min(8, editText.split("\n").length)}
                       onChange={(e) => setEditText(e.target.value)}
                       onKeyDown={(e) => {
+                        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();
                           submitEdit();
@@ -490,28 +710,30 @@ export function MessageStream({
               <div className="cv-head">
                 <span className="cv-name">AI assistant</span>
               </div>
-              {blocks.map((b, bi) => {
+              {groupExplore(blocks).map((it) => {
+                if (it.kind === "explore") {
+                  return <ExploreGroup key={`x${it.lastBi}`} tools={it.tools} />;
+                }
+                const b = it.block;
+                const bi = it.bi;
                 if (b.kind === "reasoning") {
                   const liveThis = live && bi === lastIdx;
                   const dur = b.end ? (b.end - b.start) / 1000 : null;
-                  const status = liveThis ? "running" : "done";
                   const statusLabel = liveThis
                     ? "思考中…"
                     : dur != null
                       ? `${dur < 1 ? "<1" : Math.round(dur)} 秒`
                       : "完成";
                   return (
-                    <div key={bi} className="cv-tool-wrap">
-                      <details className={`cv-tool think ${status}`} open={liveThis}>
-                        <summary className="cv-tline">
-                          <BrainIcon size={14} className="cv-tline-ico" />
-                          <span className="cv-tline-verb">思考</span>
-                          <span className="cv-tline-meta">{statusLabel}</span>
-                          <ChevronIcon size={12} className="cv-tline-chev" />
+                    <div key={bi} className="cv-xwrap think">
+                      <details className="cv-x think" open={liveThis}>
+                        <summary className="cv-xhead">
+                          <BrainIcon size={14} className="cv-xico" />
+                          <span className="cv-xverb">思考</span>
+                          <span className="cv-xsum">· {statusLabel}</span>
+                          <ChevronIcon size={12} className="cv-xchev" />
                         </summary>
-                        <div className="cv-tool-body">
-                          <div className="cv-reason">{b.text}</div>
-                        </div>
+                        <div className="cv-xbody reason">{b.text}</div>
                       </details>
                     </div>
                   );
@@ -532,13 +754,14 @@ export function MessageStream({
                 const totAdds = edits.reduce((n, e) => n + e.adds, 0);
                 const totDels = edits.reduce((n, e) => n + e.dels, 0);
                 return (
-                  <div className="cv-changes">
-                    <div className="cv-changes-h">
+                  <details className="cv-changes">
+                    <summary className="cv-changes-h">
                       <span className="cv-changes-title">{edits.length} 个文件改动</span>
                       <span className="cv-changes-tot mono">
                         <span className="add">+{totAdds}</span> <span className="del">−{totDels}</span>
                       </span>
-                    </div>
+                      <ChevronIcon size={13} className="cv-changes-chev" />
+                    </summary>
                     {edits.map((e) => {
                       const ft = fileType(e.path);
                       const name = e.path.split(/[/\\]/).pop() || e.path;
@@ -559,7 +782,7 @@ export function MessageStream({
                         </button>
                       );
                     })}
-                  </div>
+                  </details>
                 );
               })()}
               {answer && !live && (

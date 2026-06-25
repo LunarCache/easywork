@@ -36,6 +36,7 @@ export {
   FolderTree as FolderTreeIcon,
   Folder as FolderClosedIcon,
   Terminal as TerminalIcon,
+  SquareTerminal as SquareTerminalIcon,
   GitCompare as DiffIcon,
   FilePlus as FilePlusIcon,
   FileCode as FileCodeIcon,
