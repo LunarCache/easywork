@@ -134,12 +134,9 @@ describe("RouterServerManager", () => {
 
 describe("createCore 本地后端", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ew-be-"));
-  it("统一 llama → RouterServerManager 带 binaryPath；经典 llama-server → 无 binaryPath", () => {
-    const a = createCore({ llamaServerPath: "llama", modelsDir: tmp, memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+  it("统一 llama → RouterServerManager 带 binaryPath（经显式 llamaBinPath 注入）", () => {
+    const a = createCore({ llamaBinPath: "llama", modelsDir: tmp, memoryDbPath: ":memory:", kbDbPath: ":memory:" });
     expect(a.local).toBeInstanceOf(RouterServerManager);
     expect(a.local.binaryPathOf()).toBe("llama");
-
-    const b = createCore({ llamaServerPath: "llama-server", modelsDir: tmp, memoryDbPath: ":memory:", kbDbPath: ":memory:" });
-    expect(b.local.binaryPathOf()).toBeUndefined(); // 只有经典 llama-server → router 不启用，提示装统一 llama
   });
 });

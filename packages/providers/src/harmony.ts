@@ -1,9 +1,9 @@
 /**
  * gpt-oss harmony 多通道流式解析（兜底）。
  *
- * 部分 llama-server / 原始输出会把 harmony 控制 token 直接放进 content：
+ * 部分 llama.cpp / 原始输出会把 harmony 控制 token 直接放进 content：
  *   <|channel|>analysis<|message|>思考…<|end|><|start|>assistant<|channel|>final<|message|>正文<|return|>
- * 较新的 llama-server 会自行解析并以 delta.reasoning_content 给出 analysis（已在引擎层映射）。
+ * 较新的 llama.cpp 会自行解析并以 delta.reasoning_content 给出 analysis（已在引擎层映射）。
  * 本解析器处理"未解析、原始 token 落到 content"的兜底情形：
  *   - analysis / commentary 通道 → reasoning
  *   - final 通道（或出现任何 channel 标记前的普通文本）→ text

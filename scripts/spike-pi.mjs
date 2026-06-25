@@ -1,5 +1,5 @@
-// Phase 0 spike: 验证 pi-agent-core + pi-ai 能驱动本机 llama-server 跑通「模型→工具→收尾」。
-// 用法: node scripts/spike-pi.mjs  （需 llama-server 在 PATH，且 Qwen3 gguf 已下载）
+// Phase 0 spike: 验证 pi-agent-core + pi-ai 能驱动本机 llama serve 跑通「模型→工具→收尾」。
+// 用法: node scripts/spike-pi.mjs  （需 llama serve 在 PATH，且 Qwen3 gguf 已下载）
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -14,15 +14,15 @@ const GGUF = path.join(
 );
 const PORT = 8971;
 const BASE = `http://127.0.0.1:${PORT}`;
-const bin = process.env.EW_LLAMA_SERVER || "llama-server";
+const bin = process.env.EW_LLAMA_BIN || "llama";
 
 if (!fs.existsSync(GGUF)) {
   console.error("缺少模型:", GGUF, "（先在 app 下载 Qwen3-0.6B）");
   process.exit(2);
 }
 
-console.log("启动 llama-server…", bin, GGUF);
-const srv = spawn(bin, ["-m", GGUF, "--host", "127.0.0.1", "--port", String(PORT), "--jinja", "-c", "4096"], {
+console.log("启动 `llama serve`…", bin, GGUF);
+const srv = spawn(bin, ["serve", "-m", GGUF, "--host", "127.0.0.1", "--port", String(PORT), "--jinja", "-c", "4096"], {
   stdio: ["ignore", "ignore", "inherit"],
 });
 
@@ -41,7 +41,7 @@ async function waitReady(timeoutMs = 60000) {
   return false;
 }
 
-// pi-ai Model：openai-completions 指向 llama-server。
+// pi-ai Model：openai-completions 指向 llama serve。
 const model = {
   id: "qwen3",
   name: "Qwen3-0.6B (local)",
@@ -81,8 +81,8 @@ const tools = [
 ];
 
 async function main() {
-  if (!(await waitReady())) throw new Error("llama-server 未就绪");
-  console.log("llama-server 就绪，跑 pi agentLoop…\n");
+  if (!(await waitReady())) throw new Error("llama serve 未就绪");
+  console.log("llama serve 就绪，跑 pi agentLoop…\n");
 
   const prompts = [
     { role: "user", content: "用 add 工具算 21 加 21 等于多少，然后用 get_time 报一下时间。", timestamp: Date.now() },
@@ -94,7 +94,7 @@ async function main() {
   };
   const config = {
     model,
-    apiKey: "local", // llama-server 忽略，避免 env key 查找
+    apiKey: "local", // llama serve 忽略，避免 env key 查找
     convertToLlm: (messages) => messages, // 已是 pi Message
     toolExecutionMode: "parallel",
   };

@@ -85,15 +85,15 @@ export interface ModelsInfo {
   routed: string[];
   context?: Record<string, number>;
   engines: { id: string; capabilities: EngineCapabilities }[];
-  /** 本地 llama-server 对外端点（发现/外部直连）。 */
+  /** 本地 router 对外端点（发现/外部直连）。 */
   endpoints?: LocalEndpoint[];
-  /** 当前 llama-server 绑定 host。 */
+  /** 当前 router 绑定 host。 */
   bindHost?: string;
 }
 
 export interface LocalNetInfo {
   bindHost: string;
-  /** llama-server --api-key（绑 0.0.0.0 时必有）；未设为 null。 */
+  /** router --api-key（绑 0.0.0.0 时必有）；未设为 null。 */
   apiKey?: string | null;
   lanIp?: string;
   endpoints: LocalEndpoint[];
@@ -204,13 +204,13 @@ export class EasyWorkClient {
     await this.postJSON("/models/unload", { id });
   }
 
-  /** 本地 llama 推理运行时状态（llama-server / llama.app 的 llama；缺失则 found=false）。 */
-  runtimeStatus(): Promise<{ found: boolean; path?: string; kind?: "llama-server" | "llama"; install: string }> {
+  /** 本地 llama 推理运行时状态（llama.app 的统一 `llama`；缺失则 found=false）。 */
+  runtimeStatus(): Promise<{ found: boolean; path?: string; install: string }> {
     return this.getJSON("/local/runtime");
   }
 
   /** 经 llama.app 官方脚本安装 llama 运行时（用户主动触发；可能耗时数十秒）。 */
-  installRuntime(): Promise<{ ok: boolean; path?: string; kind?: string; output: string; error?: string }> {
+  installRuntime(): Promise<{ ok: boolean; path?: string; output: string; error?: string }> {
     return this.postJSON("/local/install-runtime", {});
   }
 
@@ -265,12 +265,12 @@ export class EasyWorkClient {
     });
   }
 
-  /** 本地 llama-server 网络暴露：当前绑定 host + 局域网 IP + 各模型端点。 */
+  /** 本地 router 网络暴露：当前绑定 host + 局域网 IP + 各模型端点。 */
   getLocalNet(): Promise<LocalNetInfo> {
     return this.getJSON<LocalNetInfo>("/settings/local-net");
   }
 
-  /** 切换本地 llama-server 绑定 host（0.0.0.0 必须带 apiKey）。重载已加载模型生效。 */
+  /** 切换本地 router 绑定 host（0.0.0.0 必须带 apiKey）。重载已加载模型生效。 */
   setLocalNet(bindHost: "127.0.0.1" | "0.0.0.0", apiKey?: string): Promise<LocalNetInfo & { ok: boolean }> {
     return this.postJSON<LocalNetInfo & { ok: boolean }>("/settings/local-net", {
       bindHost,

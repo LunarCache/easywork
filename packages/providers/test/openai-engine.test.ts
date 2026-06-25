@@ -76,7 +76,7 @@ describe("OpenAICompatibleEngine.chatStream", () => {
     expect(done.message.toolCalls[0].arguments).toBe('{"city":"SF"}');
   });
 
-  it("采样参数透传到请求体（含 llama-server 扩展 top_k/min_p/repeat_penalty）", async () => {
+  it("采样参数透传到请求体（含 llama.cpp 扩展 top_k/min_p/repeat_penalty）", async () => {
     let captured: any;
     const fakeFetch = (async (_url: string, init: RequestInit) => {
       captured = JSON.parse(init.body as string);

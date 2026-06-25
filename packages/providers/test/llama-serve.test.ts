@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { EventEmitter } from "node:events";
 import type { ChatStreamEvent } from "@ew/shared";
-import { LlamaServerEngine } from "../src/index.js";
+import { LlamaServeEngine } from "../src/index.js";
 
 const enc = new TextEncoder();
 function sse(frames: string[]): Response {
@@ -15,8 +15,8 @@ function sse(frames: string[]): Response {
   return new Response(stream, { status: 200 });
 }
 
-describe("LlamaServerEngine", () => {
-  it("用 --mmproj 启动、轮询 health、委托 chatStream", async () => {
+describe("LlamaServeEngine", () => {
+  it("经 `llama serve` 用 --mmproj 启动、轮询 health、委托 chatStream", async () => {
     let spawnedBin = "";
     let spawnedArgs: string[] = [];
     let killed = false;
@@ -44,7 +44,7 @@ describe("LlamaServerEngine", () => {
       throw new Error(`unexpected ${url}`);
     }) as unknown as typeof fetch;
 
-    const engine = new LlamaServerEngine({
+    const engine = new LlamaServeEngine({
       modelPath: "/models/smolvlm.gguf",
       mmprojPath: "/models/mmproj.gguf",
       port: 9999,
@@ -56,7 +56,8 @@ describe("LlamaServerEngine", () => {
     expect(engine.capabilities.vision).toBe(true);
     await engine.start();
 
-    expect(spawnedBin).toBe("llama-server");
+    expect(spawnedBin).toBe("llama"); // 默认统一 llama 二进制
+    expect(spawnedArgs[0]).toBe("serve"); // 经 `llama serve` 子命令起服务
     expect(spawnedArgs).toContain("--mmproj");
     expect(spawnedArgs).toContain("/models/mmproj.gguf");
     expect(spawnedArgs).toContain("-m");
@@ -80,7 +81,7 @@ describe("LlamaServerEngine", () => {
   });
 
   it("未启动时调用 chatStream 报错", async () => {
-    const engine = new LlamaServerEngine({ modelPath: "/m.gguf" });
+    const engine = new LlamaServeEngine({ modelPath: "/m.gguf" });
     await expect(
       (async () => {
         for await (const _ of engine.chatStream({ model: "local", messages: [] })) {

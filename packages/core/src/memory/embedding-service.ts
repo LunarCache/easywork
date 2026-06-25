@@ -1,6 +1,6 @@
 import type { EmbedResult } from "@ew/shared";
 
-/** 一个可启停、能 embed 的引擎（由 llama-server embedding 实例实现）。 */
+/** 一个可启停、能 embed 的引擎（由 llama serve embedding 实例实现）。 */
 export interface EmbedEngine {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -8,13 +8,13 @@ export interface EmbedEngine {
 }
 
 export interface EmbeddingServiceDeps {
-  /** 用给定模型路径创建一个 embedding 引擎（默认 = llama-server --embedding；测试可注入）。 */
+  /** 用给定模型路径创建一个 embedding 引擎（默认 = llama serve --embedding；测试可注入）。 */
   makeEngine: (modelPath: string) => EmbedEngine | Promise<EmbedEngine>;
 }
 
 /**
  * 本地 CPU embedding 服务（参考 Hermes：nomic-embed-text 语义召回）。
- * 经 llama.cpp llama-server 的 --embedding 模式运行；未就绪时 embed 抛错 → 记忆降级词法。
+ * 经 `llama serve --embedding` 模式运行；未就绪时 embed 抛错 → 记忆降级词法。
  */
 export class EmbeddingService {
   private engine?: EmbedEngine;
@@ -31,7 +31,7 @@ export class EmbeddingService {
     return { ready: this.ready, ...(this.modelId ? { modelId: this.modelId } : {}), dim: this.dim };
   }
 
-  /** 加载并设置 embedding 模型（启动 llama-server --embedding）。 */
+  /** 加载并设置 embedding 模型（启动 llama serve --embedding）。 */
   async setModel(modelPath: string): Promise<{ dim: number }> {
     await this.engine?.stop().catch(() => {});
     const engine = await this.deps.makeEngine(modelPath);

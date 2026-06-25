@@ -118,7 +118,7 @@ export class SessionHost {
     fs.mkdirSync(this.sessionsDir, { recursive: true });
     this.tunePiSettings();
     this.authStorage = AuthStorage.create(path.join(this.agentDir, "auth.json"));
-    // llama-server 忽略 key，仅为通过 pi 的 provider key 校验。
+    // llama 忽略 key，仅为通过 pi 的 provider key 校验。
     this.authStorage.set("local", { type: "api_key", key: "local" });
     this.modelRegistry = ModelRegistry.create(this.authStorage, path.join(this.agentDir, "models.json"));
     this.syncCloudProviders();
@@ -182,11 +182,11 @@ export class SessionHost {
     }
   }
 
-  /** 解析一个 EasyWork modelId → pi `Model`（本地 llama-server / 云端 provider）。 */
+  /** 解析一个 EasyWork modelId → pi `Model`（本地 llama / 云端 provider）。 */
   private resolveModel(modelId: string): Model<Api> {
     const localBase = this.deps.local.baseUrlFor(modelId);
     if (localBase) {
-      // llama-server 设了 --api-key 时（0.0.0.0 暴露），pi 调用本机也需带该 key。
+      // llama 设了 --api-key 时（0.0.0.0 暴露），pi 调用本机也需带该 key。
       const key = this.deps.local.getApiKey?.() || "local";
       this.authStorage.set("local", { type: "api_key", key });
       const ctx = this.deps.local.contexts()[modelId];

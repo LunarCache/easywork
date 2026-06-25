@@ -67,7 +67,7 @@ apps/
 
 | 变量 | 作用 |
 |---|---|
-| `EW_LLAMA_SERVER` | 指定统一 `llama` 可执行文件路径（缺省自动解析 PATH + `~/.local/bin` 等；router 模式只认 kind=llama） |
+| `EW_LLAMA_BIN` | 指定 llama.app 统一 `llama` 可执行文件路径（缺省自动解析 PATH + `~/.local/bin` 等；经典 llama-server 已不支持） |
 | `EW_MAX_LOADED_MODELS` | router `--models-max`：同时常驻模型数上限（默认 4） |
 | `EW_SQLITE_VEC` | 指定 sqlite-vec 可加载扩展路径（打包二进制用；缺省同目录 / node_modules 解析） |
 | `EW_MAX_LOADED_MODELS` | 最大常驻模型数（默认 3，超出按 LRU 淘汰） |

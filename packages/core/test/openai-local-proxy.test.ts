@@ -12,7 +12,7 @@ function fakePiStream(events: AssistantMessageEvent[]): AssistantMessageEventStr
   return gen() as unknown as AssistantMessageEventStream;
 }
 
-// Step 1：本地已加载模型 → /v1 透传到其 llama-server（不经我们的翻译层）。
+// Step 1：本地已加载模型 → /v1 透传到其 llama.cpp（不经我们的翻译层）。
 const enc = new TextEncoder();
 function sseResponse(frames: string[], contentType = "text/event-stream"): Response {
   const stream = new ReadableStream<Uint8Array>({
@@ -32,7 +32,7 @@ const stubRegistry = {
 } as unknown as EngineRegistry;
 
 describe("/v1 本地透传", () => {
-  it("chat/completions: 本地模型反代到 llama-server /chat/completions，原样回流", async () => {
+  it("chat/completions: 本地模型反代到 llama.cpp /chat/completions，原样回流", async () => {
     let calledUrl = "";
     let calledBody = "";
     const fakeFetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -60,7 +60,7 @@ describe("/v1 本地透传", () => {
     await app.close();
   });
 
-  it("messages: 本地模型反代到 llama-server /messages（Anthropic 原生）", async () => {
+  it("messages: 本地模型反代到 llama.cpp /messages（Anthropic 原生）", async () => {
     let calledUrl = "";
     const fakeFetch = (async (url: string | URL | Request) => {
       calledUrl = String(url);

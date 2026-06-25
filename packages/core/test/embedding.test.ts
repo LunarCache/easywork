@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { EmbeddingService, type EmbedEngine } from "../src/memory/embedding-service.js";
 
-/** 假 embedding 引擎（不起真实 llama-server）。 */
+/** 假 embedding 引擎（不起真实 llama.cpp）。 */
 function fakeEngine(): EmbedEngine {
   return {
     async start() {},

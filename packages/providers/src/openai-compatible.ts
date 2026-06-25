@@ -105,7 +105,7 @@ export class OpenAICompatibleEngine implements InferenceEngine {
     // 标准 OpenAI 字段
     if (req.frequencyPenalty != null) body.frequency_penalty = req.frequencyPenalty;
     if (req.presencePenalty != null) body.presence_penalty = req.presencePenalty;
-    // llama-server / vLLM 扩展采样字段（OpenAI 官方无，但 llama-server 接受）
+    // llama.cpp / vLLM 扩展采样字段（OpenAI 官方无，但 llama.cpp 接受）
     if (req.topK != null) body.top_k = req.topK;
     if (req.minP != null) body.min_p = req.minP;
     if (req.repeatPenalty != null) body.repeat_penalty = req.repeatPenalty;

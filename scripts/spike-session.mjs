@@ -1,4 +1,4 @@
-// R0 spike：验证 pi-coding-agent 的 AgentSession 可无头嵌入（无 TUI），用本地 llama-server 驱动，
+// R0 spike：验证 pi-coding-agent 的 AgentSession 可无头嵌入（无 TUI），用本地 llama serve 驱动，
 // 自带编码工具可用、事件可订阅。用法: node scripts/spike-session.mjs
 import { spawn } from "node:child_process";
 import os from "node:os";
@@ -9,13 +9,13 @@ import { createAgentSession, AuthStorage, ModelRegistry } from "@earendil-works/
 const GGUF = path.join(os.homedir(), ".easywork/models/unsloth__Qwen3-0.6B-GGUF/Qwen3-0.6B-Q4_K_M.gguf");
 if (!fs.existsSync(GGUF)) { console.error("缺模型", GGUF); process.exit(2); }
 const PORT = 8973;
-const bin = process.env.EW_LLAMA_SERVER || "llama-server";
+const bin = process.env.EW_LLAMA_BIN || "llama";
 
 const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-sess-cwd-")));
 const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-sess-agent-")));
 fs.writeFileSync(path.join(cwd, "README.md"), "# Spike Project\nThis project is a small teapot demo.\n");
 
-const srv = spawn(bin, ["-m", GGUF, "--host", "127.0.0.1", "--port", String(PORT), "--jinja", "-c", "4096"], {
+const srv = spawn(bin, ["serve", "-m", GGUF, "--host", "127.0.0.1", "--port", String(PORT), "--jinja", "-c", "4096"], {
   stdio: ["ignore", "ignore", "inherit"],
 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -32,11 +32,11 @@ const model = {
 };
 
 async function main() {
-  if (!(await waitReady())) throw new Error("llama-server 未就绪");
-  console.log("llama-server 就绪；createAgentSession（无头）…");
+  if (!(await waitReady())) throw new Error("llama serve 未就绪");
+  console.log("llama serve 就绪；createAgentSession（无头）…");
 
   const authStorage = AuthStorage.create(path.join(agentDir, "auth.json"));
-  authStorage.set("local", { type: "api_key", key: "local" }); // llama-server 忽略，仅为通过 pi 的 key 校验
+  authStorage.set("local", { type: "api_key", key: "local" }); // llama serve 忽略，仅为通过 pi 的 key 校验
   const modelRegistry = ModelRegistry.create(authStorage);
   const { session } = await createAgentSession({
     model, thinkingLevel: "off", authStorage, modelRegistry, cwd, agentDir,

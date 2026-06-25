@@ -1,8 +1,8 @@
-// 多模态本地推理烟测：下载 SmolVLM 视觉模型 + mmproj → 启动 llama-server sidecar → 图片问答。
+// 多模态本地推理烟测：下载 SmolVLM 视觉模型 + mmproj → 启动 `llama serve` sidecar → 图片问答。
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
-import { LlamaServerEngine } from "@ew/providers";
+import { LlamaServeEngine } from "@ew/providers";
 
 const REPO = "ggml-org/SmolVLM-256M-Instruct-GGUF";
 const MODEL_FILE = "SmolVLM-256M-Instruct-Q8_0.gguf";
@@ -76,8 +76,8 @@ fs.mkdirSync(DIR, { recursive: true });
 const modelPath = await download(MODEL_FILE);
 const mmprojPath = await download(MMPROJ_FILE);
 
-console.log("[vision] 启动 llama-server (Metal, --mmproj) ...");
-const engine = new LlamaServerEngine({
+console.log("[vision] 启动 `llama serve` (Metal, --mmproj) ...");
+const engine = new LlamaServeEngine({
   modelPath,
   mmprojPath,
   gpuLayers: 99,

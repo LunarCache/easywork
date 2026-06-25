@@ -5,7 +5,7 @@ import fs from "node:fs";
 import type { AgentEvent, MemoryProvider, MemoryItem } from "@ew/shared";
 import { EngineRegistry } from "../src/engine/registry.js";
 import { RouterServerManager } from "../src/engine/router-server-manager.js";
-import { resolveLlamaRuntime } from "../src/engine/resolve-llama.js";
+import { resolveLlamaBin } from "../src/engine/resolve-llama.js";
 import { ProviderManager } from "../src/providers/manager.js";
 import { SessionHost } from "../src/agent/session-host.js";
 
@@ -14,12 +14,12 @@ import { SessionHost } from "../src/agent/session-host.js";
 const RUN = process.env.EW_E2E === "1";
 const MODELS_DIR = path.join(os.homedir(), ".easywork/models");
 const GGUF = path.join(MODELS_DIR, "unsloth__Qwen3-4B-GGUF/Qwen3-4B-Q4_K_M.gguf");
-const rt = resolveLlamaRuntime();
+const llamaBin = resolveLlamaBin();
 
-describe.skipIf(!RUN || !fs.existsSync(GGUF) || rt?.kind !== "llama")("SessionHost e2e", () => {
+describe.skipIf(!RUN || !fs.existsSync(GGUF) || !llamaBin)("SessionHost e2e", () => {
   it("drives pi AgentSession via local `llama serve` router and emits AgentEvent stream", async () => {
     const registry = new EngineRegistry();
-    const local = new RouterServerManager(registry, { binaryPath: rt!.path, modelsDir: MODELS_DIR });
+    const local = new RouterServerManager(registry, { binaryPath: llamaBin!, modelsDir: MODELS_DIR });
     const providers = new ProviderManager(registry);
     const { id: modelId } = await local.load({ modelPath: GGUF, contextSize: 4096 });
 

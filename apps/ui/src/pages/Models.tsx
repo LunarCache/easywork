@@ -82,7 +82,7 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [embedBusy, setEmbedBusy] = useState(false);
 
   // 运行时
-  const [runtime, setRuntime] = useState<{ found: boolean; path?: string; kind?: string; install: string } | null>(null);
+  const [runtime, setRuntime] = useState<{ found: boolean; path?: string; install: string } | null>(null);
   const [rtInstalling, setRtInstalling] = useState(false);
 
   // 云端 provider
@@ -187,7 +187,7 @@ export function Models({ onChange }: { onChange: () => void }) {
 
   const load = async (m: LocalModel) => {
     setBusy(m.path);
-    setProgress(`加载 ${m.fileName}…（首次启动 llama-server 需几秒）`);
+    setProgress(`加载 ${m.fileName}…（首次启动本地推理需几秒）`);
     try {
       const contextSize = m.contextDefault ?? 4096;
       await getClient().loadModel({ modelPath: m.path, contextSize, gpuLayers: 999 });
@@ -427,7 +427,7 @@ export function Models({ onChange }: { onChange: () => void }) {
               <AlertIcon size={15} />
               <div className="rt-banner-body">
                 <div>
-                  未检测到本地推理运行时（<code>llama-server</code> / <code>llama</code>）。本地模型需要它才能运行。
+                  未检测到本地推理运行时（<code>llama</code>，来自 llama.app）。本地模型需要它才能运行。
                 </div>
                 <div className="rt-banner-cmd">一键安装（llama.app 官方）：<code>{runtime.install}</code></div>
               </div>

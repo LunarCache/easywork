@@ -10,9 +10,9 @@ import type {
 } from "@ew/shared";
 import { OpenAICompatibleEngine } from "./openai-compatible.js";
 
-export interface LlamaServerOptions {
+export interface LlamaServeOptions {
   id?: string;
-  /** llama-server 可执行文件路径（默认 PATH 中的 "llama-server"）。 */
+  /** 统一 `llama`（llama.app）可执行文件路径（默认走 PATH 中的 "llama"）。 */
   binaryPath?: string;
   /** 主模型 GGUF 路径。 */
   modelPath: string;
@@ -24,9 +24,9 @@ export interface LlamaServerOptions {
   gpuLayers?: number;
   /** embedding 模式：启动 --embedding 服务（用于本地记忆向量召回）。 */
   embedding?: boolean;
-  /** llama-server --api-key：设置后所有请求（含本机回环）需 Bearer 鉴权。用于 0.0.0.0 暴露。 */
+  /** --api-key：设置后所有请求（含本机回环）需 Bearer 鉴权。用于 0.0.0.0 暴露。 */
   apiKey?: string;
-  /** 额外透传给 llama-server 的参数。 */
+  /** 额外透传给 `llama serve` 的参数。 */
   extraArgs?: string[];
   /** 就绪探测超时（ms，默认 60s）。 */
   readyTimeoutMs?: number;
@@ -36,22 +36,22 @@ export interface LlamaServerOptions {
 }
 
 /**
- * 多模态推理后端：以子进程方式运行 llama.cpp 的 `llama-server --mmproj`（OpenAI 兼容），
- * chat/embed 委托给指向该进程 /v1 的 OpenAICompatibleEngine。
- * node-llama-cpp 不支持视觉，故视觉走这里。多模态数据通路（image→image_url）已在内部引擎就绪。
+ * 单模型 `llama serve -m <gguf>` 子进程引擎（OpenAI 兼容）：chat/embed 委托给指向该进程 /v1
+ * 的 OpenAICompatibleEngine。当前用于本地 embedding 服务（nomic-embed，语义召回）；亦支持
+ * 多模态（`--mmproj`）。文本/视觉的常规推理走统一 router（见 RouterServerManager），不在此处。
  */
-export class LlamaServerEngine implements InferenceEngine {
+export class LlamaServeEngine implements InferenceEngine {
   readonly id: string;
   readonly capabilities: EngineCapabilities;
   private proc?: ChildProcess;
   private inner?: OpenAICompatibleEngine;
-  private readonly opts: Required<Pick<LlamaServerOptions, "port" | "host">> & LlamaServerOptions;
+  private readonly opts: Required<Pick<LlamaServeOptions, "port" | "host">> & LlamaServeOptions;
   private readonly fetchImpl: typeof fetch;
   private readonly spawnFn: typeof spawn;
   private readonly modelName = "local";
 
-  constructor(opts: LlamaServerOptions) {
-    this.id = opts.id ?? "llama-server";
+  constructor(opts: LlamaServeOptions) {
+    this.id = opts.id ?? "llama-serve";
     this.opts = { ...opts, port: opts.port ?? 8090, host: opts.host ?? "127.0.0.1" };
     this.fetchImpl = opts.fetch ?? fetch;
     this.spawnFn = opts.spawnFn ?? spawn;
@@ -65,7 +65,7 @@ export class LlamaServerEngine implements InferenceEngine {
     };
   }
 
-  // 自连接恒走回环：--host 只控制对外绑定，daemon 与 llama-server 同机，自身调用用 127.0.0.1。
+  // 自连接恒走回环：--host 只控制对外绑定，daemon 与 llama 子进程同机，自身调用用 127.0.0.1。
   private baseUrl(): string {
     return `http://127.0.0.1:${this.opts.port}/v1`;
   }
@@ -86,15 +86,12 @@ export class LlamaServerEngine implements InferenceEngine {
     return a;
   }
 
-  /** 启动 llama-server 子进程并等待就绪。 */
+  /** 启动 `llama serve` 子进程并等待就绪。 */
   async start(): Promise<void> {
     if (this.proc) return;
-    const bin = this.opts.binaryPath ?? "llama-server";
-    // llama.app 的统一 `llama` 二进制经子命令 `llama serve` 起服务（flag 与 llama-server 一致）；
-    // 经典 `llama-server` 直接调用。按文件名判断（兼容裸名 / 绝对路径 / .exe）。
-    const unified = /(^|[\\/])llama(\.exe)?$/i.test(bin);
-    const args = unified ? ["serve", ...this.buildArgs()] : this.buildArgs();
-    this.proc = this.spawnFn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    // 统一 `llama`（llama.app）二进制经子命令 `llama serve` 起服务。
+    const bin = this.opts.binaryPath ?? "llama";
+    this.proc = this.spawnFn(bin, ["serve", ...this.buildArgs()], { stdio: ["ignore", "pipe", "pipe"] });
     this.proc.on("exit", () => {
       this.proc = undefined;
     });
@@ -131,7 +128,7 @@ export class LlamaServerEngine implements InferenceEngine {
   }
 
   private ensure(): OpenAICompatibleEngine {
-    if (!this.inner) throw new Error("LlamaServerEngine 未启动（请先 start()）");
+    if (!this.inner) throw new Error("LlamaServeEngine 未启动（请先 start()）");
     return this.inner;
   }
 

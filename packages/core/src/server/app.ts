@@ -24,7 +24,7 @@ import {
   type DownloadEvent,
   type McpServerConfig,
 } from "@ew/shared";
-import { LlamaServerEngine } from "@ew/providers";
+import { LlamaServeEngine } from "@ew/providers";
 import { builtinTools } from "@ew/tools";
 import { SkillManager } from "@ew/skills";
 import { McpClientManager } from "@ew/mcp";
@@ -47,7 +47,7 @@ import { parseFile } from "../rag/parse.js";
 import { RouterServerManager } from "../engine/router-server-manager.js";
 import { getFreePort } from "../engine/net.js";
 import type { LocalBackend } from "../engine/local-backend.js";
-import { resolveLlamaRuntime, LLAMA_INSTALL } from "../engine/resolve-llama.js";
+import { resolveLlamaBin, LLAMA_INSTALL } from "../engine/resolve-llama.js";
 import {
   dataDir as defaultDataDir,
   dbPath as defaultDbPath,
@@ -93,8 +93,8 @@ export interface CreateCoreOptions {
   kbDbPath?: string;
   /** 覆盖 fetch（测试用，拦截 HF / 云端调用）。 */
   fetch?: typeof fetch;
-  /** llama-server 可执行文件路径（默认走 PATH 中的 "llama-server"）。 */
-  llamaServerPath?: string;
+  /** 统一 `llama`（llama.app）可执行文件路径（默认走 PATH 中的 "llama"）。 */
+  llamaBinPath?: string;
 }
 
 const ProviderConfigSchema = z.object({
@@ -109,8 +109,8 @@ const ProviderConfigSchema = z.object({
 /** 创建核心守护进程（Fastify server + 引擎/模型/provider 管理）。 */
 export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   const token = opts.token ?? crypto.randomUUID();
-  // 解析 llama 运行时：显式 EW_LLAMA_SERVER → llama-server → llama.app 的统一 llama（含 ~/.local/bin）。
-  const llamaRuntime = resolveLlamaRuntime(opts.llamaServerPath ?? process.env.EW_LLAMA_SERVER);
+  // 解析统一 `llama`（llama.app）二进制：显式 EW_LLAMA_BIN → PATH / ~/.local/bin 里的 llama。
+  const llamaBin = resolveLlamaBin(opts.llamaBinPath ?? process.env.EW_LLAMA_BIN);
   const registry = new EngineRegistry();
   const modelsDirPath = opts.modelsDir ?? defaultModelsDir();
 
@@ -121,9 +121,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   });
 
   // 本地推理（router 模式）：1 个 `llama serve --models-dir` 路由进程,按 model 字段路由 + 按需加载 + LRU。
-  // 嵌入模型不走此处（见下方 EmbeddingService）。需统一 `llama`（kind==="llama"）；无则提示安装。
+  // 嵌入模型不走此处（见下方 EmbeddingService）。需统一 `llama`；无则提示经 llama.app 安装。
   const local: LocalBackend = new RouterServerManager(registry, {
-    ...(llamaRuntime?.kind === "llama" ? { binaryPath: llamaRuntime.path } : {}),
+    ...(llamaBin ? { binaryPath: llamaBin } : {}),
     modelsDir: modelsDirPath,
     modelsMax: Number(process.env.EW_MAX_LOADED_MODELS) || 4,
     contextsProvider: async () => {
@@ -145,16 +145,16 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   // 交互式审批跨请求登记表（/agent/run 挂起 ↔ /agent/approve 解析）。
   const approvalRegistry = new ApprovalRegistry();
 
-  // 本地 CPU embedding 服务（参考 Hermes：nomic-embed-text 语义召回）。经 llama-server --embedding 运行。
+  // 本地 CPU embedding 服务（参考 Hermes：nomic-embed-text 语义召回）。经 `llama serve --embedding` 运行。
   const embeddings = new EmbeddingService({
     makeEngine: async (modelPath) => {
       const port = await getFreePort();
-      return new LlamaServerEngine({
+      return new LlamaServeEngine({
         id: "embed",
         modelPath,
         embedding: true,
         port,
-        ...(llamaRuntime ? { binaryPath: llamaRuntime.path } : {}),
+        ...(llamaBin ? { binaryPath: llamaBin } : {}),
       });
     },
   });
@@ -222,7 +222,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   } catch {
     /* 损坏的配置忽略 */
   }
-  // 恢复 llama-server 绑定 host + api-key（启动时无已加载模型，applyNet 仅设字段）。
+  // 恢复 router 绑定 host + api-key（启动时无已加载模型，applyNet 仅设字段）。
   try {
     const savedBind = repo.getSetting(LOCAL_BIND_KEY) ?? undefined;
     const savedKey = repo.getSetting(LOCAL_APIKEY_KEY) || undefined;
@@ -316,15 +316,15 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   // ---- 引擎 / 已加载模型 ----
   app.get("/models", async () => ({
     routed: registry.routedModels(),
-    // 本地模型窗口（llama-server n_ctx）+ 云端 provider 手动配置的窗口 → UI 进度环分母。
+    // 本地模型窗口（router n_ctx）+ 云端 provider 手动配置的窗口 → UI 进度环分母。
     context: { ...providers.contexts(), ...local.contexts() },
     engines: registry.list().map((e) => ({ id: e.id, capabilities: e.capabilities })),
-    // 本地 llama-server 对外端点（发现/外部直连）+ 当前绑定 host。
+    // 本地 router 对外端点（发现/外部直连）+ 当前绑定 host。
     endpoints: local.endpoints(),
     bindHost: local.getBindHost(),
   }));
 
-  // ---- 本地网络暴露：llama-server 绑定 host（127.0.0.1 仅本机 / 0.0.0.0 局域网，后者强制 api-key） ----
+  // ---- 本地网络暴露：router 绑定 host（127.0.0.1 仅本机 / 0.0.0.0 局域网，后者强制 api-key） ----
   app.get("/settings/local-net", async () => ({
     bindHost: local.getBindHost(),
     apiKey: local.getApiKey() ?? null,
@@ -379,13 +379,13 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     return { ok: true };
   });
 
-  // ---- 本地推理运行时（llama-server / llama.app 的 llama）----
+  // ---- 本地推理运行时（llama.app 的统一 `llama`）----
   // 探测 llama 运行时是否就绪（缺失时 UI 引导经 llama.app 安装）。
   app.get("/local/runtime", async () => {
-    const rt = resolveLlamaRuntime(opts.llamaServerPath ?? process.env.EW_LLAMA_SERVER);
+    const bin = resolveLlamaBin(opts.llamaBinPath ?? process.env.EW_LLAMA_BIN);
     return {
-      found: !!rt,
-      ...(rt ? { path: rt.path, kind: rt.kind } : {}),
+      found: !!bin,
+      ...(bin ? { path: bin } : {}),
       install: process.platform === "win32" ? LLAMA_INSTALL.windows : LLAMA_INSTALL.unix,
     };
   });
@@ -414,10 +414,10 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       });
     });
     // 安装后重新解析并热更新本地后端的二进制路径（下次 load 即用新装的 llama）。
-    const rt = resolveLlamaRuntime(opts.llamaServerPath ?? process.env.EW_LLAMA_SERVER);
-    if (rt) local.setBinaryPath(rt.path);
-    if (!rt) return reply.code(500).send({ ok: false, output: result.output, error: "未在 PATH / ~/.local/bin 解析到 llama 运行时" });
-    return { ok: result.code === 0 || !!rt, path: rt.path, kind: rt.kind, output: result.output };
+    const bin = resolveLlamaBin(opts.llamaBinPath ?? process.env.EW_LLAMA_BIN);
+    if (bin) local.setBinaryPath(bin);
+    if (!bin) return reply.code(500).send({ ok: false, output: result.output, error: "未在 PATH / ~/.local/bin 解析到 llama 运行时" });
+    return { ok: result.code === 0 || !!bin, path: bin, output: result.output };
   });
 
   // ---- 模型管理（HF 搜索 / 变体 / 下载 / 本地扫描） ----
@@ -1319,7 +1319,7 @@ version: "0.1.0"
   });
 
   // ---- OpenAI/Anthropic 兼容端点（复用同一 registry） ----
-  // 本地模型透传到 llama-server；云端流式经 pi-ai（统一 ModelRegistry/AuthStorage）。
+  // 本地模型透传到 router；云端流式经 pi-ai（统一 ModelRegistry/AuthStorage）。
   registerOpenAICompat(app, registry, {
     localBaseUrl: (m) => local.baseUrlFor(m),
     localApiKey: () => local.getApiKey(),
@@ -1432,7 +1432,7 @@ function isExistingDir(p: string): boolean {
   }
 }
 
-/** 取本机第一个非内部 IPv4（绑定 0.0.0.0 时供其他设备直连 llama-server）。 */
+/** 取本机第一个非内部 IPv4（绑定 0.0.0.0 时供其他设备直连 router）。 */
 function lanIPv4(): string | undefined {
   for (const list of Object.values(os.networkInterfaces())) {
     for (const ni of list ?? []) {

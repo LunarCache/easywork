@@ -21,11 +21,11 @@ function genId(): string {
   return `chatcmpl-${Date.now().toString(36)}${counter.toString(36)}`;
 }
 
-/** 网关依赖：本地已加载模型的 llama-server baseUrl 解析器（用于本地透传）。 */
+/** 网关依赖：本地已加载模型的 router baseUrl 解析器（用于本地透传）。 */
 export interface OpenAICompatDeps {
   /** 返回已加载本地模型的 OpenAI/Anthropic 兼容 baseUrl（http://host:port/v1）；非本地返回 undefined。 */
   localBaseUrl?: (model: string) => string | undefined;
-  /** 本地 llama-server 的 --api-key（设置后透传需带 Bearer）；未设返回 undefined。 */
+  /** 本地 router 的 --api-key（设置后透传需带 Bearer）；未设返回 undefined。 */
   localApiKey?: () => string | undefined;
   /** 透传所用 fetch（默认全局；测试可注入）。 */
   fetch?: typeof fetch;
@@ -57,7 +57,7 @@ async function tryCompleteCloud(deps: OpenAICompatDeps, chatReq: ChatRequest): P
 }
 
 /**
- * 本地透传：把请求反向代理到该模型的 llama-server（原生支持 OpenAI /chat/completions
+ * 本地透传：把请求反向代理到该模型的 router（原生支持 OpenAI /chat/completions
  * 与 Anthropic /messages，且我们带 --jinja 启动）。原样转发 + 回流，不经我们的翻译层。
  */
 async function proxyToLocal(
@@ -117,7 +117,7 @@ async function proxyToLocal(
 /**
  * 挂载 OpenAI 兼容端点，复用同一 EngineRegistry。
  * 让外部工具（Claude Code / openai SDK）指向 http://127.0.0.1:<port>/v1 即可用。
- * 本地已加载模型直接透传到其 llama-server；云端走引擎（Step 2 改 pi-ai）。
+ * 本地已加载模型直接透传到其 router；云端走引擎（Step 2 改 pi-ai）。
  */
 export function registerOpenAICompat(
   app: FastifyInstance,
@@ -137,7 +137,7 @@ export function registerOpenAICompat(
   app.post("/v1/chat/completions", async (req, reply) => {
     const body = req.body as Record<string, unknown>;
     const model = typeof body.model === "string" ? body.model : "";
-    // 本地已加载模型 → 透传到 llama-server 原生 /v1/chat/completions。
+    // 本地已加载模型 → 透传到 router 原生 /v1/chat/completions。
     const localBase = model ? deps.localBaseUrl?.(model) : undefined;
     if (localBase) return proxyToLocal(localBase, "/chat/completions", req, reply, deps.fetch ?? fetch, deps.localApiKey?.());
 
@@ -249,7 +249,7 @@ export function registerOpenAICompat(
   // ---- Anthropic Messages API 兼容（让走 Anthropic 协议的客户端，如 Claude Code，可接入）----
   app.post("/v1/messages", async (req, reply) => {
     const body = req.body as AnthropicRequestBody;
-    // 本地已加载模型 → 透传到 llama-server 原生 /v1/messages（含 tool_use，需 --jinja，已带）。
+    // 本地已加载模型 → 透传到 router 原生 /v1/messages（含 tool_use，需 --jinja，已带）。
     const localBase = body.model ? deps.localBaseUrl?.(body.model) : undefined;
     if (localBase) return proxyToLocal(localBase, "/messages", req, reply, deps.fetch ?? fetch, deps.localApiKey?.());
 

@@ -7,7 +7,7 @@
 ### ✅ 已完成
 
 - **核心守护进程**（`@ew/core`）：Fastify HTTP + SSE，托管 pi-coding-agent 内核（`SessionHost`，按 threadId 串行化），无头可运行（`easywork serve`）。
-- **本地推理（router 模式）**：统一 `llama`（llama.app）的 `llama serve --models-dir` **单路由进程**，按请求 `model`（= 模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰（文本 / 视觉）；嵌入模型走独立 `llama serve -m --embedding` 进程。经典每模型一进程的 `llama-server` 已弃用。HF 搜索 / 断点续传下载 / GGUF 头解析。
+- **本地推理（router 模式）**：统一 `llama`（llama.app）的 `llama serve --models-dir` **单路由进程**，按请求 `model`（= 模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰（文本 / 视觉）；嵌入模型走独立 `llama serve -m --embedding` 进程。经典每模型一进程的 `llama-server`（含 brew llama.cpp）**已完全移除**——只支持 llama.app 统一 `llama`。HF 搜索 / 断点续传下载 / GGUF 头解析。
 - **云端推理**：OpenAI 兼容 provider（OpenAI / OpenRouter / DeepSeek / vLLM …），云端流式经 pi-ai（含 OAuth）。
 - **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/web_search）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
@@ -31,6 +31,17 @@
 ---
 
 ## 里程碑日志
+
+## 2026-06-25 — 完全移除经典 `llama-server` 支持（仅 llama.app 统一 `llama`）
+
+本地推理早已迁到 router 模式（`llama serve`），经典每模型一进程的 `llama-server`（含 `brew install llama.cpp`）只剩"探测回退"残留。本次**彻底移除**该回退与相关命名，运行时唯一真相 = llama.app 的统一 `llama`。
+
+- **运行时解析**：`resolve-llama.ts` 删 `LlamaKind`/`kind`/`llama-server` 候选 → `resolveLlamaBin()` 只找 `llama`，返回路径字符串；`app.ts` 去掉 `kind==="llama"` 门槛，直接把 binaryPath 传给 router/嵌入。
+- **引擎重命名**：`LlamaServerEngine` → **`LlamaServeEngine`**（`providers/llama-server.ts` → `llama-serve.ts`），`start()` 恒用 `llama serve`（删经典分支，默认二进制 `llama`）。该引擎现仅用于本地 embedding 子进程。
+- **环境变量/选项**：`EW_LLAMA_SERVER` → `EW_LLAMA_BIN`；`createCore` 选项 `llamaServerPath` → `llamaBinPath`。
+- **API/UI**：`/local/runtime` 与 SDK `runtimeStatus()`/`installRuntime()` 去掉 `kind` 字段；Models 页运行时缺失提示文案去 `llama-server`。
+- **注释收口**：本地透传/网络暴露注释 `llama-server` → `router`，采样/Harmony 扩展 → `llama.cpp`，嵌入 → `llama serve`。
+- 测试 **204 通过**（e2e 仍 skip）· typecheck 19/19 · lint 0 · build 绿。
 
 ## 2026-06-24（续）— 设置整页化 + 插件并入设置 + 弹层统一 + 本地模型删除
 

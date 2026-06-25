@@ -32,7 +32,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
 
 /** Agent 运行输入。 */
-/** 采样参数（透传给推理引擎；本地 llama-server 支持 top_k/min_p/repeat_penalty 扩展字段）。 */
+/** 采样参数（透传给推理引擎；本地 llama.cpp 支持 top_k/min_p/repeat_penalty 扩展字段）。 */
 export interface SamplingParams {
   temperature?: number;
   topP?: number;
