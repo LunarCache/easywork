@@ -5,6 +5,7 @@ export {
   SlidersHorizontal as SlidersIcon,
   Send as SendIcon,
   Search as SearchIcon,
+  ChevronsDownUp as CollapseAllIcon,
   Sparkles as SparkIcon,
   Download as DownloadIcon,
   Brain as BrainIcon,

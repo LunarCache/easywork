@@ -9,6 +9,8 @@ import {
   TrashIcon,
   GearIcon,
   InboxIcon,
+  SearchIcon,
+  CollapseAllIcon,
 } from "../icons.js";
 
 export type Mode = "chat" | "work" | "inbox";
@@ -57,6 +59,7 @@ export function Sidebar({
   onOpenFiles,
   onOpenInbox,
   onOpenSettings,
+  onOpenSearch,
 }: {
   threads: ThreadItem[];
   projects: Project[];
@@ -77,9 +80,13 @@ export function Sidebar({
   onOpenFiles: (pid: string) => void;
   onOpenInbox: () => void;
   onOpenSettings: () => void;
+  onOpenSearch?: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const isOpen = (pid: string) => (pid in collapsed ? !collapsed[pid] : pid === projectId);
+  // 折叠全部 / 展开全部：任一展开 → 全折叠；否则全展开。
+  const anyOpen = projects.some((p) => isOpen(p.id));
+  const toggleAll = () => setCollapsed(Object.fromEntries(projects.map((p) => [p.id, anyOpen])));
   const chatThreads = threads.filter((t) => !t.projectId);
 
   return (
@@ -90,6 +97,13 @@ export function Sidebar({
           <span>新对话</span>
           <span className="ad-side-kbd">⌘N</span>
         </button>
+        {onOpenSearch && (
+          <button className="ad-side-act" onClick={onOpenSearch}>
+            <SearchIcon size={18} className="ad-side-act-ico" />
+            <span>搜索</span>
+            <span className="ad-side-kbd">⌘K</span>
+          </button>
+        )}
         <button className="ad-side-act" onClick={onNewWorkspace}>
           <FolderTreeIcon size={18} className="ad-side-act-ico" />
           <span>打开工作区</span>
@@ -102,7 +116,18 @@ export function Sidebar({
 
       <div className="ad-side-scroll">
         {/* 项目（工作区）分区 */}
-        <div className="ad-side-eyebrow">项目</div>
+        <div className="ad-side-eyebrow bar">
+          <span>项目</span>
+          {projects.length > 1 && (
+            <button
+              className="ad-eyebrow-act"
+              title={anyOpen ? "折叠全部" : "展开全部"}
+              onClick={toggleAll}
+            >
+              <CollapseAllIcon size={13} />
+            </button>
+          )}
+        </div>
         {projects.length === 0 ? (
           <div className="ad-side-hint">暂无项目</div>
         ) : (
@@ -123,6 +148,16 @@ export function Sidebar({
                   <FolderClosedIcon size={14} className="ad-side-folder-ico" />
                   <span className="ad-side-folder-name">{p.name}</span>
                   {p.id === projectId && <span className="ad-side-cwd">CWD</span>}
+                  <span
+                    className="ad-task-del"
+                    title="新建会话"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNewWorkThread(p.id);
+                    }}
+                  >
+                    <PlusIcon size={13} />
+                  </span>
                   <span
                     className="ad-task-del"
                     title="查看文件"
@@ -151,15 +186,13 @@ export function Sidebar({
                         >
                           <span className={`ad-task-dot ${on ? "run" : ""}`} />
                           <span className="ad-task-name">{t.title || "新会话"}</span>
+                          <span className="ad-task-time">{relTime(t.updatedAt)}</span>
                           <span className="ad-task-del" title="删除" onClick={(e) => onDelThread(t.id, e)}>
                             <TrashIcon size={12} />
                           </span>
                         </button>
                       );
                     })}
-                    <button className="ad-side-newsub" onClick={() => onNewWorkThread(p.id)}>
-                      <PlusIcon size={12} /> 新建会话
-                    </button>
                   </div>
                 )}
               </div>

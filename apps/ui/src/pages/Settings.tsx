@@ -8,10 +8,8 @@ import { Mcp } from "./Mcp.js";
 import { KnowledgeBaseOverlay } from "../components/KnowledgeBaseOverlay.js";
 import { MemoryOverlay } from "../components/MemoryOverlay.js";
 import {
-  GlobeIcon,
   PaletteIcon,
   AlertIcon,
-  KbIcon,
   SunIcon,
   MoonIcon,
   MonitorIcon,
@@ -23,9 +21,8 @@ import {
   PluginsIcon,
 } from "../icons.js";
 
-export type SettingsSection = "general" | "models" | "kb" | "skills" | "mcp" | "memory" | "embed" | "net";
+export type SettingsSection = "general" | "models" | "kb" | "skills" | "mcp" | "memory";
 
-type EmbedStatus = { ready: boolean; modelId?: string; dim: number };
 
 const APPEARANCES: { id: Appearance; label: string; Icon: typeof SunIcon }[] = [
   { id: "light", label: "浅色", Icon: SunIcon },
@@ -39,11 +36,14 @@ function genApiKey(): string {
 
 export function Settings({
   theme,
+  navWidth,
   onThemeChange,
   onBack,
   onModelsChange,
 }: {
   theme: ThemePrefs;
+  /** 与主侧栏同宽，保证设置页的左栏分割线与默认页对齐。 */
+  navWidth?: number;
   onThemeChange: (next: ThemePrefs) => void;
   onBack: () => void;
   onModelsChange: () => void;
@@ -59,8 +59,6 @@ export function Settings({
   const [net, setNet] = useState<LocalNetInfo | null>(null);
   const [netBusy, setNetBusy] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
-  const [embed, setEmbed] = useState<EmbedStatus | null>(null);
-  const [embedBusy, setEmbedBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -68,27 +66,7 @@ export function Settings({
     } catch {
       /* ignore */
     }
-    try {
-      setEmbed(await getClient().embeddingStatus());
-    } catch {
-      /* ignore */
-    }
   }, []);
-
-  const enableEmbed = async () => {
-    if (embedBusy) return;
-    setEmbedBusy(true);
-    setNote("正在启用向量记忆：下载嵌入模型 + 重建索引，可能耗时…");
-    try {
-      const r = await getClient().enableEmbedding();
-      setEmbed(r);
-      setNote(`向量记忆已启用：${r.dim} 维（重建索引 ${r.reindexed} 条）`);
-    } catch (e) {
-      setNote(`启用失败：${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setEmbedBusy(false);
-    }
-  };
 
   const changeBind = async (host: "127.0.0.1" | "0.0.0.0") => {
     if (netBusy || net?.bindHost === host) return;
@@ -128,15 +106,13 @@ export function Settings({
     { id: "skills", label: "Skills", Icon: SparkIcon },
     { id: "mcp", label: "MCP", Icon: PluginsIcon },
     { id: "memory", label: "记忆", Icon: BrainIcon },
-    { id: "embed", label: "向量记忆", Icon: KbIcon },
-    { id: "net", label: "本地网络", Icon: GlobeIcon },
   ];
   // 「卡片行」型分区（自带标题 + 卡片）；其余是直接铺满的管理页（自带头部）。
-  const CARD_SECS = new Set<SettingsSection>(["general", "embed", "net"]);
+  const CARD_SECS = new Set<SettingsSection>(["general"]);
 
   return (
     <div className="set-page">
-      <div className="set-nav">
+      <div className="set-nav" style={navWidth ? { width: navWidth } : undefined}>
         <button className="set-back" onClick={onBack}>
           <ArrowLeftIcon size={15} /> 返回工作区
         </button>
@@ -176,42 +152,7 @@ export function Settings({
           </div>
         )}
 
-        {sec === "embed" && (
-          <div className="set-group">
-            <div className="set-row">
-              <div className="set-row-info">
-                <div className="set-row-title">向量召回</div>
-                <div className="set-row-desc">
-                  记忆与知识库走 sqlite-vec 语义 ⊕ 词法混合召回；嵌入模型可在「插件 → 模型」页管理。
-                </div>
-              </div>
-              <div className="set-row-control">
-                {embed?.ready ? (
-                  <div className="embed-status">
-                    <span className="embed-state on">
-                      <span className="mcp-dot ok" /> 已启用
-                    </span>
-                    <code className="embed-model" title={embed.modelId}>
-                      {embed.modelId?.split("/").pop() ?? "嵌入模型"}
-                    </code>
-                    <span className="embed-dim">{embed.dim} 维</span>
-                  </div>
-                ) : (
-                  <button
-                    className="set-add primary"
-                    disabled={embedBusy}
-                    title="下载本地 CPU 嵌入模型 nomic-embed（约 80MB）并重建索引"
-                    onClick={() => void enableEmbed()}
-                  >
-                    {embedBusy ? "启用中…" : "启用"}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {sec === "net" && (
+        {sec === "general" && (
           <>
             <div className="set-group">
               <div className="set-row">

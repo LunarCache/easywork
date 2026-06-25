@@ -8,6 +8,7 @@ import { Workspace } from "./pages/Workspace.js";
 import { FilesPage } from "./pages/FilesPage.js";
 import { Titlebar } from "./components/Titlebar.js";
 import { Sidebar, type Mode } from "./components/Sidebar.js";
+import { SearchPalette } from "./components/SearchPalette.js";
 import { Settings } from "./pages/Settings.js";
 import { FolderTreeIcon, InboxIcon } from "./icons.js";
 
@@ -41,6 +42,7 @@ export function App() {
   const [theme, setTheme] = useState<ThemePrefs>(loadThemePrefs);
   const [sessionWidth, setSessionWidth] = useState<number>(loadSessionWidth);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
   const [workBranch, setWorkBranch] = useState<string | undefined>(undefined);
   // 点项目「查看文件」→ 主区切到该项目的文件浏览页（替代对话，左上角「返回任务」回退）。
@@ -153,6 +155,9 @@ export function App() {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
         e.preventDefault();
         newChat();
+      } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -297,6 +302,7 @@ export function App() {
                 onOpenFiles={openProjectFiles}
                 onOpenInbox={() => changeMode("inbox")}
                 onOpenSettings={() => setOverlay("settings")}
+                onOpenSearch={() => setSearchOpen(true)}
               />
             </div>
             <div className="ad-resizer" title="拖动调整宽度" onMouseDown={onResizeStart}>
@@ -353,7 +359,17 @@ export function App() {
         </main>
       </div>
       {overlay === "settings" && (
-        <Settings theme={theme} onThemeChange={changeTheme} onModelsChange={check} onBack={() => setOverlay(null)} />
+        <Settings theme={theme} navWidth={sessionWidth} onThemeChange={changeTheme} onModelsChange={check} onBack={() => setOverlay(null)} />
+      )}
+      {searchOpen && (
+        <SearchPalette
+          threads={threads}
+          projects={projects}
+          onSelectThread={selectThread}
+          onSelectWorkThread={selectWorkThread}
+          onSelectProject={(id) => void selectProject(id)}
+          onClose={() => setSearchOpen(false)}
+        />
       )}
     </div>
   );
