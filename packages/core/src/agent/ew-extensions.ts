@@ -24,6 +24,7 @@ import {
   type ApprovalGate,
   type ApprovalMode,
   type SamplingParams,
+  type ThinkLevel,
   type MemoryProvider,
   type MemoryLayer,
   type ScopeView,
@@ -222,6 +223,8 @@ export interface RunRuntime {
   alwaysApproved: Set<string>;
   /** 本轮采样参数（run() 前写入；streamFn 包装读取，注入 provider 请求）。 */
   sampling?: SamplingParams;
+  /** 本轮思考档位（run() 前写入；云端经 setThinkingLevel，本地经 streamFn 注入 payload）。 */
+  thinkingLevel?: ThinkLevel;
   /** 本轮是否被用户取消（取消则跳过记忆抽取；上下文回滚由宿主处理）。 */
   aborted?: boolean;
 }

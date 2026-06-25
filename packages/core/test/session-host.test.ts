@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { mapSessionEvent } from "../src/agent/session-host.js";
+import { mapSessionEvent, injectLocalThinking } from "../src/agent/session-host.js";
 
 // R1：pi AgentSessionEvent → 我们的 AgentEvent 的边界翻译，逐型锁定。
 describe("mapSessionEvent", () => {
@@ -108,7 +108,51 @@ describe("mapSessionEvent", () => {
   });
 
   it("unmapped session events → empty", () => {
-    expect(mapSessionEvent({ type: "compaction_start", reason: "threshold" } as AgentSessionEvent)).toEqual([]);
+    expect(mapSessionEvent({ type: "queue_update", steering: [], followUp: [] } as unknown as AgentSessionEvent)).toEqual([]);
     expect(mapSessionEvent({ type: "agent_start" } as AgentSessionEvent)).toEqual([]);
+  });
+
+  it("auto_retry_start → retry 事件", () => {
+    const ev = { type: "auto_retry_start", attempt: 2, maxAttempts: 5, delayMs: 1000, errorMessage: "429" } as AgentSessionEvent;
+    expect(mapSessionEvent(ev)).toEqual([{ type: "retry", attempt: 2, maxAttempts: 5, delayMs: 1000, message: "429" }]);
+  });
+
+  it("compaction_start/end → compaction 事件（end 带 ok + token 增减）", () => {
+    expect(mapSessionEvent({ type: "compaction_start", reason: "threshold" } as AgentSessionEvent)).toEqual([
+      { type: "compaction", phase: "start", reason: "threshold" },
+    ]);
+    const ok = {
+      type: "compaction_end",
+      reason: "manual",
+      aborted: false,
+      willRetry: false,
+      result: { summary: "s", firstKeptEntryId: "e", tokensBefore: 8000, estimatedTokensAfter: 1200 },
+    } as unknown as AgentSessionEvent;
+    expect(mapSessionEvent(ok)).toEqual([
+      { type: "compaction", phase: "end", reason: "manual", ok: true, tokensBefore: 8000, tokensAfter: 1200 },
+    ]);
+    // 中止/失败的压缩不能谎报成功：ok=false。
+    const failed = { type: "compaction_end", reason: "overflow", aborted: true, willRetry: false, result: undefined } as unknown as AgentSessionEvent;
+    expect(mapSessionEvent(failed)).toEqual([{ type: "compaction", phase: "end", reason: "overflow", ok: false }]);
+  });
+
+  it("agent_end{willRetry} 不发 final（重试/压缩续写在即）", () => {
+    const retrying = { type: "agent_end", willRetry: true, messages: [] } as unknown as AgentSessionEvent;
+    expect(mapSessionEvent(retrying)).toEqual([]);
+  });
+});
+
+describe("injectLocalThinking", () => {
+  it("off → enable_thinking=false + budget 0", () => {
+    expect(injectLocalThinking({}, "off")).toEqual({
+      chat_template_kwargs: { enable_thinking: false },
+      thinking_budget_tokens: 0,
+    });
+  });
+  it("分级 → enable_thinking=true + 对应预算，保留已有 kwargs", () => {
+    const out = injectLocalThinking({ messages: [], chat_template_kwargs: { foo: 1 } }, "medium");
+    expect(out.chat_template_kwargs).toEqual({ foo: 1, enable_thinking: true });
+    expect(out.thinking_budget_tokens).toBe(4096);
+    expect(out.messages).toEqual([]); // 不破坏其余请求体
   });
 });

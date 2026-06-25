@@ -32,6 +32,21 @@
 
 ## 里程碑日志
 
+## 2026-06-25（续）— 接入 pi 内核 6 项能力（斜杠命令 / 分级思考 / 切模型 / 压缩 / 重试 / 缓存）
+
+把 pi-coding-agent 已有但未启用的能力接进宿主层。全部用 pi `.d.ts` 核验后实现，后端 + 双 composer。
+
+- **分级思考**：去掉硬编码 `thinkingLevel:"off"`；每轮 `setThinkingLevel`（云端 reasoning 模型真分级）；**本地**经 `injectLocalThinking` 往 llama.cpp 请求体注入 `chat_template_kwargs.enable_thinking` + `thinking_budget_tokens`（取代旧 Qwen `/think` 文本 hack）。对外 4 档 off/low/medium/high。
+- **自动重试**：`setAutoRetryEnabled(true)` 默认开；`auto_retry_start` → `retry` 事件，状态条提示"重试中"。
+- **prompt caching**：streamFn 包装对**云端**加 `cacheRetention:"long"` + `sessionId=threadId`（会话级缓存）。
+- **手动压缩**：`SessionHost.compact(threadId)`（排进该 thread 的 runChain 串行）+ `POST /threads/:id/compact` + SDK `compactThread`；`compaction_start/end` → `compaction` 事件。
+- **斜杠命令**：`lib/slash.ts` + `useSlashPalette`（两 composer 共用）——输入「/」两阶段自动补全：`/think <档位>`、`/model <名>`、`/compact`。
+- **思考控件**：composer `think` 布尔 → `thinkingLevel` 分级 chip（按模型持久化，默认 off）；Chat + Workspace 双 composer。
+- 契约：`AgentEvent` 加 `retry`/`compaction`（含 `ok`）；运行入参 `think:boolean` → `thinkingLevel`。
+- **多 agent 高强度审查（38 agent）发现并修复 6 类真 bug**：① 自动重试/压缩会先发 `agent_end{willRetry}`，原逻辑会提前终止本轮吞掉续写 → 仅 `!willRetry` 才收尾、且不发提前 final；② `compact()` 在 runChain 屏障前读 session，换模型重建后会动到已 dispose 的旧会话 → 改为屏障后再读；③ 压缩总结调用继承上轮采样（小 maxTokens 截断总结）→ compact 前清 sampling/思考；④ 压缩中止/失败被谎报「已压缩」→ 加 `ok` 标记，UI 显「压缩未完成」；⑤ 重试/压缩瞬态提示仅靠后续 text 清除，以工具/错误结尾会残留 → 本轮 finally 清除；⑥ 本地思考改 payload 注入有版本风险 → 保留 `/think`·`/no_think` 文本兜底（仅本地）。
+- 测试 **209 通过**（+5：mapSessionEvent retry/compaction(ok)/willRetry + injectLocalThinking）· typecheck 19/19 · lint 0 · build 绿；Playwright 实测斜杠面板/思考档/`/compact` 全通。
+- **待真机校准**：本地思考的 llama body 字段接受性需文本模型实跑确认（payload 形状已单测锁定，且有 `/think` 文本兜底）。
+
 ## 2026-06-25 — 完全移除经典 `llama-server` 支持（仅 llama.app 统一 `llama`）
 
 本地推理早已迁到 router 模式（`llama serve`），经典每模型一进程的 `llama-server`（含 `brew install llama.cpp`）只剩"探测回退"残留。本次**彻底移除**该回退与相关命名，运行时唯一真相 = llama.app 的统一 `llama`。

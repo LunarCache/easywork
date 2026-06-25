@@ -10,6 +10,7 @@ import {
   LocalLoadOptionsSchema,
   McpServerConfigSchema,
   SamplingParamsSchema,
+  ThinkLevelSchema,
   MemoryLayerSchema,
   messageText,
   normalizeContent,
@@ -524,7 +525,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     excludeTools: z.array(z.string()).optional(),
     /** 禁用的 Skill 名称（按名过滤 pi resourceLoader 的 skills）。 */
     excludeSkills: z.array(z.string()).optional(),
-    think: z.boolean().optional(),
+    thinkingLevel: ThinkLevelSchema.optional(),
     sampling: SamplingParamsSchema.optional(),
     /** 是否启用知识库 RAG（自动注入 + 暴露 search_knowledge_base）。默认关，由聊天「知识库」开关控制。 */
     kb: z.boolean().optional(),
@@ -628,7 +629,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         approvalMode: isWorkspace ? (project?.approvalMode ?? "approve-each") : "auto-edits",
         signal: ac.signal,
         ...(parsed.data.sampling ? { sampling: parsed.data.sampling } : {}),
-        ...(parsed.data.think !== undefined ? { think: parsed.data.think } : {}),
+        ...(parsed.data.thinkingLevel !== undefined ? { thinkingLevel: parsed.data.thinkingLevel } : {}),
         ...(parsed.data.excludeSkills?.length ? { excludeSkills: parsed.data.excludeSkills } : {}),
       })) {
         recorded.push(...recorder.push(ev));
@@ -907,6 +908,8 @@ version: "0.1.0"
   app.get("/threads/:id/usage", async (req) => ({
     usage: sessionHost.lastUsage((req.params as { id: string }).id),
   }));
+  // 手动压缩该会话上下文（pi session.compact()）；排进该 thread 的 run 串行链。无活动会话则 skipped。
+  app.post("/threads/:id/compact", async (req) => sessionHost.compact((req.params as { id: string }).id));
   app.delete("/threads/:id", async (req) => {
     const id = (req.params as { id: string }).id;
     const projectId = repo.getThread(id)?.projectId;

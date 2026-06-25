@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatMessage } from "@ew/shared";
+import type { ChatMessage, ThinkLevel } from "@ew/shared";
 import type { WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { SideDock } from "../components/SideDock.js";
 import { ContextRing } from "../components/ContextRing.js";
 import { ModelSelect } from "../components/ModelSelect.js";
+import { useSlashPalette } from "../components/SlashPalette.js";
+import { THINK_LABEL, nextThink } from "../lib/slash.js";
 import {
   applyAgentEvent,
   messageText,
@@ -22,6 +24,8 @@ import {
   saveSampling,
   samplingToRequest,
   loadDisabledSkills,
+  loadThink,
+  saveThink,
   type Sampling,
 } from "../lib/prefs.js";
 import {
@@ -72,7 +76,8 @@ export function Chat({
   const [msgs, setMsgs] = useState<UiMsg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [think, setThink] = useState(true);
+  const [thinkLevel, setThinkLevel] = useState<ThinkLevel>("off");
+  const [notice, setNotice] = useState<string | null>(null); // 重试/压缩等瞬态状态提示
   const [web, setWeb] = useState(true);
   const [kb, setKb] = useState(false);
   const [kbId, setKbId] = useState<string | undefined>(undefined); // undefined = 全部集合
@@ -223,7 +228,34 @@ export function Chat({
   // 切换模型 → 载入该模型的采样覆盖。
   useEffect(() => {
     setSampling(loadSampling(model));
+    setThinkLevel(loadThink(model));
   }, [model]);
+
+  // 改思考档位（按模型持久化）。
+  const changeThink = useCallback(
+    (lv: ThinkLevel) => {
+      setThinkLevel(lv);
+      saveThink(model, lv);
+    },
+    [model],
+  );
+  const cycleThink = () => changeThink(nextThink(thinkLevel));
+
+  // /compact：手动压缩上下文。
+  const doCompact = useCallback(() => {
+    setNotice("压缩上下文中…");
+    void getClient()
+      .compactThread(threadId)
+      .then((r) => setNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
+      .catch(() => setNotice("压缩失败"));
+  }, [threadId]);
+
+  const slash = useSlashPalette(input, setInput, {
+    models,
+    onThink: changeThink,
+    onModel: setModel,
+    onCompact: doCompact,
+  });
 
   // 开启知识库时拉取可用集合。
   useEffect(() => {
@@ -296,7 +328,7 @@ export function Chat({
           model,
           history,
           excludeTools,
-          think,
+          thinkingLevel: thinkLevel,
           kb,
           ...(kb && kbId ? { kbId } : {}),
           ...(Object.keys(sampling).length ? { sampling } : {}),
@@ -307,7 +339,13 @@ export function Chat({
         if (ev.type === "usage") setUsage(ev.usage);
         else if (ev.type === "approval-request")
           setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });
-        else if (ev.type === "final") apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
+        else if (ev.type === "retry") setNotice(`重试中 (${ev.attempt}/${ev.maxAttempts})…`);
+        else if (ev.type === "compaction")
+          setNotice(ev.phase === "start" ? "压缩上下文中…" : ev.ok === false ? "压缩未完成" : "已压缩上下文");
+        else if (ev.type === "text" || ev.type === "reasoning") {
+          setNotice(null); // 有新输出即清掉瞬态提示（值未变时 React 自动跳过重渲染）
+          apply((m) => applyAgentEvent(m, ev));
+        } else if (ev.type === "final") apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
         else if (ev.type === "error") apply((m) => ({ ...m, raw: `${m.raw}\n\n[错误] ${ev.message}` }));
         else if (ev.type === "tool-end") {
           apply((m) => applyAgentEvent(m, ev));
@@ -321,6 +359,7 @@ export function Chat({
         apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
     } finally {
       setBusy(false);
+      setNotice(null); // 本轮收尾即清掉瞬态提示（重试/压缩），避免以工具/错误结尾时残留
     }
   };
 
@@ -443,16 +482,18 @@ export function Chat({
               e.target.value = "";
             }}
           />
+          {slash.palette}
           <textarea
             ref={taRef}
             value={input}
             rows={1}
-            placeholder="发送消息…"
+            placeholder="发送消息…（/ 唤起命令）"
             onChange={(e) => {
               setInput(e.target.value);
               autoGrow(e.target);
             }}
             onKeyDown={(e) => {
+              if (slash.onKeyDown(e)) return; // 斜杠命令面板优先消费方向/回车/Esc
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 void send();
@@ -479,9 +520,13 @@ export function Chat({
                         <PlusBtnIcon size={16} /> <span>上传图片</span>
                       </button>
                       <div className="cadd-sep" />
-                      <button className={`cadd-item ${think ? "on" : ""}`} onClick={() => setThink((v) => !v)}>
+                      <button
+                        className={`cadd-item ${thinkLevel !== "off" ? "on" : ""}`}
+                        onClick={cycleThink}
+                        title="点击循环：关 / 低 / 中 / 高"
+                      >
                         <ThinkIcon size={16} /> <span>思考</span>
-                        {think && <CheckIcon size={15} className="cadd-check" />}
+                        <span className="cadd-lvl">{THINK_LABEL[thinkLevel]}</span>
                       </button>
                       <button className={`cadd-item ${web ? "on" : ""}`} onClick={() => setWeb((v) => !v)}>
                         <GlobeIcon size={16} /> <span>联网</span>
@@ -512,9 +557,10 @@ export function Chat({
                   </>
                 )}
               </div>
-              {think && (
-                <button className="cchip on" onClick={() => setThink(false)} title="思考（点击关闭）">
+              {thinkLevel !== "off" && (
+                <button className="cchip on" onClick={cycleThink} title="思考档位（点击循环：低/中/高/关）">
                   <ThinkIcon size={15} />
+                  <span className="cchip-lvl">{THINK_LABEL[thinkLevel]}</span>
                 </button>
               )}
               {web && (
@@ -600,7 +646,9 @@ export function Chat({
             </div>
           </div>
         </div>
-        <div className="composer-note">本地 AI 也可能出错，请自行核实重要信息。</div>
+        <div className="composer-note">
+          {notice ? <span className="composer-status">{notice}</span> : "本地 AI 也可能出错，请自行核实重要信息。"}
+        </div>
       </footer>
       </div>
       <SideDock

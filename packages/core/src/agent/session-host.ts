@@ -16,7 +16,7 @@ import {
 import { streamSimple, completeSimple } from "@earendil-works/pi-ai";
 import type { Model, Api, Context as PiContext, AssistantMessageEventStream, AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import { GLOBAL_SCOPE } from "@ew/shared";
-import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, SamplingParams, Tool } from "@ew/shared";
+import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, SamplingParams, ThinkLevel, Tool } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { LocalBackend } from "../engine/local-backend.js";
@@ -70,8 +70,8 @@ export interface EwAgentRunInput {
   signal?: AbortSignal;
   /** 采样参数（透传给 provider 请求；本地额外注入 llama.cpp top_k/min_p/repeat_penalty）。 */
   sampling?: SamplingParams;
-  /** 思考开关：true→/think，false→/no_think（Qwen3 约定，注入给模型，不污染持久化消息）。 */
-  think?: boolean;
+  /** 思考档位（off/low/medium/high）：云端经 pi setThinkingLevel；本地经 streamFn 注入 llama.cpp 思考参数。 */
+  thinkingLevel?: ThinkLevel;
   /** 禁用的 Skill 名称：按名从 pi resourceLoader 的 skills 里过滤掉（改变即重建会话）。 */
   excludeSkills?: string[];
 }
@@ -376,7 +376,6 @@ export class SessionHost {
     });
     const { session } = await createAgentSession({
       model,
-      thinkingLevel: "off",
       authStorage: this.authStorage,
       modelRegistry: this.modelRegistry,
       cwd,
@@ -388,22 +387,32 @@ export class SessionHost {
       // 安全由权限扩展统一把守：escapesCwd 限定 fs 路径，bash 经审批（对话模式 auto-edits）。
       ...(customTools.length ? { customTools } : {}),
     });
-    // 采样参数注入：pi 不在 createAgentSession 暴露采样，包装 agent.streamFn 读取 runtime.sampling
-    // → temperature/maxTokens 走 StreamOptions；top_p/top_k/min_p/repeat_penalty/seed/penalties 经
-    // onPayload 注入请求体（top_k/min_p/repeat_penalty 是 llama.cpp 扩展，仅本地模型注入）。
+    // 自动重试默认开：provider 抖动/限流时 pi 自带退避重试（事件经 mapSessionEvent 提示 UI）。
+    session.setAutoRetryEnabled(true);
+    // streamFn 包装（pi 不在 createAgentSession 暴露采样/缓存/本地思考，统一在此注入）：
+    // - 采样：temperature/maxTokens 走 StreamOptions；其余经 onPayload 注入请求体（local 扩展字段）。
+    // - 本地思考：local 经 onPayload 注入 chat_template_kwargs.enable_thinking + thinking_budget_tokens。
+    // - prompt caching：云端开 cacheRetention=long + sessionId=threadId（会话级缓存）。
     const baseStream = session.agent.streamFn;
     session.agent.streamFn = (m, context, options) => {
-      const s = runtime.sampling;
-      if (!s) return baseStream(m, context, options);
       const isLocal = m.provider === "local";
+      const s = runtime.sampling;
+      const level = runtime.thinkingLevel ?? "off";
       const prevOnPayload = options?.onPayload;
       return baseStream(m, context, {
         ...options,
-        ...(s.temperature != null ? { temperature: s.temperature } : {}),
-        ...(s.maxTokens != null ? { maxTokens: s.maxTokens } : {}),
+        ...(s?.temperature != null ? { temperature: s.temperature } : {}),
+        ...(s?.maxTokens != null ? { maxTokens: s.maxTokens } : {}),
+        // 云端 prompt caching：长保留 + 会话级缓存键（与 usage 缓存口径一致）。本地无缓存语义。
+        ...(!isLocal ? { cacheRetention: "long" as const, sessionId: threadId } : {}),
         onPayload: async (payload, mm) => {
-          const base = (prevOnPayload ? await prevOnPayload(payload, mm) : undefined) ?? payload;
-          return applySampling(base as Record<string, unknown>, s, isLocal);
+          let body = ((prevOnPayload ? await prevOnPayload(payload, mm) : undefined) ?? payload) as Record<
+            string,
+            unknown
+          >;
+          if (s) body = applySampling(body, s, isLocal);
+          if (isLocal) body = injectLocalThinking(body, level);
+          return body;
         },
       });
     };
@@ -438,6 +447,36 @@ export class SessionHost {
     }
   }
 
+  /**
+   * 手动压缩该 thread 的上下文（pi `session.compact()`）。排进同一 runChain 串行——
+   * 不能与 run 并发动同一 AgentSession。无活动会话（未建/未跑过）则跳过。
+   */
+  async compact(threadId: string): Promise<{ tokensBefore?: number; tokensAfter?: number; skipped?: boolean }> {
+    const prev = this.runChain.get(threadId) ?? Promise.resolve();
+    let release!: () => void;
+    const mine = new Promise<void>((r) => {
+      release = r;
+    });
+    this.runChain.set(threadId, prev.then(() => mine));
+    await prev.catch(() => {});
+    try {
+      // 必须在屏障之后再读 session：在途的换模型 run 会 dispose 旧会话并建新会话；
+      // 在创建中的首轮 run 也要等它建好。提前读会拿到将被弃用/尚不存在的会话。
+      const hosted = this.sessions.get(threadId);
+      if (!hosted) return { skipped: true };
+      // 清掉上一轮残留的采样/思考档位，避免压缩总结的 LLM 调用继承小 maxTokens 等而产出残缺总结。
+      hosted.runtime.sampling = undefined;
+      hosted.runtime.thinkingLevel = "off";
+      const r = await hosted.session.compact();
+      return {
+        ...(r.tokensBefore != null ? { tokensBefore: r.tokensBefore } : {}),
+        ...(r.estimatedTokensAfter != null ? { tokensAfter: r.estimatedTokensAfter } : {}),
+      };
+    } finally {
+      release();
+    }
+  }
+
   private async *runOne(input: EwAgentRunInput): AsyncGenerator<AgentEvent> {
     const workspace = input.workspace ?? false;
     const memoryScope = input.memoryScope ?? GLOBAL_SCOPE;
@@ -454,7 +493,11 @@ export class SessionHost {
     hosted.runtime.mode = input.approvalMode ?? "approve-each";
     hosted.runtime.approval = input.approval;
     hosted.runtime.sampling = input.sampling; // 采样参数（streamFn 包装读取）
+    hosted.runtime.thinkingLevel = input.thinkingLevel ?? "off"; // 思考档位（本地 streamFn 注入读取）
     hosted.runtime.aborted = false; // 本轮是否被用户取消（取消则跳过记忆抽取 + 回滚上下文）
+    // 云端真分级思考：pi setThinkingLevel 驱动 thinkingBudgets（自动 clamp 到模型能力；本地 reasoning=false
+    // 会被 clamp 到 off，实际由 streamFn 的 injectLocalThinking 注入 llama.cpp 思考参数生效）。幂等：仅变化才存盘。
+    session.setThinkingLevel(hosted.runtime.thinkingLevel);
 
     // 用户取消「不计入上下文」：快照本轮 prompt 前的会话消息，取消时回滚到此（移除本轮用户消息 + 部分助手输出）。
     const snapshot = session.agent.state.messages.slice();
@@ -486,7 +529,9 @@ export class SessionHost {
     const unsub = session.subscribe((ev) => {
       try {
         for (const m of mapSessionEvent(ev)) push(m);
-        if (ev.type === "agent_end") {
+        // 自动重试 / 自动压缩会先发 agent_end{willRetry:true} 再 continue —— 此时不能终止本轮，
+        // 否则吞掉重试/压缩后的续写。只在真正收尾（willRetry=false）时结束。
+        if (ev.type === "agent_end" && !ev.willRetry) {
           done = true;
           wake();
         }
@@ -497,8 +542,11 @@ export class SessionHost {
       }
     });
 
-    // 思考开关（Qwen3 约定）：注入 /think 或 /no_think 给模型；不改持久化的原始用户消息。
-    const directive = input.think === true ? " /think" : input.think === false ? " /no_think" : "";
+    // 思考：云端经 setThinkingLevel，本地经 streamFn 注入 payload（enable_thinking/thinking_budget_tokens）。
+    // 本地额外补 /think·/no_think 文本兜底——若 llama.cpp 构建不认 payload 字段，文本指令仍能可靠开/关
+    // （Qwen3 约定；与 payload 同向不冲突）。云端不注入文本。
+    const isLocal = !!this.deps.local.baseUrlFor(input.modelId);
+    const directive = isLocal ? (hosted.runtime.thinkingLevel === "off" ? " /no_think" : " /think") : "";
     const promptText = directive ? `${input.text}${directive}` : input.text;
     const promptDone = session
       .prompt(promptText, input.images?.length ? { images: input.images } : undefined)
@@ -629,9 +677,34 @@ export function mapSessionEvent(ev: AgentSessionEvent): AgentEvent[] {
       return [];
     }
     case "agent_end": {
+      if (ev.willRetry) return []; // 重试/压缩续写在即，别发提前的 final
       const text = lastAssistantText(ev.messages);
       return [{ type: "final", message: { role: "assistant", content: text } }];
     }
+    case "auto_retry_start":
+      return [
+        {
+          type: "retry",
+          attempt: ev.attempt,
+          maxAttempts: ev.maxAttempts,
+          ...(ev.delayMs != null ? { delayMs: ev.delayMs } : {}),
+          ...(ev.errorMessage ? { message: ev.errorMessage } : {}),
+        },
+      ];
+    case "compaction_start":
+      return [{ type: "compaction", phase: "start", reason: ev.reason }];
+    case "compaction_end":
+      return [
+        {
+          type: "compaction",
+          phase: "end",
+          reason: ev.reason,
+          // ok=false：中止或无结果（失败）—— UI 据此区分「已压缩」与「压缩未完成」，不谎报成功。
+          ok: !ev.aborted && ev.result != null,
+          ...(ev.result?.tokensBefore != null ? { tokensBefore: ev.result.tokensBefore } : {}),
+          ...(ev.result?.estimatedTokensAfter != null ? { tokensAfter: ev.result.estimatedTokensAfter } : {}),
+        },
+      ];
     default:
       return [];
   }
@@ -652,6 +725,25 @@ export function applySampling(body: Record<string, unknown>, s: SamplingParams, 
     if (s.repeatPenalty != null) out.repeat_penalty = s.repeatPenalty;
   }
   return out;
+}
+
+/** 思考档位 → 本地思考预算（token）。off=0 关思考；其余分级。常量可按模型/经验调。 */
+const THINK_BUDGET: Record<ThinkLevel, number> = { off: 0, low: 1024, medium: 4096, high: 16384 };
+
+/**
+ * 本地（llama.cpp / llama.app）思考注入：往 /v1/chat/completions 请求体写思考开关 + 预算。
+ * - chat_template_kwargs.enable_thinking：开/关思考（Qwen3 等混合模型识别）。
+ * - thinking_budget_tokens：思考预算（顶层字段，仅在 router 未设 --reasoning-budget 时生效，我们未设）。
+ * 字段名/语义随 llama.cpp 版本有别，需真机校准；不被接受时模型回退默认行为，不报错。
+ */
+export function injectLocalThinking(body: Record<string, unknown>, level: ThinkLevel): Record<string, unknown> {
+  const on = level !== "off";
+  const prevKwargs = (body.chat_template_kwargs as Record<string, unknown> | undefined) ?? {};
+  return {
+    ...body,
+    chat_template_kwargs: { ...prevKwargs, enable_thinking: on },
+    thinking_budget_tokens: THINK_BUDGET[level],
+  };
 }
 
 function safeStringify(v: unknown): string {

@@ -16,6 +16,7 @@ import type {
   Project,
   SamplingParams,
   Skill,
+  ThinkLevel,
 } from "@ew/shared";
 
 export type { Project, ApprovalMode } from "@ew/shared";
@@ -286,7 +287,7 @@ export class EasyWorkClient {
       history: ChatMessage[];
       excludeTools?: string[];
       excludeSkills?: string[];
-      think?: boolean;
+      thinkingLevel?: ThinkLevel;
       sampling?: SamplingParams;
       kb?: boolean;
       kbId?: string;
@@ -295,6 +296,11 @@ export class EasyWorkClient {
     init?: { signal?: AbortSignal },
   ): AsyncIterable<AgentEvent> {
     return this.streamSSE<AgentEvent>("/agent/run", input, init);
+  }
+
+  /** 手动压缩会话上下文（pi compact）；无活动会话则 {skipped:true}。 */
+  compactThread(id: string): Promise<{ tokensBefore?: number; tokensAfter?: number; skipped?: boolean }> {
+    return this.postJSON(`/threads/${encodeURIComponent(id)}/compact`, {});
   }
 
   // ---- 工作区项目 ----

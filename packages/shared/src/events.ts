@@ -26,10 +26,31 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("memory-recall"), count: z.number().int().nonnegative() }),
   z.object({ type: z.literal("usage"), usage: UsageSchema }),
+  // 自动重试（provider 抖动时 pi 自带退避重试）：attempt/maxAttempts 从 1 计。
+  z.object({
+    type: z.literal("retry"),
+    attempt: z.number().int().positive(),
+    maxAttempts: z.number().int().positive(),
+    delayMs: z.number().int().nonnegative().optional(),
+    message: z.string().optional(),
+  }),
+  // 上下文压缩（自动阈值 / 溢出 / 手动）：phase=start|end；ok=false 表示压缩中止/失败（end 时）。
+  z.object({
+    type: z.literal("compaction"),
+    phase: z.enum(["start", "end"]),
+    reason: z.string().optional(),
+    ok: z.boolean().optional(),
+    tokensBefore: z.number().int().nonnegative().optional(),
+    tokensAfter: z.number().int().nonnegative().optional(),
+  }),
   z.object({ type: z.literal("final"), message: ChatMessageSchema }),
   z.object({ type: z.literal("error"), message: z.string() }),
 ]);
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
+
+/** 思考档位（对外 4 档；映射到 pi 的 ThinkingLevel off/low/medium/high）。 */
+export const ThinkLevelSchema = z.enum(["off", "low", "medium", "high"]);
+export type ThinkLevel = z.infer<typeof ThinkLevelSchema>;
 
 /** Agent 运行输入。 */
 /** 采样参数（透传给推理引擎；本地 llama.cpp 支持 top_k/min_p/repeat_penalty 扩展字段）。 */

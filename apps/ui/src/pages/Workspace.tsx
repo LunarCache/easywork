@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import type { ApprovalMode, ChatMessage, Project } from "@ew/shared";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ApprovalMode, ChatMessage, Project, ThinkLevel } from "@ew/shared";
 import type { GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
-import { loadDisabledSkills } from "../lib/prefs.js";
+import { loadDisabledSkills, loadThink, saveThink } from "../lib/prefs.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { SideDock } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
+import { useSlashPalette } from "../components/SlashPalette.js";
+import { THINK_LABEL, nextThink } from "../lib/slash.js";
 import {
   applyAgentEvent,
   messageText,
@@ -24,6 +26,7 @@ import {
   ChevronDownIcon,
   CheckIcon,
   PlusBtnIcon,
+  ThinkIcon,
   XIcon,
 } from "../icons.js";
 
@@ -65,6 +68,8 @@ export function Workspace({
   const [msgs, setMsgs] = useState<UiMsg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [thinkLevel, setThinkLevel] = useState<ThinkLevel>("off");
+  const [notice, setNotice] = useState<string | null>(null);
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [git, setGit] = useState<GitStatus>({ repo: false, files: [] });
   const [remote, setRemote] = useState<GitRemoteInfo>({ hasRemote: false, hasUpstream: false, ahead: 0, behind: 0 });
@@ -94,6 +99,31 @@ export function Workspace({
   // 模型列表变化时校正选中项：当前模型被卸载/移除 → 退回首个可用或清空。
   if (model && !models.includes(model)) setModel(models[0] ?? "");
   else if (model === "" && models.length > 0) setModel(models[0]!);
+
+  useEffect(() => {
+    setThinkLevel(loadThink(model));
+  }, [model]);
+  const changeThink = useCallback(
+    (lv: ThinkLevel) => {
+      setThinkLevel(lv);
+      saveThink(model, lv);
+    },
+    [model],
+  );
+  const cycleThink = () => changeThink(nextThink(thinkLevel));
+  const doCompact = useCallback(() => {
+    setNotice("压缩上下文中…");
+    void getClient()
+      .compactThread(threadId)
+      .then((r) => setNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
+      .catch(() => setNotice("压缩失败"));
+  }, [threadId]);
+  const slash = useSlashPalette(input, setInput, {
+    models,
+    onThink: changeThink,
+    onModel: setModel,
+    onCompact: doCompact,
+  });
 
   const refreshWsFiles = async () => {
     try {
@@ -207,11 +237,17 @@ export function Workspace({
     if (pendingMode.current) await pendingMode.current.catch(() => {});
     try {
       for await (const ev of getClient().runAgent(
-        { threadId, model, history, projectId: project.id, ...(excludeSkills.length ? { excludeSkills } : {}) },
+        { threadId, model, history, projectId: project.id, thinkingLevel: thinkLevel, ...(excludeSkills.length ? { excludeSkills } : {}) },
         { signal: ac.signal },
       )) {
         if (ev.type === "approval-request") setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });
-        else if (ev.type === "final") apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
+        else if (ev.type === "retry") setNotice(`重试中 (${ev.attempt}/${ev.maxAttempts})…`);
+        else if (ev.type === "compaction")
+          setNotice(ev.phase === "start" ? "压缩上下文中…" : ev.ok === false ? "压缩未完成" : "已压缩上下文");
+        else if (ev.type === "text" || ev.type === "reasoning") {
+          setNotice(null);
+          apply((m) => applyAgentEvent(m, ev));
+        } else if (ev.type === "final") apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
         else if (ev.type === "error") apply((m) => ({ ...m, raw: `${m.raw}\n\n[错误] ${ev.message}` }));
         else if (ev.type === "tool-end") {
           apply((m) => applyAgentEvent(m, ev));
@@ -230,6 +266,7 @@ export function Workspace({
         apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
     } finally {
       setBusy(false);
+      setNotice(null); // 本轮收尾即清掉瞬态提示，避免以工具/错误结尾时残留
     }
   };
 
@@ -305,12 +342,14 @@ export function Workspace({
                 e.target.value = "";
               }}
             />
+            {slash.palette}
             <textarea
               value={input}
               rows={1}
-              placeholder={`在「${project.name}」里让 AI 干活…`}
+              placeholder={`在「${project.name}」里让 AI 干活…（/ 唤起命令）`}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
+                if (slash.onKeyDown(e)) return;
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   void send();
@@ -320,6 +359,14 @@ export function Workspace({
             <div className="composer-bar">
               <button className="cbtn" title="上传图片（需视觉模型）" onClick={() => fileRef.current?.click()}>
                 <PlusBtnIcon size={18} />
+              </button>
+              <button
+                className={`cchip ${thinkLevel !== "off" ? "on" : ""}`}
+                onClick={cycleThink}
+                title="思考档位（点击循环：关/低/中/高）"
+              >
+                <ThinkIcon size={15} />
+                <span className="cchip-lvl">{THINK_LABEL[thinkLevel]}</span>
               </button>
               <div className="perm-wrap">
                 <button className="perm-pill" onClick={() => setPermOpen((v) => !v)} title="Approval policy">
@@ -356,6 +403,7 @@ export function Workspace({
                 <ArrowUpIcon size={18} />
               </button>
             </div>
+            {notice && <div className="composer-note"><span className="composer-status">{notice}</span></div>}
           </div>
         </footer>
       </div>

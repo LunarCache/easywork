@@ -1,5 +1,7 @@
 // 采样参数按「模型」保存（每模型独立覆盖）；Agent 配置全局。均持久化到 localStorage。
 
+import type { ThinkLevel } from "@ew/shared";
+
 export interface Sampling {
   temperature?: number;
   topP?: number;
@@ -39,6 +41,31 @@ export function saveSampling(model: string, s: Sampling): void {
   }
 }
 
+
+// 思考档位按「模型」保存（每模型独立；默认 off——云端思考更慢更贵，本地开一次即记住）。
+const THINK_KEY = "ew.think"; // Record<modelId, ThinkLevel>
+export function loadThink(model: string): ThinkLevel {
+  if (!model) return "off";
+  try {
+    const raw = localStorage.getItem(THINK_KEY);
+    const map = raw ? (JSON.parse(raw) as Record<string, ThinkLevel>) : {};
+    return map[model] ?? "off";
+  } catch {
+    return "off";
+  }
+}
+export function saveThink(model: string, level: ThinkLevel): void {
+  if (!model) return;
+  try {
+    const raw = localStorage.getItem(THINK_KEY);
+    const map = raw ? (JSON.parse(raw) as Record<string, ThinkLevel>) : {};
+    if (level === "off") delete map[model];
+    else map[model] = level;
+    localStorage.setItem(THINK_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
 
 // 被禁用的 Skill 名称（按名传给 runAgent.excludeSkills，过滤 pi 发现的 skills）。
 const DISABLED_SKILLS_KEY = "ew.disabledSkills";
