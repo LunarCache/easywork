@@ -45,6 +45,7 @@ export {
   FileImage as FileImageIcon,
   FileTerminal as FileTerminalIcon,
   ChevronDown as ChevronDownIcon,
+  Clock as ClockIcon,
   ShieldCheck as ShieldIcon,
   RefreshCw as RefreshIcon,
   GitBranch as GitBranchIcon,

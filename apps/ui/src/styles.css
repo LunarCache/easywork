@@ -832,7 +832,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
    聊天
    ================================================================ */
 .chat-wrap { flex: 1; position: relative; display: flex; min-height: 0; min-width: 0; overflow: hidden; }
-.chat { flex: 1; display: flex; flex-direction: column; height: 100%; min-width: 0; }
+.chat { flex: 1; display: flex; flex-direction: column; height: 100%; min-width: 0; position: relative; }
 .bar { padding: 13px 24px; display: flex; align-items: center; gap: 9px; }
 .mdot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .mdot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15); }
@@ -1007,6 +1007,25 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .cv-changes-badge { width: 20px; height: 20px; border-radius: var(--r-sm); color: #fff; font-family: var(--font-mono); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex: none; }
 .cv-changes-name { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; color: var(--tx-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-changes-stat { font-family: var(--font-mono); font-size: 12px; flex: none; }
+
+/* —— 工作日志（轮内「过程」折叠容器：时钟 + 已工作 N 分，默认折叠，只露最终答复）—— */
+.cv-worklog { margin: 2px 0 6px; }
+.cv-worklog-h { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--tx-2); }
+.cv-worklog-h::-webkit-details-marker { display: none; }
+.cv-worklog-ico { color: var(--tx-2); flex: none; }
+.cv-worklog-label { color: var(--tx-1); font-weight: 600; }
+.cv-worklog-chev { color: var(--tx-2); flex: none; margin-left: auto; opacity: 0; transition: transform 0.15s var(--ease), opacity 0.15s var(--ease); }
+.cv-worklog-h:hover .cv-worklog-chev { opacity: 0.6; }
+.cv-worklog[open] > .cv-worklog-h .cv-worklog-chev { transform: rotate(90deg); opacity: 0.6; }
+.cv-worklog-body { margin: 4px 0 2px 6px; padding-left: 14px; border-left: 1px solid var(--border-soft); }
+
+/* 助手消息操作行的时间戳 */
+.cv-msg-time { font-family: var(--font-mono); font-size: 11px; color: var(--tx-2); margin-left: 4px; }
+
+/* —— 跳到最新浮动按钮（消息区右下，离底才出现）—— */
+.jump-bottom { position: absolute; right: 26px; bottom: 92px; z-index: 6; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--bg-elev); color: var(--tx-1); border: 1px solid var(--border); box-shadow: var(--shadow-1); cursor: pointer; transition: background 0.15s var(--ease), color 0.15s var(--ease), transform 0.15s var(--ease); }
+.jump-bottom:hover { background: var(--bg-hover); color: var(--tx-0); transform: translateY(-1px); }
+
 /* web 搜索来源 chips（在工具卡折叠体内） */
 .cv-search-chips { display: flex; flex-wrap: wrap; gap: 7px; padding: 10px 12px; }
 .msg.user .text { background: var(--color-bg-user-msg); color: var(--color-text-user-msg); border: 0; border-radius: 16px 4px 16px 16px; box-shadow: var(--shadow-1); }
@@ -1248,14 +1267,17 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
    ================================================================ */
 /* 审批：对话栏上方内嵌卡片（非弹层），与 composer 横向对齐、从下方滑入。 */
 .approval-wrap { padding: 0 clamp(16px, 7%, 130px); margin-bottom: 4px; }
-.approval-card { background: var(--surface); border: 1px solid var(--acc-bd); border-radius: var(--r-lg); box-shadow: var(--shadow-2); padding: 13px 15px; animation: approvalUp 0.18s var(--ease); }
-@keyframes approvalUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-.approval-title { font-weight: 700; font-size: 14px; font-family: var(--font-head); }
-.approval-tool { display: flex; align-items: center; gap: 6px; margin: 8px 0 6px; font-size: 13px; color: var(--text-2); }
-.approval-tool svg { color: var(--accent); }
-.approval-args { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r); padding: 8px 10px; font-size: 12px; font-family: var(--font-mono); max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0 0 12px; }
-.approval-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.approval-actions button { padding: 7px 14px; font-size: 13px; }
+.approval-card { background: var(--bg-elev); border: 1px solid var(--acc-bd); border-radius: var(--r-lg); box-shadow: var(--shadow-1); padding: 9px 12px; animation: approvalUp 0.16s var(--ease); }
+@keyframes approvalUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* 头行：盾牌 + 「允许运行 工具名？」+ 右侧紧凑按钮，单行 */
+.approval-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--tx-1); }
+.approval-ico { color: var(--acc); flex: none; }
+.approval-q { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-tool-name { font-family: var(--font-mono); font-size: 12.5px; color: var(--acc); background: var(--acc-weak); border-radius: var(--r-sm); padding: 1px 6px; }
+.approval-actions { display: flex; gap: 6px; margin-left: auto; flex: none; }
+.approval-actions button { padding: 5px 12px; font-size: 12.5px; }
+/* 参数预览：单行省略、悬停看全（title），淡灰 mono，无重框 */
+.approval-arg { margin: 6px 0 0 23px; font-family: var(--font-mono); font-size: 12px; color: var(--tx-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* RAG 引用来源 */
 .citations { margin: 6px 0 10px; }
@@ -1326,7 +1348,7 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
    工作区
    ================================================================ */
 .workspace { position: relative; display: flex; height: 100%; min-height: 0; overflow: hidden; }
-.ws-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ws-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
 .ws-review-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 4px 10px; border-radius: var(--r); background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); }
 .ws-review-toggle.on { background: var(--accent-soft); color: var(--accent); border-color: var(--color-border-focus); }
 .ws-review-toggle:hover { background: var(--surface-2); }

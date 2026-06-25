@@ -8,6 +8,7 @@ import { fileType } from "../lib/filetype.js";
 import {
   BrainIcon,
   ChevronIcon,
+  ClockIcon,
   SearchIcon,
   GlobeIcon,
   WrenchIcon,
@@ -27,6 +28,15 @@ function fmtTime(ms: number): string {
   } catch {
     return "";
   }
+}
+
+/** 本轮耗时 → 「已工作 N 分 M 秒」（<60s 只显秒）。 */
+function fmtWork(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `已工作 ${s} 秒`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r ? `已工作 ${m} 分 ${r} 秒` : `已工作 ${m} 分`;
 }
 
 function host(url: string): string {
@@ -710,44 +720,66 @@ export function MessageStream({
               <div className="cv-head">
                 <span className="cv-name">AI assistant</span>
               </div>
-              {groupExplore(blocks).map((it) => {
-                if (it.kind === "explore") {
-                  return <ExploreGroup key={`x${it.lastBi}`} tools={it.tools} />;
-                }
-                const b = it.block;
-                const bi = it.bi;
-                if (b.kind === "reasoning") {
-                  const liveThis = live && bi === lastIdx;
-                  const dur = b.end ? (b.end - b.start) / 1000 : null;
-                  const statusLabel = liveThis
-                    ? "思考中…"
-                    : dur != null
-                      ? `${dur < 1 ? "<1" : Math.round(dur)} 秒`
-                      : "完成";
+              {(() => {
+                const items = groupExplore(blocks);
+                // 一条「过程」项 = 探索组 / 思考 / 非文本工具（编辑·运行·web_search）；末尾的文本块是最终答复。
+                let lastProc = -1;
+                items.forEach((it, idx) => {
+                  if (it.kind === "explore" || (it.kind === "block" && it.block.kind !== "text")) lastProc = idx;
+                });
+                const renderItem = (it: RenderItem): ReactNode => {
+                  if (it.kind === "explore") return <ExploreGroup key={`x${it.lastBi}`} tools={it.tools} />;
+                  const b = it.block;
+                  const bi = it.bi;
+                  if (b.kind === "reasoning") {
+                    const liveThis = live && bi === lastIdx;
+                    const dur = b.end ? (b.end - b.start) / 1000 : null;
+                    const statusLabel = liveThis
+                      ? "思考中…"
+                      : dur != null
+                        ? `${dur < 1 ? "<1" : Math.round(dur)} 秒`
+                        : "完成";
+                    return (
+                      <div key={bi} className="cv-xwrap think">
+                        <details className="cv-x think" open={liveThis}>
+                          <summary className="cv-xhead">
+                            <BrainIcon size={14} className="cv-xico" />
+                            <span className="cv-xverb">思考</span>
+                            <span className="cv-xsum">· {statusLabel}</span>
+                            <ChevronIcon size={12} className="cv-xchev" />
+                          </summary>
+                          <div className="cv-xbody reason">{b.text}</div>
+                        </details>
+                      </div>
+                    );
+                  }
+                  if (b.kind === "tool") return <ToolView key={bi} t={b.tool} onOpenUrl={onOpenUrl} />;
                   return (
-                    <div key={bi} className="cv-xwrap think">
-                      <details className="cv-x think" open={liveThis}>
-                        <summary className="cv-xhead">
-                          <BrainIcon size={14} className="cv-xico" />
-                          <span className="cv-xverb">思考</span>
-                          <span className="cv-xsum">· {statusLabel}</span>
-                          <ChevronIcon size={12} className="cv-xchev" />
-                        </summary>
-                        <div className="cv-xbody reason">{b.text}</div>
-                      </details>
+                    <div key={bi} className="text md">
+                      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ a: mdLink, pre: CodeBlock }}>
+                        {b.text}
+                      </Markdown>
+                      {live && bi === lastIdx && <span className="cursor" />}
                     </div>
                   );
-                }
-                if (b.kind === "tool") return <ToolView key={bi} t={b.tool} onOpenUrl={onOpenUrl} />;
+                };
+                // 无过程（纯文本答复）→ 不套工作日志，直接渲染。
+                if (lastProc < 0) return <>{items.map(renderItem)}</>;
+                const workMs = m.start != null ? (m.end ?? (live ? Date.now() : m.start)) - m.start : 0;
                 return (
-                  <div key={bi} className="text md">
-                    <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ a: mdLink, pre: CodeBlock }}>
-                      {b.text}
-                    </Markdown>
-                    {live && bi === lastIdx && <span className="cursor" />}
-                  </div>
+                  <>
+                    <details className="cv-worklog" open={live}>
+                      <summary className="cv-worklog-h">
+                        <ClockIcon size={13} className="cv-worklog-ico" />
+                        <span className="cv-worklog-label">{live ? "工作中…" : fmtWork(workMs)}</span>
+                        <ChevronIcon size={12} className="cv-worklog-chev" />
+                      </summary>
+                      <div className="cv-worklog-body">{items.slice(0, lastProc + 1).map(renderItem)}</div>
+                    </details>
+                    {items.slice(lastProc + 1).map(renderItem)}
+                  </>
                 );
-              })}
+              })()}
               {(() => {
                 const edits = aggregateEdits(blocks);
                 if (edits.length === 0) return null;
@@ -788,6 +820,7 @@ export function MessageStream({
               {answer && !live && (
                 <div className="cv-actions">
                   <CopyButton text={answer} className="cv-action" label="复制" />
+                  {(m.end ?? m.start) != null && <span className="cv-msg-time">{fmtTime((m.end ?? m.start)!)}</span>}
                 </div>
               )}
               {blocks.length === 0 && live && (

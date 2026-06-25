@@ -43,6 +43,8 @@ export interface UiMsg {
   at?: number;
   start?: number;
   thinkEnd?: number;
+  /** 本轮结束时刻（epoch ms），用于「已工作 N 分」耗时；运行中未设。 */
+  end?: number;
   /** 本轮被用户取消（部分输出，不计入上下文/历史）。 */
   cancelled?: boolean;
 }

@@ -4,6 +4,7 @@ import type { GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { loadDisabledSkills, loadThink, saveThink } from "../lib/prefs.js";
 import { MessageStream } from "../components/MessageStream.js";
+import { ApprovalCard } from "../components/ApprovalCard.js";
 import { SideDock } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
@@ -21,7 +22,6 @@ import {
 import {
   ArrowUpIcon,
   TerminalIcon,
-  WrenchIcon,
   ShieldIcon,
   ChevronDownIcon,
   CheckIcon,
@@ -178,8 +178,19 @@ export function Workspace({
     };
   }, [threadId]);
 
+  // 仅当已在底部附近才自动滚到底；离底则显示「跳到最新」浮钮。
+  const atBottomRef = useRef(true);
+  const [showJump, setShowJump] = useState(false);
+  const onMessagesScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const at = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    atBottomRef.current = at;
+    setShowJump(!at);
+  };
+  const jumpToBottom = () => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    if (atBottomRef.current) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [msgs]);
 
   // 卸载（切换工作区会因 key 重挂载）时中断在途的 agent 流。
@@ -285,6 +296,7 @@ export function Workspace({
       if (!ac.signal.aborted)
         apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
     } finally {
+      apply((m) => (m.end ? m : { ...m, end: Date.now() })); // 盖本轮结束时刻 → 「已工作 N 分」
       setBusy(false);
       setNotice(null); // 本轮收尾即清掉瞬态提示，避免以工具/错误结尾时残留
     }
@@ -323,7 +335,7 @@ export function Workspace({
           <span className="bar-spacer" />
         </header>
 
-        <div className="messages" ref={scrollRef}>
+        <div className="messages" ref={scrollRef} onScroll={onMessagesScroll}>
           {msgs.length === 0 && (
             <div className="empty">
               <div className="ring">
@@ -352,26 +364,14 @@ export function Workspace({
             onEdit={editRetry}
           />
         </div>
+        {showJump && (
+          <button className="jump-bottom" title="跳到最新" onClick={jumpToBottom}>
+            <ChevronDownIcon size={18} />
+          </button>
+        )}
 
         {approval && (
-          <div className="approval-wrap">
-            <div className="approval-card">
-              <div className="approval-title">允许运行工具？</div>
-              <div className="approval-tool">
-                <WrenchIcon size={14} /> <b>{approval.toolName}</b>
-              </div>
-              <pre className="approval-args">{JSON.stringify(approval.args, null, 2)}</pre>
-              <div className="approval-actions">
-                <button className="btn-ghost" onClick={() => void respondApproval("deny")}>
-                  拒绝
-                </button>
-                <button className="btn-ghost" onClick={() => void respondApproval("approve-always")}>
-                  本会话总是允许
-                </button>
-                <button onClick={() => void respondApproval("approve")}>允许</button>
-              </div>
-            </div>
-          </div>
+          <ApprovalCard toolName={approval.toolName} args={approval.args} onRespond={(v) => void respondApproval(v)} />
         )}
         <footer className="composer">
           <div className="composer-box">
