@@ -13,7 +13,10 @@ export interface DefineToolSpec<T> {
 
 /** 用 zod schema 定义一个 Tool：自动生成 JSON Schema 参数 + 入参校验。 */
 export function defineTool<T>(spec: DefineToolSpec<T>): Tool {
-  const parameters = zodToJsonSchema(spec.schema, { target: "openApi3" }) as Record<string, unknown>;
+  // 用 JSON Schema draft-7（numeric exclusiveMinimum）而非 openApi3——后者把 .positive()/.int() 等
+  // 译成布尔 exclusiveMinimum:true（draft-4 风格），严格的 provider（DeepSeek 等）校验工具 schema 时
+  // 报 "true is not of type number" 而 400，导致整轮空输出。draft-7 是 OpenAI/Anthropic/llama.cpp 通用。
+  const parameters = zodToJsonSchema(spec.schema, { target: "jsonSchema7" }) as Record<string, unknown>;
   // 去掉 $schema 等顶层噪声，保留 type/properties/required。
   delete parameters.$schema;
   return {

@@ -32,6 +32,14 @@
 
 ## 里程碑日志
 
+## 2026-06-25（续2）— 修复云端模型「没有输出」（工具 schema 兼容 + 错误不再被吞）
+
+DeepSeek 等严格 provider 下 `/agent/run` 整轮空输出。根因 + 修复：
+- **工具 schema 方言**（`packages/tools/src/define.ts`）：`zodToJsonSchema` 用 `target:"openApi3"` 把 `z.number().int().positive()` 译成 **draft-4 布尔 `exclusiveMinimum:true`**；OpenAI 宽容接受，但 DeepSeek 按 draft-7 校验 → `400 Invalid schema for function 'recall_memory': true is not of type "number"` → 整轮 400。改 `target:"jsonSchema7"`（numeric exclusiveMinimum，OpenAI/Anthropic/llama.cpp 通用）。`/v1` 网关不带工具故不受影响——这也是为何 `/v1` 能跑、agent loop 不能。**既存 bug，与新功能无关。**
+- **错误被吞**（`session-host.ts` mapSessionEvent）：provider 在 agent loop 内报错时，pi 以 `agent_end` 末条 assistant `stopReason:"error"`+`errorMessage` 收尾（非流式 error delta），原映射只发空 `final` → 用户「没有输出」却看不到原因。现 `agent_end` 检测末条 assistant error → 冒泡 `error` 事件。
+- 顺带：prompt caching 收紧到**仅 Anthropic-shaped API**（`cacheRetention`/`sessionId` 是 Anthropic 语义，不发给 OpenAI 兼容 provider）。
+- 实测 DeepSeek 真机正常流式；测试 **210 通过**（+错误冒泡单测）· typecheck 19/19 · lint 0 · build 绿。
+
 ## 2026-06-25（续）— 接入 pi 内核 6 项能力（斜杠命令 / 分级思考 / 切模型 / 压缩 / 重试 / 缓存）
 
 把 pi-coding-agent 已有但未启用的能力接进宿主层。全部用 pi `.d.ts` 核验后实现，后端 + 双 composer。

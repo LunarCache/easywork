@@ -140,6 +140,18 @@ describe("mapSessionEvent", () => {
     const retrying = { type: "agent_end", willRetry: true, messages: [] } as unknown as AgentSessionEvent;
     expect(mapSessionEvent(retrying)).toEqual([]);
   });
+
+  it("agent_end 末条 assistant stopReason=error → 冒泡 error（不吞成空 final）", () => {
+    const ev = {
+      type: "agent_end",
+      willRetry: false,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+        { role: "assistant", content: [], stopReason: "error", errorMessage: "400 Invalid schema" },
+      ],
+    } as unknown as AgentSessionEvent;
+    expect(mapSessionEvent(ev)).toEqual([{ type: "error", message: "400 Invalid schema" }]);
+  });
 });
 
 describe("injectLocalThinking", () => {

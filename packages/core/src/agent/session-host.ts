@@ -392,19 +392,21 @@ export class SessionHost {
     // streamFn 包装（pi 不在 createAgentSession 暴露采样/缓存/本地思考，统一在此注入）：
     // - 采样：temperature/maxTokens 走 StreamOptions；其余经 onPayload 注入请求体（local 扩展字段）。
     // - 本地思考：local 经 onPayload 注入 chat_template_kwargs.enable_thinking + thinking_budget_tokens。
-    // - prompt caching：云端开 cacheRetention=long + sessionId=threadId（会话级缓存）。
+    // - prompt caching：仅 Anthropic-shaped API 开 cacheRetention=long + sessionId（会话级缓存）。
     const baseStream = session.agent.streamFn;
     session.agent.streamFn = (m, context, options) => {
       const isLocal = m.provider === "local";
       const s = runtime.sampling;
       const level = runtime.thinkingLevel ?? "off";
       const prevOnPayload = options?.onPayload;
+      // cacheRetention/sessionId 是 Anthropic prompt-caching 语义；对 OpenAI 兼容 provider（DeepSeek 等）
+      // 强加会触发缓存式 websocket 传输或非法字段，导致**空输出**。OpenAI 系本就服务端自动缓存，无需该参数。
+      const supportsCaching = m.api === "anthropic-messages";
       return baseStream(m, context, {
         ...options,
         ...(s?.temperature != null ? { temperature: s.temperature } : {}),
         ...(s?.maxTokens != null ? { maxTokens: s.maxTokens } : {}),
-        // 云端 prompt caching：长保留 + 会话级缓存键（与 usage 缓存口径一致）。本地无缓存语义。
-        ...(!isLocal ? { cacheRetention: "long" as const, sessionId: threadId } : {}),
+        ...(supportsCaching ? { cacheRetention: "long" as const, sessionId: threadId } : {}),
         onPayload: async (payload, mm) => {
           let body = ((prevOnPayload ? await prevOnPayload(payload, mm) : undefined) ?? payload) as Record<
             string,
@@ -678,6 +680,13 @@ export function mapSessionEvent(ev: AgentSessionEvent): AgentEvent[] {
     }
     case "agent_end": {
       if (ev.willRetry) return []; // 重试/压缩续写在即，别发提前的 final
+      // 末条 assistant 以 error 收尾（如 provider 400/tool schema 拒绝）→ 冒泡为 error 事件，
+      // 否则会被吞成空 final、用户「没有输出」却看不到原因。仅在真正终止（!willRetry）时冒泡。
+      const msgs = ev.messages as Array<{ role?: string; stopReason?: string; errorMessage?: string }>;
+      const lastAsst = [...msgs].reverse().find((m) => m.role === "assistant");
+      if (lastAsst?.stopReason === "error") {
+        return [{ type: "error", message: lastAsst.errorMessage ?? "inference_error" }];
+      }
       const text = lastAssistantText(ev.messages);
       return [{ type: "final", message: { role: "assistant", content: text } }];
     }
