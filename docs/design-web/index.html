@@ -457,6 +457,7 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 共用 MessageStream / SideDock / ModelSelect / composer / 审批卡 / **斜杠命令面板** / **思考分级 chip**。
 - **Chat**：composer `+` 菜单（上传图片 + 联网/知识库 开关，KB 开可选集合）+ 思考档位 chip；右侧 ContextRing + ModelSelect + 参数 + 发送；工件面板（fs 工具后刷新、首件自动开 dock）。
 - **Workspace**：composer 有**审批策略 pill**（改档 PATCH `project.approvalMode`，`send()` 前 await 在途 PATCH 防"切档即发"）+ 思考档位 chip；SideDock 带 git 上下文；mutating 工具后刷 git + ws 文件 + 上报分支给标题栏。
+- **审批卡**（`.approval-wrap`）：危险工具挂起时在 **composer 正上方内嵌弹出**（与输入框同宽、从下滑入），非遮罩弹层——不挡对话；含工具名 + 命令 JSON + 拒绝/本会话总是允许/允许。Chat 与 Workspace 一致。
 - **斜杠命令**（`lib/slash.ts` + `components/SlashPalette.tsx` 的 `useSlashPalette` hook，两 composer 共用）：输入「/」弹两阶段自动补全（命令名→参数）；`onKeyDown` 优先消费 ↑↓/Enter/Tab/Esc。`/think <档位>` 设思考、`/model <名>` 切模型（下一轮 run 带新 modelId，复用 getOrCreate 重建保上下文）、`/compact` 调 `POST /threads/:id/compact`。
 - **思考分级**：composer chip（关/低/中/高，点击循环）+ `/think`；`thinkingLevel` **按模型持久化**（`prefs.ts`，默认 off），run 时随 `runAgent` 下发。
 - **SSE 处理**：`runAgent` 流 → `usage`(驱动环)/`approval-request`(审批卡)/`retry`·`compaction`(状态条瞬态提示，有新 text 即清)/`final`/`error`/其余→`applyAgentEvent` reducer。`AbortController` 卸载或停止时取消（后端回滚 + 不落库，UI 标"已停止·本轮不计入上下文")。**图片**经 FileReader→base64→`{type:"image",mimeType,data}` 内容片段。采样参数**按模型**存。

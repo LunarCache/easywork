@@ -353,6 +353,26 @@ export function Workspace({
           />
         </div>
 
+        {approval && (
+          <div className="approval-wrap">
+            <div className="approval-card">
+              <div className="approval-title">允许运行工具？</div>
+              <div className="approval-tool">
+                <WrenchIcon size={14} /> <b>{approval.toolName}</b>
+              </div>
+              <pre className="approval-args">{JSON.stringify(approval.args, null, 2)}</pre>
+              <div className="approval-actions">
+                <button className="btn-ghost" onClick={() => void respondApproval("deny")}>
+                  拒绝
+                </button>
+                <button className="btn-ghost" onClick={() => void respondApproval("approve-always")}>
+                  本会话总是允许
+                </button>
+                <button onClick={() => void respondApproval("approve")}>允许</button>
+              </div>
+            </div>
+          </div>
+        )}
         <footer className="composer">
           <div className="composer-box">
             {images.length > 0 && (
@@ -460,27 +480,6 @@ export function Workspace({
         target={dockTarget}
         git={{ projectId: project.id, status: git, remote, onRefresh: refreshGit }}
       />
-
-      {approval && (
-        <div className="approval-overlay">
-          <div className="approval-card">
-            <div className="approval-title">允许运行工具？</div>
-            <div className="approval-tool">
-              <WrenchIcon size={14} /> <b>{approval.toolName}</b>
-            </div>
-            <pre className="approval-args">{JSON.stringify(approval.args, null, 2)}</pre>
-            <div className="approval-actions">
-              <button className="btn-ghost" onClick={() => void respondApproval("deny")}>
-                拒绝
-              </button>
-              <button className="btn-ghost" onClick={() => void respondApproval("approve-always")}>
-                本会话总是允许
-              </button>
-              <button onClick={() => void respondApproval("approve")}>允许</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

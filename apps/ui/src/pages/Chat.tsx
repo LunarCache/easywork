@@ -475,7 +475,7 @@ export function Chat({
         />
       </div>
       {approval && (
-        <div className="approval-overlay">
+        <div className="approval-wrap">
           <div className="approval-card">
             <div className="approval-title">允许运行工具？</div>
             <div className="approval-tool">
