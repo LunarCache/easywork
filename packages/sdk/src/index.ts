@@ -288,6 +288,7 @@ export class EasyWorkClient {
       excludeTools?: string[];
       excludeSkills?: string[];
       thinkingLevel?: ThinkLevel;
+      regenerate?: boolean;
       sampling?: SamplingParams;
       kb?: boolean;
       kbId?: string;

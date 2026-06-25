@@ -989,6 +989,13 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .md strong { font-weight: 600; color: var(--text); }
 .md code { font-family: var(--font-mono); font-size: 0.88em; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 1px 5px; }
 .md pre { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 12px 14px; overflow-x: auto; margin: 0 0 10px; }
+/* 代码块外壳：顶栏（语言标签 + 复制）+ 代码区。 */
+.md-code { border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; margin: 0 0 10px; background: var(--surface-2); }
+.md-code-head { display: flex; align-items: center; justify-content: space-between; padding: 3px 6px 3px 12px; border-bottom: 1px solid var(--border); background: var(--bg-hover); }
+.md-code-lang { font-family: var(--font-mono); font-size: 11px; color: var(--tx-2); letter-spacing: .02em; user-select: none; }
+.md-code pre { border: 0; border-radius: 0; margin: 0; background: transparent; }
+.md-code-copy { display: grid; place-items: center; padding: 4px; border-radius: var(--r-sm); background: transparent; color: var(--muted); border: 0; cursor: pointer; transition: color var(--ease) 0.15s; }
+.md-code-copy:hover { color: var(--accent); }
 .md pre code { background: transparent; border: 0; padding: 0; color: inherit; font-size: 12px; }
 .md blockquote { margin: 0 0 10px; padding: 4px 12px; border-left: 3px solid var(--accent-soft); color: var(--text-2); }
 .md table { border-collapse: collapse; margin: 0 0 10px; font-size: 13px; }
@@ -1090,6 +1097,22 @@ details.toolcard[open] > summary .chev { transform: rotate(90deg); }
 .csend.stop:hover { filter: brightness(0.95); }
 /* 已取消标注（助手消息下方） */
 .cancel-note { margin-top: 6px; font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
+/* 消息下方操作行：助手=复制（左）；用户=重试/重新生成（随气泡右对齐，仅末条用户显示）。 */
+.cv-actions { display: flex; align-items: center; gap: 4px; margin-top: 8px; }
+.cv-actions.user { justify-content: flex-end; margin-top: 6px; }
+.cv-action { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: var(--r-sm); background: transparent; color: var(--tx-2); border: 1px solid transparent; font-size: 12px; font-family: var(--font); cursor: pointer; transition: color var(--ease) .15s, background var(--ease) .15s; }
+.cv-action:hover { color: var(--tx-0); background: var(--bg-hover); }
+.cv-action svg { flex: none; }
+/* 用户消息内联编辑（点「编辑」→ 气泡变可编辑框 + 取消/发送）。 */
+.cv-edit { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.cv-edit-area { width: 420px; max-width: 100%; min-height: 38px; resize: vertical; padding: 9px 12px; border-radius: var(--r-lg); border: 1px solid var(--acc-bd); background: var(--bg-elev); color: var(--tx-0); font-family: var(--font); font-size: 14px; line-height: 1.55; }
+.cv-edit-area:focus { outline: none; border-color: var(--acc); }
+.cv-edit-actions { display: flex; gap: 6px; }
+.cv-edit-cancel, .cv-edit-send { padding: 5px 14px; border-radius: var(--r); font-size: 12.5px; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--tx-1); font-family: var(--font); }
+.cv-edit-cancel:hover { background: var(--bg-hover); color: var(--tx-0); }
+.cv-edit-send { background: var(--acc); border-color: var(--acc); color: #fff; }
+.cv-edit-send:hover:not(:disabled) { filter: brightness(1.08); }
+.cv-edit-send:disabled { opacity: .5; cursor: default; }
 .composer-note { text-align: center; font-size: 11px; color: var(--muted); padding: 7px 0 5px; }
 /* 瞬态状态（重试中 / 压缩中 / 已压缩）：替换 composer-note 文案，强调色提示。 */
 .composer-status { color: var(--acc); font-weight: 500; }

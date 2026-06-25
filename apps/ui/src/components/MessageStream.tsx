@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { isValidElement, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -16,6 +16,7 @@ import {
   SparkIcon,
   CopyIcon,
   CheckIcon,
+  RefreshIcon,
 } from "../icons.js";
 
 function fmtTime(ms: number): string {
@@ -50,11 +51,20 @@ function toolSubject(args: string): string {
   }
 }
 
-export function CopyButton({ text }: { text: string }) {
+export function CopyButton({
+  text,
+  className = "msg-action",
+  label,
+}: {
+  text: string;
+  className?: string;
+  /** 提供则按钮带文字（复制后短暂变「已复制」）。 */
+  label?: string;
+}) {
   const [done, setDone] = useState(false);
   return (
     <button
-      className="msg-action"
+      className={className}
       title="复制"
       onClick={() => {
         void navigator.clipboard.writeText(text);
@@ -63,7 +73,35 @@ export function CopyButton({ text }: { text: string }) {
       }}
     >
       {done ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+      {label && <span>{done ? "已复制" : label}</span>}
     </button>
+  );
+}
+
+/** 递归取 React 子树纯文本（highlight.js 高亮后代码是 span 树，取其文本作复制源）。 */
+function codeText(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string") return node;
+  if (typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(codeText).join("");
+  if (isValidElement(node)) return codeText((node.props as { children?: ReactNode }).children);
+  return "";
+}
+
+/** markdown 代码块（react-markdown 的 `pre` 覆写）：顶栏显示语言 + 复制按钮。内联代码不受影响。 */
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const codeEl = Array.isArray(children) ? children.find(isValidElement) : children;
+  const className = isValidElement(codeEl) ? ((codeEl.props as { className?: string }).className ?? "") : "";
+  const lang = /language-([\w-]+)/.exec(className)?.[1] ?? "";
+  const raw = codeText(children).replace(/\n+$/, "");
+  return (
+    <div className="md-code">
+      <div className="md-code-head">
+        <span className="md-code-lang">{lang || "text"}</span>
+        <CopyButton text={raw} className="md-code-copy" />
+      </div>
+      <pre>{children}</pre>
+    </div>
   );
 }
 
@@ -332,12 +370,18 @@ export function MessageStream({
   busy,
   onOpenUrl,
   onOpenFile,
+  onRetry,
+  onEdit,
 }: {
   msgs: UiMsg[];
   busy: boolean;
   onOpenUrl?: (url: string) => void;
   /** 点击「文件改动」卡里的某文件 → 跳转查看其 diff（打开工作台）。 */
   onOpenFile?: (path: string) => void;
+  /** 重试上一次输入（重发最后一条用户消息）。仅最后一条用户消息显示。 */
+  onRetry?: () => void;
+  /** 编辑最后一条用户消息后重发（改文本 → 重新生成）。 */
+  onEdit?: (text: string) => void;
 }) {
   const mdLink = ({ href, children }: { href?: string; children?: ReactNode }) => (
     <a
@@ -351,6 +395,16 @@ export function MessageStream({
       {children}
     </a>
   );
+  // 最后一条用户消息的下标——「编辑 / 重试」只挂它（重新生成上一轮）。
+  const lastUserIdx = msgs.reduce((acc, m, idx) => (m.role === "user" ? idx : acc), -1);
+  // 内联编辑状态：正在编辑的消息下标 + 草稿文本。
+  const [editIdx, setEditIdx] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
+  const submitEdit = () => {
+    if (!editText.trim()) return;
+    onEdit?.(editText);
+    setEditIdx(null);
+  };
   return (
     <>
       {msgs.map((m, i) => {
@@ -369,7 +423,56 @@ export function MessageStream({
                     ))}
                   </div>
                 )}
-                {m.raw && <div className="cv-userbubble">{m.raw}</div>}
+                {i === lastUserIdx && editIdx === i ? (
+                  <div className="cv-edit">
+                    <textarea
+                      className="cv-edit-area"
+                      value={editText}
+                      autoFocus
+                      rows={Math.min(8, editText.split("\n").length)}
+                      onChange={(e) => setEditText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          submitEdit();
+                        } else if (e.key === "Escape") {
+                          setEditIdx(null);
+                        }
+                      }}
+                    />
+                    <div className="cv-edit-actions">
+                      <button className="cv-edit-cancel" onClick={() => setEditIdx(null)}>
+                        取消
+                      </button>
+                      <button className="cv-edit-send" onClick={submitEdit} disabled={!editText.trim()}>
+                        发送
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  m.raw && <div className="cv-userbubble">{m.raw}</div>
+                )}
+                {i === lastUserIdx && !busy && editIdx !== i && (onEdit || onRetry) && (
+                  <div className="cv-actions user">
+                    {onEdit && (
+                      <button
+                        className="cv-action"
+                        title="编辑后重新生成"
+                        onClick={() => {
+                          setEditText(m.raw);
+                          setEditIdx(i);
+                        }}
+                      >
+                        <EditIcon size={14} /> <span>编辑</span>
+                      </button>
+                    )}
+                    {onRetry && (
+                      <button className="cv-action" title="重新生成回答" onClick={onRetry}>
+                        <RefreshIcon size={14} /> <span>重试</span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -416,7 +519,7 @@ export function MessageStream({
                 if (b.kind === "tool") return <ToolView key={bi} t={b.tool} onOpenUrl={onOpenUrl} />;
                 return (
                   <div key={bi} className="text md">
-                    <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ a: mdLink }}>
+                    <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ a: mdLink, pre: CodeBlock }}>
                       {b.text}
                     </Markdown>
                     {live && bi === lastIdx && <span className="cursor" />}
@@ -459,7 +562,11 @@ export function MessageStream({
                   </div>
                 );
               })()}
-              {answer && !live && <CopyButton text={answer} />}
+              {answer && !live && (
+                <div className="cv-actions">
+                  <CopyButton text={answer} className="cv-action" label="复制" />
+                </div>
+              )}
               {blocks.length === 0 && live && (
                 <div className="cv-think">
                   <span />

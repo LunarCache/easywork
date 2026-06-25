@@ -281,13 +281,16 @@ export function Chat({
     el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
   };
 
-  const send = async () => {
-    const text = input.trim();
-    if ((!text && images.length === 0) || !model || busy) return;
-    const sentImages = images;
-    setInput("");
-    setImages([]);
-    if (taRef.current) taRef.current.style.height = "24px";
+  const send = async (over?: { text: string; images: UiImage[]; regenerate?: boolean }) => {
+    const text = (over?.text ?? input).trim();
+    const sentImages = over?.images ?? images;
+    if ((!text && sentImages.length === 0) || !model || busy) return;
+    if (!over) {
+      // 普通发送才清空 composer；重试用上一次输入、不动输入框。
+      setInput("");
+      setImages([]);
+      if (taRef.current) taRef.current.style.height = "24px";
+    }
     setBusy(true);
     const history: ChatMessage[] = msgs.map((m) => ({
       role: m.role,
@@ -301,12 +304,29 @@ export function Chat({
             ...sentImages.map((im) => ({ type: "image" as const, mimeType: im.mimeType, data: im.data })),
           ]
         : text;
+    // 始终把本轮用户消息推进 history —— 后端据 history 末条取本轮 text/images（重新生成也要带原文）。
     history.push({ role: "user", content: userContent });
-    setMsgs((m) => [
-      ...m,
-      { role: "user", raw: text, reasoning: "", tools: [], at: Date.now(), ...(sentImages.length ? { images: sentImages } : {}) },
-      { role: "assistant", raw: "", reasoning: "", tools: [] },
-    ]);
+    if (over?.regenerate) {
+      // 重新生成：UI 保留末条用户消息（编辑场景把其文本更新为本轮 text；普通重试 text 不变），
+      // 移除其后旧助手回答，换成新的空助手（流式目标）。
+      setMsgs((cur) => {
+        const next = cur.slice();
+        for (let k = next.length - 1; k >= 0; k--)
+          if (next[k]!.role === "user") {
+            next[k] = { ...next[k]!, raw: text };
+            break;
+          }
+        while (next.length && next[next.length - 1]!.role === "assistant") next.pop();
+        next.push({ role: "assistant", raw: "", reasoning: "", tools: [] });
+        return next;
+      });
+    } else {
+      setMsgs((m) => [
+        ...m,
+        { role: "user", raw: text, reasoning: "", tools: [], at: Date.now(), ...(sentImages.length ? { images: sentImages } : {}) },
+        { role: "assistant", raw: "", reasoning: "", tools: [] },
+      ]);
+    }
 
     const apply = (fn: (m: UiMsg) => UiMsg) =>
       setMsgs((cur) => {
@@ -329,6 +349,7 @@ export function Chat({
           history,
           excludeTools,
           thinkingLevel: thinkLevel,
+          ...(over?.regenerate ? { regenerate: true } : {}),
           kb,
           ...(kb && kbId ? { kbId } : {}),
           ...(Object.keys(sampling).length ? { sampling } : {}),
@@ -373,6 +394,20 @@ export function Chat({
       if (last && last.role === "assistant") next[next.length - 1] = { ...last, cancelled: true };
       return next;
     });
+  };
+
+  // 重新生成：用最后一条用户输入重跑（不动 composer），UI 替换旧回答，后端回滚上一轮保证上下文正确。
+  const retry = () => {
+    if (busy) return;
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    if (!lastUser) return;
+    void send({ text: lastUser.raw, images: lastUser.images ?? [], regenerate: true });
+  };
+  // 编辑后重发：用改过的文本重跑（= 带新 text 的重新生成；保留原图）。
+  const editRetry = (text: string) => {
+    if (busy || !text.trim()) return;
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    void send({ text, images: lastUser?.images ?? [], regenerate: true });
   };
 
   const respondApproval = async (verdict: "approve" | "approve-always" | "deny") => {
@@ -435,6 +470,8 @@ export function Chat({
             setDockOpen(true);
             setDockTarget({ path: p, nonce: Date.now() });
           }}
+          onRetry={retry}
+          onEdit={editRetry}
         />
       </div>
       {approval && (

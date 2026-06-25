@@ -72,6 +72,8 @@ export interface EwAgentRunInput {
   sampling?: SamplingParams;
   /** 思考档位（off/low/medium/high）：云端经 pi setThinkingLevel；本地经 streamFn 注入 llama.cpp 思考参数。 */
   thinkingLevel?: ThinkLevel;
+  /** 重试/重新生成：先把上一轮（最后一条 user + 其后助手）从 pi 会话回滚，再用本轮 text 重新生成。 */
+  regenerate?: boolean;
   /** 禁用的 Skill 名称：按名从 pi resourceLoader 的 skills 里过滤掉（改变即重建会话）。 */
   excludeSkills?: string[];
 }
@@ -479,6 +481,41 @@ export class SessionHost {
     }
   }
 
+  /**
+   * 把会话上一轮回滚（重新生成用）：定位最后一条 user 消息条目，导航到其父节点 →
+   * 之后 prompt 会从那里另起分支，旧 user+助手成为兄弟分支、不再进上下文（含 JSONL/resume 正确）。
+   * 主路用 pi `navigateTree`；失败兜底为内存截断（仅当轮正确，与 abort 回滚同机制）。
+   */
+  private async rollbackLastUserTurn(session: HostedSession["session"]): Promise<void> {
+    try {
+      const branch = session.sessionManager.getBranch();
+      let lastUser: { id: string; parentId: string | null } | undefined;
+      for (const e of branch) {
+        const m = (e as { type?: string; message?: { role?: string } }).message;
+        if ((e as { type?: string }).type === "message" && m?.role === "user")
+          lastUser = e as { id: string; parentId: string | null };
+      }
+      if (lastUser?.parentId) {
+        await session.navigateTree(lastUser.parentId);
+        return;
+      }
+    } catch {
+      /* 落到内存兜底 */
+    }
+    try {
+      const msgs = session.agent.state.messages as Array<{ role?: string }>;
+      let cut = -1;
+      for (let i = msgs.length - 1; i >= 0; i--)
+        if (msgs[i]?.role === "user") {
+          cut = i;
+          break;
+        }
+      if (cut >= 0) session.agent.state.messages = msgs.slice(0, cut) as typeof session.agent.state.messages;
+    } catch {
+      /* 回滚失败不致命：退化为续问 */
+    }
+  }
+
   private async *runOne(input: EwAgentRunInput): AsyncGenerator<AgentEvent> {
     const workspace = input.workspace ?? false;
     const memoryScope = input.memoryScope ?? GLOBAL_SCOPE;
@@ -500,6 +537,10 @@ export class SessionHost {
     // 云端真分级思考：pi setThinkingLevel 驱动 thinkingBudgets（自动 clamp 到模型能力；本地 reasoning=false
     // 会被 clamp 到 off，实际由 streamFn 的 injectLocalThinking 注入 llama.cpp 思考参数生效）。幂等：仅变化才存盘。
     session.setThinkingLevel(hosted.runtime.thinkingLevel);
+
+    // 重新生成：先把上一轮（最后一条 user + 其后助手）从 pi 会话回滚，再重发同一 text → 全新作答，
+    // 且模型不会看到上一版答案（上下文正确）。须在 snapshot 之前做。
+    if (input.regenerate) await this.rollbackLastUserTurn(session);
 
     // 用户取消「不计入上下文」：快照本轮 prompt 前的会话消息，取消时回滚到此（移除本轮用户消息 + 部分助手输出）。
     const snapshot = session.agent.state.messages.slice();

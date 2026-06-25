@@ -526,6 +526,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     /** 禁用的 Skill 名称（按名过滤 pi resourceLoader 的 skills）。 */
     excludeSkills: z.array(z.string()).optional(),
     thinkingLevel: ThinkLevelSchema.optional(),
+    regenerate: z.boolean().optional(),
     sampling: SamplingParamsSchema.optional(),
     /** 是否启用知识库 RAG（自动注入 + 暴露 search_knowledge_base）。默认关，由聊天「知识库」开关控制。 */
     kb: z.boolean().optional(),
@@ -630,6 +631,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         signal: ac.signal,
         ...(parsed.data.sampling ? { sampling: parsed.data.sampling } : {}),
         ...(parsed.data.thinkingLevel !== undefined ? { thinkingLevel: parsed.data.thinkingLevel } : {}),
+        ...(parsed.data.regenerate ? { regenerate: true } : {}),
         ...(parsed.data.excludeSkills?.length ? { excludeSkills: parsed.data.excludeSkills } : {}),
       })) {
         recorded.push(...recorder.push(ev));
