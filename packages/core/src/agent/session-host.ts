@@ -415,7 +415,7 @@ export class SessionHost {
             unknown
           >;
           if (s) body = applySampling(body, s, isLocal);
-          if (isLocal) body = injectLocalThinking(body, level);
+          body = isLocal ? injectLocalThinking(body, level) : injectCloudThinking(body, level);
           return body;
         },
       });
@@ -794,6 +794,18 @@ export function injectLocalThinking(body: Record<string, unknown>, level: ThinkL
     chat_template_kwargs: { ...prevKwargs, enable_thinking: on },
     thinking_budget_tokens: THINK_BUDGET[level],
   };
+}
+
+/**
+ * 云端混合推理模型（DeepSeek-V4 等 OpenAI 兼容端）思考注入：
+ * - `thinking: { type: "enabled"|"disabled" }`：思考开关（off → 真正关闭，省 reasoning token）。
+ * - `reasoning_effort: low|medium|high`：思考强度（provider 内部映射，如 low/medium→high）。
+ * 这些字段是该类 provider 的扩展（经请求体顶层透传，等价其 OpenAI SDK 的 extra_body）；
+ * 不支持的 provider 会忽略或拒绝——故仅在 streamFn 里对云端注入，且保留 off 时不外发 reasoning 的兜底。
+ */
+export function injectCloudThinking(body: Record<string, unknown>, level: ThinkLevel): Record<string, unknown> {
+  if (level === "off") return { ...body, thinking: { type: "disabled" } };
+  return { ...body, thinking: { type: "enabled" }, reasoning_effort: level };
 }
 
 function safeStringify(v: unknown): string {

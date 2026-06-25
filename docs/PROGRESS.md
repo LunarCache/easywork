@@ -32,6 +32,15 @@
 
 ## 里程碑日志
 
+## 2026-06-25（续3）— 消息交互（复制/重试/编辑/重新生成）+ 思考开关真关
+
+- **代码块**：`pre` 覆写 `CodeBlock`，顶栏语言标签 + 复制（取高亮 span 树纯文本）；内联代码不受影响。
+- **消息操作行**（下移，取代右上悬浮）：助手下方复制整条；用户末条下方编辑 + 重试。
+- **重新生成**（重试/编辑共用）：后端 `regenerate` → `rollbackLastUserTurn` 用 pi `navigateTree` 回滚上一轮（旧问答分叉离开上下文，含 JSONL/resume 正确）；前端替换旧答案非追加、composer 不动。修复 bug：重试漏推 `history` 致后端取到空 text、模型「以为用户没说话」——`history` 始终带原文。
+- **思考开关真关**：之前 `off` 仍思考。根因——用错了参数键。修复：**云端**注入 `thinking:{type:"enabled"/"disabled"}` + `reasoning_effort`（DeepSeek-V4 等 OpenAI-SDK 思考模型的扩展，off 真关、省 reasoning token）；**本地**用 llama.cpp 的 `chat_template_kwargs.enable_thinking` + `thinking_budget_tokens`。实测 deepseek `off`→reasoning 0、`high`→reasoning 正常。
+- **代码块复制 bug**：复制源取自 highlight.js 高亮后的 span 树纯文本，确保是干净源码。
+- 测试 **212 通过**（+ injectCloudThinking / mapSessionEvent error 等）· typecheck 19/19 · lint 0 · build 绿；Playwright 逐项验证（代码块、复制/重试/编辑、上下文回滚、思考开关）。
+
 ## 2026-06-25（续2）— 修复云端模型「没有输出」（工具 schema 兼容 + 错误不再被吞）
 
 DeepSeek 等严格 provider 下 `/agent/run` 整轮空输出。根因 + 修复：

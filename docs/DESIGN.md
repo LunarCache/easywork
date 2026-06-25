@@ -155,7 +155,10 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 **streamFn 包装（采样 + 思考 + 缓存）**：pi 不在 `createAgentSession` 暴露这些，故统一包装 `session.agent.streamFn`：
 - **采样**：`temperature/maxTokens` 走 StreamOptions，其余经 `onPayload` 注入请求体；`top_k/min_p/repeat_penalty` 是 llama.cpp 扩展，**仅 `provider==="local"` 注入**。
-- **思考（分级）**：每轮 `session.setThinkingLevel(level)`（云端 reasoning 模型真分级；非 reasoning 模型 pi 自动 clamp）；**本地** provider 经 `injectLocalThinking`（`onPayload`）写 `chat_template_kwargs.enable_thinking` + `thinking_budget_tokens`（off=0/low=1024/medium=4096/high=16384），取代旧 `/think` 文本 hack。
+- **思考（分级，off/low/medium/high）**：每轮 `session.setThinkingLevel(level)`（pi 已登记的推理模型据此真分级）+ `onPayload` 注入 provider 实际识别的参数：
+  - **云端** `injectCloudThinking`：`thinking:{type:"enabled"/"disabled"}`（off→真关，省 reasoning token）+ `reasoning_effort:<档位>`（DeepSeek-V4 等 OpenAI-SDK 思考模型扩展，经请求体顶层透传 = 其 SDK 的 extra_body）。
+  - **本地** `injectLocalThinking`：`chat_template_kwargs.enable_thinking`（llama.cpp 思考开关）+ `thinking_budget_tokens`（off=0/low=1024/medium=4096/high=16384）。取代旧 `/think` 文本 hack。
+  - 不支持该字段的 provider 会忽略/拒绝——故按 local/cloud 分别注入；不在显示层藏 reasoning（参数层即关）。
 - **prompt caching**：**仅云端**加 `cacheRetention:"long"` + `sessionId:threadId`（会话级缓存，与 usage 的 cacheRead/Write 口径一致）；本地无缓存语义。
 - **自动重试**：`createAgentSession` 后 `setAutoRetryEnabled(true)`，provider 抖动/限流时 pi 自带退避重试。
 
@@ -356,6 +359,9 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 ### 13.4 MessageStream
 
 用户右对齐气泡；**助手无逐行头像、纯 prose**（react-markdown + remark-gfm + rehype-highlight，外链改路由到 dock 内嵌预览而非跳走 webview）。按有序 `blocks`（reasoning|tool|text）保留真实交织。**行内工具调用**（`<details>` 行）：思考/编辑〔文件类型角标 + `+/-`〕/运行〔命令 + 终端输出〕/读取/搜索〔favicon 来源〕。**diff 统计**：`lineDiffStat`（滚动 Int32Array LCS，`n*m>250_000` 退化行数差防流式卡顿）、`diffStat`（优先 unified、否则 before/after）、`editStat`（str_replace 行级 diff 防虚高）、`aggregateEdits`（按路径合并、过滤 `+0 −0` 幽灵）。**文件改动汇总卡**点击跳 dock 对应文件 diff。
+- **代码块**（`pre` 覆写 `CodeBlock`）：顶栏语言标签 + 复制（`codeText` 递归取高亮 span 树纯文本作复制源）；内联代码不受影响。
+- **消息操作行**（移到消息下方，取代右上角悬浮）：助手下方「复制」整条；用户**最后一条**下方「编辑」+「重试」。
+- **重新生成**（重试 / 编辑共用 `regenerate`）：UI 替换旧答案（非追加）、composer 不动；`history` 始终带本轮用户原文（后端据 `history` 末条取 text/images）；编辑则更新末条用户气泡文本。后端 `SessionHost.rollbackLastUserTurn` 用 pi `navigateTree` 回滚到上一轮用户消息的父节点 → 旧问答另起分支、不再进上下文（含 JSONL/resume 正确），失败兜底内存截断。
 
 ### 13.5 统一文件预览 FileViewer
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { mapSessionEvent, injectLocalThinking } from "../src/agent/session-host.js";
+import { mapSessionEvent, injectLocalThinking, injectCloudThinking } from "../src/agent/session-host.js";
 
 // R1：pi AgentSessionEvent → 我们的 AgentEvent 的边界翻译，逐型锁定。
 describe("mapSessionEvent", () => {
@@ -166,5 +166,18 @@ describe("injectLocalThinking", () => {
     expect(out.chat_template_kwargs).toEqual({ foo: 1, enable_thinking: true });
     expect(out.thinking_budget_tokens).toBe(4096);
     expect(out.messages).toEqual([]); // 不破坏其余请求体
+  });
+});
+
+describe("injectCloudThinking", () => {
+  it("off → thinking:disabled（真关，省 reasoning token）", () => {
+    expect(injectCloudThinking({ messages: [] }, "off")).toEqual({ messages: [], thinking: { type: "disabled" } });
+  });
+  it("分级 → thinking:enabled + reasoning_effort=档位", () => {
+    expect(injectCloudThinking({ messages: [] }, "high")).toEqual({
+      messages: [],
+      thinking: { type: "enabled" },
+      reasoning_effort: "high",
+    });
   });
 });
