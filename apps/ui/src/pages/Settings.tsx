@@ -19,6 +19,8 @@ import {
   SparkIcon,
   BrainIcon,
   PluginsIcon,
+  ChevronDownIcon,
+  CheckIcon,
 } from "../icons.js";
 
 export type SettingsSection = "general" | "models" | "kb" | "skills" | "mcp" | "memory";
@@ -32,6 +34,42 @@ const APPEARANCES: { id: Appearance; label: string; Icon: typeof SunIcon }[] = [
 /** 生成一个随机 api-key（暴露 0.0.0.0 时用）。 */
 function genApiKey(): string {
   return "ew-" + crypto.randomUUID().replace(/-/g, "");
+}
+
+/** 主题下拉：自绘深色弹层（原生 <select> 的选项菜单是 OS 浅色绘制，无法随主题着色）。 */
+function AppearanceSelect({ value, onChange }: { value: Appearance; onChange: (a: Appearance) => void }) {
+  const [open, setOpen] = useState(false);
+  const cur = APPEARANCES.find((a) => a.id === value) ?? APPEARANCES[1]!;
+  return (
+    <div className="set-select-wrap">
+      <button className={`set-select-btn ${open ? "open" : ""}`} onClick={() => setOpen((o) => !o)}>
+        <cur.Icon size={14} />
+        <span>{cur.label}</span>
+        <ChevronDownIcon size={13} className="set-select-chev" />
+      </button>
+      {open && (
+        <>
+          <div className="menu-backdrop" onClick={() => setOpen(false)} />
+          <div className="set-select-menu">
+            {APPEARANCES.map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                className={`set-select-opt ${id === value ? "on" : ""}`}
+                onClick={() => {
+                  onChange(id);
+                  setOpen(false);
+                }}
+              >
+                <Icon size={14} />
+                <span>{label}</span>
+                {id === value && <CheckIcon size={14} className="set-select-check" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 export function Settings({
@@ -139,17 +177,7 @@ export function Settings({
                     <div className="set-row-title">界面主题</div>
                     <div className="set-row-desc">切换应用界面使用的主题外观。</div>
                   </div>
-                  <select
-                    className="set-select"
-                    value={theme.appearance}
-                    onChange={(e) => onThemeChange({ ...theme, appearance: e.target.value as Appearance })}
-                  >
-                    {APPEARANCES.map(({ id, label }) => (
-                      <option key={id} value={id}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
+                  <AppearanceSelect value={theme.appearance} onChange={(a) => onThemeChange({ ...theme, appearance: a })} />
                 </div>
               </div>
             )}
