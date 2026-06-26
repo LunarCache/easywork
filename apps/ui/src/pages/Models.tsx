@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { GGUFVariant, HFModelSummary, LocalModel } from "@ew/shared";
-import type { ProviderInfo } from "@ew/sdk";
+import type { ProviderInfo, LocalNetInfo } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "../components/ConfirmDialog.js";
 import {
@@ -28,6 +28,10 @@ const PROVIDER_PRESETS: { id: string; label: string; baseUrl: string }[] = [
 function fmtSize(bytes: number): string {
   const mb = bytes / 1e6;
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+}
+/** 生成一个随机 api-key（暴露 0.0.0.0 时用）。 */
+function genApiKey(): string {
+  return "ew-" + crypto.randomUUID().replace(/-/g, "");
 }
 function fmtCtx(n?: number): string {
   if (!n) return "—";
@@ -85,6 +89,11 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [runtime, setRuntime] = useState<{ found: boolean; path?: string; install: string } | null>(null);
   const [rtInstalling, setRtInstalling] = useState(false);
 
+  // 网络访问（暴露模型服务到局域网：llama router + /v1 网关）。
+  const [net, setNet] = useState<LocalNetInfo | null>(null);
+  const [netBusy, setNetBusy] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState("");
+
   // 云端 provider
   const [prov, setProv] = useState({ id: "", baseUrl: "", apiKey: "", models: "", context: "" });
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -111,6 +120,35 @@ export function Models({ onChange }: { onChange: () => void }) {
       /* ignore */
     }
   }, []);
+  const refreshNet = useCallback(async () => {
+    try {
+      setNet(await getClient().getLocalNet());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  // 切换绑定 127.0.0.1 ⇄ 0.0.0.0（暴露须 api-key：输入框 / 现有 / 自动生成）。重载 router。
+  const changeBind = async (host: "127.0.0.1" | "0.0.0.0") => {
+    if (netBusy || net?.bindHost === host) return;
+    const apiKey = host === "0.0.0.0" ? apiKeyInput.trim() || net?.apiKey || genApiKey() : undefined;
+    setNetBusy(true);
+    setProgress(host === "0.0.0.0" ? "正在重载模型并暴露到局域网…" : "正在重载模型并收回到本机…");
+    try {
+      const r = await getClient().setLocalNet(host, apiKey);
+      setNet(r);
+      setApiKeyInput("");
+      setProgress(host === "0.0.0.0" ? "已暴露到局域网（0.0.0.0）" : "已收回到仅本机（127.0.0.1）");
+    } catch (e) {
+      setProgress(`切换失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setNetBusy(false);
+    }
+  };
+  /** 端点对外可用 URL：绑 0.0.0.0 时其他设备用本机局域网 IP。 */
+  const endpointUrl = (port: number): string => {
+    const host = net?.bindHost === "0.0.0.0" ? net?.lanIp ?? "0.0.0.0" : "127.0.0.1";
+    return `http://${host}:${port}/v1`;
+  };
   const refreshProviders = useCallback(async () => {
     try {
       setProviders(await getClient().listProviders());
@@ -122,7 +160,8 @@ export function Models({ onChange }: { onChange: () => void }) {
   useEffect(() => {
     void refreshLocal();
     void refreshRuntime();
-  }, [refreshLocal, refreshRuntime]);
+    void refreshNet();
+  }, [refreshLocal, refreshRuntime, refreshNet]);
   useEffect(() => {
     if (tab === "cloud") void refreshProviders();
   }, [tab, refreshProviders]);
@@ -422,6 +461,59 @@ export function Models({ onChange }: { onChange: () => void }) {
 
       {tab === "local" ? (
         <>
+          {/* 网络访问：把模型服务（llama router + /v1 网关）暴露到局域网 */}
+          <div className="set-group">
+            <div className="set-row">
+              <div className="set-row-info">
+                <div className="set-row-title">暴露到局域网</div>
+                <div className="set-row-desc">开启后局域网内其它设备可直连模型服务（绑定 0.0.0.0，须 api-key）；关闭则仅本机。</div>
+              </div>
+              <button
+                className={`set-toggle ${net?.bindHost === "0.0.0.0" ? "on" : ""}`}
+                disabled={netBusy}
+                onClick={() => void changeBind(net?.bindHost === "0.0.0.0" ? "127.0.0.1" : "0.0.0.0")}
+                title={net?.bindHost === "0.0.0.0" ? "收回到仅本机" : "暴露到局域网"}
+              >
+                <span />
+              </button>
+            </div>
+            <div className="set-row">
+              <div className="set-row-info">
+                <div className="set-row-title">API Key</div>
+                <div className="set-row-desc">绑定 0.0.0.0 时必填；留空自动生成。</div>
+              </div>
+              <div className="set-row-control">
+                <input
+                  className="set-key-input"
+                  placeholder="api-key"
+                  type="text"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                />
+                <button className="set-add" disabled={netBusy} onClick={() => setApiKeyInput(genApiKey())}>
+                  生成
+                </button>
+              </div>
+            </div>
+          </div>
+          {net?.bindHost === "0.0.0.0" && (
+            <div className="note">
+              <AlertIcon size={14} style={{ verticalAlign: "-2px", marginRight: 5 }} />
+              已绑定 0.0.0.0：局域网设备需带 <code>Authorization: Bearer {net.apiKey}</code> 才能访问。请仅在可信网络使用。
+            </div>
+          )}
+          {net && net.endpoints.length > 0 && (
+            <div className="set-group">
+              <div className="set-row col">
+                <div className="set-row-title">已加载模型端点（外部可直连）</div>
+                {net.endpoints.map((ep) => (
+                  <div key={ep.id} className="sub mono">
+                    {ep.id.split("/").pop()} → {endpointUrl(ep.port)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {runtime && !runtime.found && (
             <div className="rt-banner warn">
               <AlertIcon size={15} />

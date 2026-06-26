@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
-import type { LocalNetInfo } from "@ew/sdk";
-import { getClient } from "../lib/client.js";
+import { useState } from "react";
 import { type Appearance, type ThemePrefs } from "../lib/prefs.js";
 import { Models } from "./Models.js";
 import { Skills } from "./Skills.js";
@@ -9,7 +7,6 @@ import { KnowledgeBaseOverlay } from "../components/KnowledgeBaseOverlay.js";
 import { MemoryOverlay } from "../components/MemoryOverlay.js";
 import {
   PaletteIcon,
-  AlertIcon,
   SunIcon,
   MoonIcon,
   MonitorIcon,
@@ -31,11 +28,6 @@ const APPEARANCES: { id: Appearance; label: string; Icon: typeof SunIcon }[] = [
   { id: "dark", label: "深色", Icon: MoonIcon },
   { id: "system", label: "跟随系统", Icon: MonitorIcon },
 ];
-/** 生成一个随机 api-key（暴露 0.0.0.0 时用）。 */
-function genApiKey(): string {
-  return "ew-" + crypto.randomUUID().replace(/-/g, "");
-}
-
 /** 主题下拉：自绘深色弹层（原生 <select> 的选项菜单是 OS 浅色绘制，无法随主题着色）。 */
 function AppearanceSelect({ value, onChange }: { value: Appearance; onChange: (a: Appearance) => void }) {
   const [open, setOpen] = useState(false);
@@ -93,50 +85,6 @@ export function Settings({
     setVisited((v) => (v.has(id) ? v : new Set(v).add(id)));
     setSec(id);
   };
-  const [note, setNote] = useState("");
-  const [net, setNet] = useState<LocalNetInfo | null>(null);
-  const [netBusy, setNetBusy] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState("");
-
-  const refresh = useCallback(async () => {
-    try {
-      setNet(await getClient().getLocalNet());
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const changeBind = async (host: "127.0.0.1" | "0.0.0.0") => {
-    if (netBusy || net?.bindHost === host) return;
-    let apiKey: string | undefined;
-    if (host === "0.0.0.0") {
-      // 暴露到局域网必须有 api-key：用输入框 / 现有 / 自动生成。
-      apiKey = apiKeyInput.trim() || net?.apiKey || genApiKey();
-    }
-    setNetBusy(true);
-    setNote(host === "0.0.0.0" ? "正在重载模型并暴露到局域网…" : "正在重载模型并收回到本机…");
-    try {
-      const r = await getClient().setLocalNet(host, apiKey);
-      setNet(r);
-      setApiKeyInput("");
-      setNote(host === "0.0.0.0" ? "已暴露到局域网（0.0.0.0）" : "已收回到仅本机（127.0.0.1）");
-    } catch (e) {
-      setNote(`切换失败：${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setNetBusy(false);
-    }
-  };
-
-  /** 端点对外可用 URL：绑 0.0.0.0 时其他设备用本机局域网 IP。 */
-  const endpointUrl = (port: number): string => {
-    const host = net?.bindHost === "0.0.0.0" ? net?.lanIp ?? "0.0.0.0" : "127.0.0.1";
-    return `http://${host}:${port}/v1`;
-  };
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
   const SECS: { id: SettingsSection; label: string; Icon: typeof PaletteIcon }[] = [
     { id: "general", label: "通用", Icon: PaletteIcon },
     { id: "models", label: "模型", Icon: BoxIcon },
@@ -168,8 +116,6 @@ export function Settings({
         <div className="set-mbody">
         {CARD_SECS.has(sec) && (
           <div className="set-content">
-            {note && <div className="note">{note}</div>}
-
             {sec === "general" && (
               <div className="set-group">
                 <div className="set-row">
@@ -180,63 +126,6 @@ export function Settings({
                   <AppearanceSelect value={theme.appearance} onChange={(a) => onThemeChange({ ...theme, appearance: a })} />
                 </div>
               </div>
-            )}
-
-        {sec === "general" && (
-          <>
-            <div className="set-group">
-              <div className="set-row">
-                <div className="set-row-info">
-                  <div className="set-row-title">暴露到局域网</div>
-                  <div className="set-row-desc">开启后局域网内其它设备可直连（绑定 0.0.0.0，须 api-key）；关闭则仅本机。</div>
-                </div>
-                <button
-                  className={`set-toggle ${net?.bindHost === "0.0.0.0" ? "on" : ""}`}
-                  disabled={netBusy}
-                  onClick={() => void changeBind(net?.bindHost === "0.0.0.0" ? "127.0.0.1" : "0.0.0.0")}
-                  title={net?.bindHost === "0.0.0.0" ? "收回到仅本机" : "暴露到局域网"}
-                >
-                  <span />
-                </button>
-              </div>
-              <div className="set-row">
-                <div className="set-row-info">
-                  <div className="set-row-title">API Key</div>
-                  <div className="set-row-desc">绑定 0.0.0.0 时必填；留空自动生成。</div>
-                </div>
-                <div className="set-row-control">
-                  <input
-                    className="set-key-input"
-                    placeholder="api-key"
-                    type="text"
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                  />
-                  <button className="set-add" disabled={netBusy} onClick={() => setApiKeyInput(genApiKey())}>
-                    生成
-                  </button>
-                </div>
-              </div>
-            </div>
-            {net?.bindHost === "0.0.0.0" && (
-              <div className="note">
-                <AlertIcon size={14} style={{ verticalAlign: "-2px", marginRight: 5 }} />
-                已绑定 0.0.0.0：局域网设备需带 <code>Authorization: Bearer {net.apiKey}</code> 才能访问。请仅在可信网络使用。
-              </div>
-            )}
-            {net && net.endpoints.length > 0 && (
-              <div className="set-group">
-                <div className="set-row col">
-                  <div className="set-row-title">已加载模型端点（外部可直连）</div>
-                  {net.endpoints.map((ep) => (
-                    <div key={ep.id} className="sub mono">
-                      {ep.id.split("/").pop()} → {endpointUrl(ep.port)}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-              </>
             )}
           </div>
         )}
