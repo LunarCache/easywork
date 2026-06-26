@@ -376,10 +376,10 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 /* ================================================================
    Agent Desk 工作台 shell（标题栏 + 图标轨道 + 会话列表 + 主区 + 浮层）
    ================================================================ */
-.ad-app { height: 100vh; width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); }
+.ad-app { position: relative; height: 100vh; width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); }
 
 /* —— 标题栏（两段式：段A=侧栏宽+nav，段B=面包屑+工具）—— */
-.ad-titlebar { height: 46px; flex: none; display: flex; align-items: stretch; background: var(--bg); border-bottom: 1px solid var(--border-soft); user-select: none; }
+.ad-titlebar { height: 46px; flex: none; display: flex; align-items: stretch; background: var(--bg); user-select: none; }
 .ad-spacer { flex: 1; }
 .ad-tb-seg-a { flex: none; height: 100%; display: flex; align-items: center; gap: 3px; padding: 0 10px; }
 .ad-tb-seg-a.bordered { border-right: 1px solid var(--border-soft); }
@@ -569,8 +569,6 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .ad-ov-content .mcp-row,
 .ad-ov-content .kb-doc,
 .ad-ov-content .skill-card,
-.ad-ov-content .mem-item,
-.ad-ov-content .mem-hit,
 .ad-ov-content .kb-upload,
 .ad-ov-content .search-panel { box-shadow: none; }
 .ad-ov-content .empty-models { background: transparent; }
@@ -679,12 +677,9 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mem-ov-ico { width: 34px; height: 34px; border-radius: var(--r); background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex: none; }
 .mem-ov-titles { display: flex; flex-direction: column; line-height: 1.25; }
 .mem-ov-sub { font-size: 11px; color: var(--text-tertiary); }
-.mem-ov-body { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--color-bg-primary); position: relative; overflow: hidden; }
 /* —— 添加记忆弹层（仿知识库上传目标选择） —— */
 .mem-add-textarea { width: 100%; min-height: 90px; resize: vertical; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r); background: var(--color-bg-primary); color: var(--text); font-size: 13px; font-family: var(--font); line-height: 1.5; outline: none; }
 .mem-add-textarea:focus { border-color: var(--accent); }
-.mem-ov-head-add { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: transparent; color: var(--text-2); font-size: 13px; font-weight: 600; cursor: pointer; }
-.mem-ov-head-add:hover { background: var(--color-bg-tertiary); color: var(--text); }
 .mem-add-pickers { display: flex; gap: 8px; margin-top: 12px; }
 .mem-add-pickers select { flex: 1; min-width: 0; }
 .mem-add-hint { font-size: 11px; color: var(--text-tertiary); }
@@ -701,44 +696,40 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mem-add-btn { height: 34px; padding: 0 13px; display: inline-flex; align-items: center; gap: 6px; border: none; border-radius: 9px; background: var(--accent); color: var(--color-text-inverse, #fff); font-size: 13px; font-weight: 600; cursor: pointer; }
 .mem-add-btn:hover { filter: brightness(1.06); }
 
-.mem-doss { flex: 1; min-height: 0; display: flex; }
-.mem-rail { width: 230px; flex: none; border-right: 1px solid var(--border-soft); padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
-.mem-rail-h { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary); font-family: var(--font-mono); padding: 6px 8px 4px; }
-.mem-scope { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: none; border-radius: 9px; background: transparent; color: var(--text-2); cursor: pointer; text-align: left; }
-.mem-scope:hover { background: var(--color-bg-tertiary); color: var(--text); }
-.mem-scope.on { background: var(--accent-soft); color: var(--text); }
-.mem-scope.empty .mem-nm { color: var(--text-tertiary); }
-.mem-av { width: 28px; height: 28px; flex: none; border-radius: 8px; display: grid; place-items: center; background: var(--color-bg-tertiary); color: var(--text-2); }
-.mem-scope.on .mem-av { background: var(--accent); color: #fff; }
-.mem-nm { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mem-ct { flex: none; font-size: 11px; font-family: var(--font-mono); color: var(--text-tertiary); }
-
-.mem-main { flex: 1; min-width: 0; overflow-y: auto; padding: 18px 22px; }
-.mem-main-h h2 { margin: 0; font-size: 18px; font-weight: 600; }
-.mem-main-sub { font-size: 12px; font-family: var(--font-mono); color: var(--text-tertiary); margin: 4px 0 18px; }
-.mem-sect { margin-bottom: 20px; }
-.mem-sect-h { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
 .mem-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
-.mem-sect-lbl { font-size: 13.5px; font-weight: 600; color: var(--text); }
-.mem-sect-ct { font-size: 11px; font-family: var(--font-mono); color: var(--text-tertiary); }
-.mem-sect-add { margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; border: none; border-radius: 7px; background: transparent; color: var(--text-tertiary); cursor: pointer; }
-.mem-sect-add:hover { background: var(--color-bg-tertiary); color: var(--text); }
-.mem-sect-empty { font-size: 12px; font-family: var(--font-mono); color: var(--text-tertiary); padding: 2px 2px 6px; }
-.mem-card { background: var(--color-bg-card); border: 1px solid var(--border-soft); border-radius: 10px; padding: 11px 13px; margin-bottom: 7px; }
-.mem-card:hover { border-color: var(--border); }
-.mem-card-txt { font-size: 13.5px; line-height: 1.55; color: var(--text); }
-.mem-card-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .mem-src { font-size: 10.5px; font-weight: 500; font-family: var(--font-mono); padding: 1px 7px; border-radius: 5px; }
 .mem-src.man { background: rgba(124, 132, 255, 0.14); color: #7C84FF; }
 .mem-src.auto { background: var(--color-bg-tertiary); color: var(--text-tertiary); }
 .mem-time { font-size: 11px; font-family: var(--font-mono); color: var(--text-tertiary); }
 .mem-card-act { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; border: none; background: transparent; color: var(--muted); opacity: 0; cursor: pointer; }
-.mem-card:hover .mem-card-act { opacity: 1; }
 .mem-card-act.show { opacity: 1; }
 .mem-card-act:hover { background: var(--color-bg-tertiary); color: var(--text); }
 .mem-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text-tertiary); text-align: center; padding: 50px 20px; }
 .mem-empty p { font-size: 13px; color: var(--text-2); }
 .mem-ov-edit { width: 100%; padding: 4px 8px; border-radius: var(--r-sm); border: 1px solid var(--accent); background: var(--color-bg-card); color: var(--text); font-size: 13.5px; line-height: 1.55; font-family: var(--font); }
+
+/* —— 记忆信息流（单列卡片 + 顶部筛选 chips）—— */
+.mem-filters { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 11px 18px; border-bottom: 1px solid var(--border-soft); }
+.mem-chip { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border-soft); background: var(--surface-2); color: var(--text-2); font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background var(--ease) 0.12s, color var(--ease) 0.12s, border-color var(--ease) 0.12s; }
+.mem-chip:hover { background: var(--bg-hover); color: var(--text); }
+.mem-chip.on { background: var(--accent-soft); border-color: var(--color-border-focus); color: var(--accent); }
+.mem-chip > svg { flex: none; opacity: 0.85; }
+.mem-chip-ct { font-size: 11px; font-family: var(--font-mono); color: var(--text-tertiary); }
+.mem-chip.on .mem-chip-ct { color: var(--accent); }
+.mem-chip.cat .mem-dot { width: 7px; height: 7px; }
+.mem-filters-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; flex: none; }
+
+.mem-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 34px; display: flex; flex-direction: column; gap: 9px; }
+.mem-fcard { background: var(--color-bg-card); border: 1px solid var(--border-soft); border-radius: 11px; padding: 12px 14px; }
+.mem-fcard:hover { border-color: var(--border); }
+.mem-fcard-txt { font-size: 13.5px; line-height: 1.55; color: var(--text); white-space: pre-wrap; }
+.mem-fcard-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
+.mem-fscope { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 500; color: var(--text-2); padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--surface-2); }
+.mem-fscope > svg { flex: none; color: var(--muted); }
+.mem-fcat { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-tertiary); }
+.mem-fcard:hover .mem-card-act { opacity: 1; }
+.mem-empty.feed { flex: 1; min-height: 0; }
+.set-pane .mem-filters, .set-pane .mem-feed { padding-left: var(--set-x); padding-right: var(--set-x); }
 
 /* —— Skills 简约卡片 + SKILL.md 详情 —— */
 .skills-head { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
@@ -775,8 +766,11 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .embed-dim { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-tertiary); }
 
 /* —— 设置整页：左导航 + 卡片行（label+desc 左 / 控件右），非弹层 —— */
-.set-page { flex: 1; min-height: 0; display: flex; background: var(--bg); }
+/* 设置页覆盖整窗（含顶部标题栏），避免上一页的标题在顶部露出。 */
+.set-page { position: absolute; inset: 0; z-index: 40; display: flex; background: var(--bg); --set-x: clamp(24px, 3.2vw, 56px); }
 .set-nav { width: 232px; flex: none; border-right: 1px solid var(--border-soft); padding: 16px 12px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
+/* 桌面端：左导航顶部让位 macOS 红绿灯。 */
+.is-desktop .set-nav { padding-top: 38px; }
 .set-back { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 10px; border: none; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 13px; cursor: pointer; }
 .set-back:hover { background: var(--color-bg-tertiary); color: var(--text); }
 .set-navi { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: none; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 13.5px; font-weight: 500; cursor: pointer; text-align: left; }
@@ -785,14 +779,25 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .set-navi svg { flex: none; color: var(--text-tertiary); }
 .set-navi.on svg { color: var(--accent); }
 .set-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.set-content { flex: 1; min-height: 0; overflow-y: auto; padding: 28px 36px 60px; }
+/* 统一标题头（所有设置页共用：大标题 + 一致留白）。 */
+.set-phead { flex: none; padding: 26px var(--set-x) 0; }
+.set-mbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.set-content { flex: 1; min-height: 0; overflow-y: auto; padding: 18px var(--set-x) 60px; }
 /* 管理页（模型/知识库/Skills/MCP/记忆）铺满，keep-alive 切换 */
 .set-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .set-pane.hidden { display: none; }
-.set-pane > .page { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 28px 40px; }
+.set-pane > .page { flex: 1; min-height: 0; overflow-y: auto; padding: 18px var(--set-x) 40px; }
 .set-pane > .ad-page-embed { flex: 1; min-height: 0; display: flex; }
-.set-title { font-size: 24px; font-weight: 700; margin: 0 0 20px; }
-.set-group { max-width: 760px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--color-bg-card); margin-bottom: 16px; }
+/* 嵌入设置的双栏页（知识库/记忆）：顶部工具栏左右留白对齐统一标题。 */
+.set-pane .mem-toolbar { padding-left: var(--set-x); padding-right: var(--set-x); }
+.set-pane .kb-ov-head.embed { padding: 0 var(--set-x); height: 46px; border-bottom: 1px solid var(--border-soft); }
+.set-pane .kb-ov-head.embed .kb-ov-sub.embed { font-size: 12.5px; color: var(--text-tertiary); }
+.set-title { font-size: 24px; font-weight: 700; margin: 0; }
+/* 设置项下拉（界面主题等）。 */
+.set-select { flex: none; min-width: 150px; height: 34px; padding: 0 30px 0 12px; border-radius: var(--r); border: 1px solid var(--border-strong); background: var(--color-bg-card); color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239aa0ab' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>"); background-repeat: no-repeat; background-position: right 10px center; }
+.set-select:hover { border-color: var(--color-border-focus); }
+.set-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--acc-weak); }
+.set-group { width: 100%; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--color-bg-card); margin-bottom: 16px; }
 .set-row { display: flex; align-items: center; gap: 20px; padding: 16px 18px; }
 .set-row + .set-row { border-top: 1px solid var(--border-soft); }
 .set-row.col { flex-direction: column; align-items: stretch; gap: 7px; }

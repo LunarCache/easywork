@@ -227,16 +227,25 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
   return (
     <div className={embedded ? "ad-page-embed" : "ad-overlay"} onClick={embedded ? undefined : onClose}>
       <div className={`ad-overlay-card kb-ov-card ${embedded ? "embed" : ""}`} onClick={(e) => e.stopPropagation()}>
-        <div className="ad-ov-head kb-ov-head">
-          <span className="kb-ov-ico">
-            <BookIcon size={18} />
-          </span>
-          <div className="kb-ov-titles">
-            <span className="ad-ov-title">知识库</span>
-            <span className="kb-ov-sub">
+        <div className={`ad-ov-head kb-ov-head ${embedded ? "embed" : ""}`}>
+          {!embedded && (
+            <>
+              <span className="kb-ov-ico">
+                <BookIcon size={18} />
+              </span>
+              <div className="kb-ov-titles">
+                <span className="ad-ov-title">知识库</span>
+                <span className="kb-ov-sub">
+                  {totalChunks} 片段已索引{activeJobs.length > 0 ? ` · ${activeJobs.length} 处理中` : ""}
+                </span>
+              </div>
+            </>
+          )}
+          {embedded && (
+            <span className="kb-ov-sub embed">
               {totalChunks} 片段已索引{activeJobs.length > 0 ? ` · ${activeJobs.length} 处理中` : ""}
             </span>
-          </div>
+          )}
           <span className="ad-spacer" />
           <button
             className="kb-ov-upload"

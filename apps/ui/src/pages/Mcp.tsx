@@ -32,8 +32,10 @@ export function Mcp() {
     try {
       const list = await getClient().listMcpServers();
       setServers(list);
-      // 自动探测每个服务器的连接状态 + 工具数（并行）。
-      list.forEach((s) => void probeOne(s));
+      // 仅探测已启用的服务器（禁用的不连接，显示「已禁用」）。
+      list.forEach((s) => {
+        if (s.enabled !== false) void probeOne(s);
+      });
     } catch {
       /* ignore */
     }
@@ -260,15 +262,16 @@ export function Mcp() {
       {servers.length === 0 ? null : (
         <div className="mcp-list">
           {servers.map((s) => {
+            const on = s.enabled !== false;
             const pr = probe[s.id];
-            const busy = pr === "busy";
-            const res = pr && pr !== "busy" ? pr : null;
+            // 禁用的服务器不显示连接态（即使有旧探测结果）——显示「已禁用」。
+            const busy = on && pr === "busy";
+            const res = on && pr && pr !== "busy" ? pr : null;
             const ok = !!res?.ok;
             const err = !!res && !res.ok;
-            const on = s.enabled !== false;
             const detail =
               s.transport.kind === "stdio" ? `${s.transport.command} ${s.transport.args.join(" ")}` : s.transport.url;
-            const status = busy ? "连接中…" : ok ? "已连接" : err ? "连接失败" : "未探测";
+            const status = !on ? "已禁用" : busy ? "连接中…" : ok ? "已连接" : err ? "连接失败" : "未探测";
             return (
               <div key={s.id} className="mcp-card">
                 <span className={`mcp-dot ${ok ? "ok" : err ? "err" : "busy"}`} />

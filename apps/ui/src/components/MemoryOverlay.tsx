@@ -56,7 +56,9 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
   const [note, setNote] = useState("");
   const [emb, setEmb] = useState<{ ready: boolean; modelId?: string; dim: number } | null>(null);
   const [embBusy, setEmbBusy] = useState(false);
-  const [selectedScope, setSelectedScope] = useState<string>(GLOBAL_SCOPE);
+  // 信息流筛选：作用域（"all" / global / ws:<id>）+ 可选分类层。
+  const [scopeFilter, setScopeFilter] = useState<string>("all");
+  const [layerFilter, setLayerFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   const refresh = useCallback(async () => {
@@ -98,7 +100,8 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
     setDraft("");
     try {
       await getClient().writeMemory({ scope, layer, text });
-      setSelectedScope(scope);
+      setScopeFilter(scope);
+      setLayerFilter(null);
       await refresh();
     } catch (e) {
       setNote(`添加失败：${e instanceof Error ? e.message : String(e)}`);
@@ -143,9 +146,10 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
   const scopeOf = (m: MemItem) => m.scope ?? GLOBAL_SCOPE;
   const scopeName = (sid: string) =>
     sid === GLOBAL_SCOPE ? "全局 / 你" : projects.find((p) => `ws:${p.id}` === sid)?.name ?? "工作区";
-  const scopeIds = [GLOBAL_SCOPE, ...projects.map((p) => `ws:${p.id}`)];
-  const sel = scopeIds.includes(selectedScope) ? selectedScope : GLOBAL_SCOPE;
+  const countScope = (sid: string) => allMem.filter((m) => scopeOf(m) === sid).length;
   const q = query.trim().toLowerCase();
+  // 选中具体作用域时才展示其分类层 chips（"全部"视图不按层筛，避免跨作用域层语义混淆）。
+  const catLayers = scopeFilter === "all" ? [] : layerOrder(scopeFilter);
 
   const openAdd = (scope: string, layer?: string) => {
     setDraft("");
@@ -155,35 +159,37 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
         : { scope, layer: layerOrder(scope)[0]!, label: "", pick: true },
     );
   };
+  // 顶部「添加」：具体作用域+层已筛 → 直接加；否则弹层自选 scope/层。
+  const openAddTop = () => {
+    if (scopeFilter !== "all" && layerFilter) openAdd(scopeFilter, layerFilter);
+    else openAdd(scopeFilter === "all" ? GLOBAL_SCOPE : scopeFilter);
+  };
 
-  // 选中作用域内、按层分组（保留层顺序，搜索时仅留命中层）。
-  const layers = layerOrder(sel).map((layer) => {
-    const items = allMem
-      .filter((m) => scopeOf(m) === sel && m.layer === layer)
-      .filter((m) => !q || m.text.toLowerCase().includes(q))
-      .sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1));
-    return { layer, items };
-  });
-  const selHasAny = layers.some((l) => l.items.length > 0);
+  // 单列信息流：按作用域 / 分类 / 搜索过滤，时间倒序。
+  const feed = allMem
+    .filter((m) => scopeFilter === "all" || scopeOf(m) === scopeFilter)
+    .filter((m) => !layerFilter || m.layer === layerFilter)
+    .filter((m) => !q || m.text.toLowerCase().includes(q))
+    .sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1));
 
   return (
     <div className={embedded ? "ad-page-embed" : "ad-overlay"} onClick={embedded ? undefined : onClose}>
       <div className={`ad-overlay-card mem-ov-card ${embedded ? "embed" : ""}`} onClick={(e) => e.stopPropagation()}>
-        <div className="ad-ov-head mem-ov-head">
-          <span className="mem-ov-ico">
-            <BrainIcon size={18} />
-          </span>
-          <div className="mem-ov-titles">
-            <span className="ad-ov-title">记忆</span>
-            <span className="mem-ov-sub">Agent 跨会话记住的内容</span>
-          </div>
-          <span className="ad-spacer" />
-          {!embedded && (
+        {!embedded && (
+          <div className="ad-ov-head mem-ov-head">
+            <span className="mem-ov-ico">
+              <BrainIcon size={18} />
+            </span>
+            <div className="mem-ov-titles">
+              <span className="ad-ov-title">记忆</span>
+              <span className="mem-ov-sub">Agent 跨会话记住的内容</span>
+            </div>
+            <span className="ad-spacer" />
             <button className="ad-ov-close" title="关闭" onClick={onClose}>
               <XIcon size={15} />
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* 工具栏：搜索 + 向量召回状态 + 添加 */}
         <div className="mem-toolbar">
@@ -200,116 +206,110 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
               </button>
             )}
           </span>
-          <button className="mem-add-btn" onClick={() => openAdd(sel)}>
+          <button className="mem-add-btn" onClick={openAddTop}>
             <PlusIcon size={15} /> 添加
           </button>
         </div>
 
         {note && <div className="mem-ov-note">{note}</div>}
 
-        {/* 档案：左作用域栏 + 右层分区 */}
-        <div className="mem-doss">
-          <div className="mem-rail">
-            <div className="mem-rail-h">作用域</div>
-            <button className={`mem-scope ${sel === GLOBAL_SCOPE ? "on" : ""}`} onClick={() => setSelectedScope(GLOBAL_SCOPE)}>
-              <span className="mem-av">
-                <UserIcon size={15} />
-              </span>
-              <span className="mem-nm">全局 / 你</span>
-              <span className="mem-ct">{allMem.filter((m) => scopeOf(m) === GLOBAL_SCOPE).length}</span>
-            </button>
-            {projects.length > 0 && <div className="mem-rail-h">工作区</div>}
-            {projects.map((p) => {
-              const sid = `ws:${p.id}`;
-              const ct = allMem.filter((m) => scopeOf(m) === sid).length;
-              return (
+        {/* 筛选 chips：作用域 + （选中具体作用域时）分类层 */}
+        <div className="mem-filters">
+          <button className={`mem-chip ${scopeFilter === "all" ? "on" : ""}`} onClick={() => { setScopeFilter("all"); setLayerFilter(null); }}>
+            全部
+            <span className="mem-chip-ct">{allMem.length}</span>
+          </button>
+          <button
+            className={`mem-chip ${scopeFilter === GLOBAL_SCOPE ? "on" : ""}`}
+            onClick={() => { setScopeFilter(GLOBAL_SCOPE); setLayerFilter(null); }}
+          >
+            <UserIcon size={13} /> 全局·你
+            <span className="mem-chip-ct">{countScope(GLOBAL_SCOPE)}</span>
+          </button>
+          {projects.map((p) => {
+            const sid = `ws:${p.id}`;
+            return (
+              <button
+                key={p.id}
+                className={`mem-chip ${scopeFilter === sid ? "on" : ""}`}
+                title={p.workspaceDir}
+                onClick={() => { setScopeFilter(sid); setLayerFilter(null); }}
+              >
+                <FolderClosedIcon size={12} /> {p.name}
+                <span className="mem-chip-ct">{countScope(sid)}</span>
+              </button>
+            );
+          })}
+          {catLayers.length > 0 && (
+            <>
+              <span className="mem-filters-sep" />
+              {catLayers.map((l) => (
                 <button
-                  key={p.id}
-                  className={`mem-scope ${sel === sid ? "on" : ""} ${ct === 0 ? "empty" : ""}`}
-                  title={p.workspaceDir}
-                  onClick={() => setSelectedScope(sid)}
+                  key={l}
+                  className={`mem-chip cat ${layerFilter === l ? "on" : ""}`}
+                  onClick={() => setLayerFilter(layerFilter === l ? null : l)}
                 >
-                  <span className="mem-av">
-                    <FolderClosedIcon size={14} />
-                  </span>
-                  <span className="mem-nm">{p.name}</span>
-                  <span className="mem-ct">{ct}</span>
+                  <span className="mem-dot" style={{ background: LAYER_COLOR[l] ?? "var(--accent)" }} />
+                  {LAYER_LABEL[l] ?? l}
                 </button>
-              );
-            })}
-          </div>
-
-          <div className="mem-main">
-            <div className="mem-main-h">
-              <h2>{scopeName(sel)}</h2>
-            </div>
-            <div className="mem-main-sub">
-              {sel === GLOBAL_SCOPE ? "所有对话共享 · 助手跨会话记住的关于你的内容" : "本工作区私有池 · 与全局隔离"}
-            </div>
-
-            {q && !selHasAny ? (
-              <div className="mem-empty">
-                <SearchIcon size={24} />
-                <p>无匹配「{query}」</p>
-              </div>
-            ) : (
-              layers.map(({ layer, items }) => {
-                if (q && items.length === 0) return null; // 搜索时隐藏空层
-                return (
-                  <div key={layer} className="mem-sect">
-                    <div className="mem-sect-h">
-                      <span className="mem-dot" style={{ background: LAYER_COLOR[layer] ?? "var(--accent)" }} />
-                      <span className="mem-sect-lbl">{LAYER_LABEL[layer] ?? layer}</span>
-                      <span className="mem-sect-ct">{items.length}</span>
-                      <button className="mem-sect-add" title={`添加到「${LAYER_LABEL[layer] ?? layer}」`} onClick={() => openAdd(sel, layer)}>
-                        <PlusIcon size={14} />
-                      </button>
-                    </div>
-                    {items.length === 0 ? (
-                      <div className="mem-sect-empty">暂无 · 点 + 添加</div>
-                    ) : (
-                      items.map((m) => (
-                        <div key={m.id} className="mem-card">
-                          {editing?.id === m.id ? (
-                            <input
-                              className="mem-ov-edit"
-                              autoFocus
-                              value={editing.text}
-                              onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") void saveEdit();
-                                else if (e.key === "Escape") setEditing(null);
-                              }}
-                            />
-                          ) : (
-                            <div className="mem-card-txt">{m.text}</div>
-                          )}
-                          <div className="mem-card-meta">
-                            <span className={`mem-src ${m.sessionId ? "auto" : "man"}`}>{m.sessionId ? "自动抽取" : "手动"}</span>
-                            <span className="mem-time">{relTime(m.updatedAt)}</span>
-                            <span className="ad-spacer" />
-                            {editing?.id === m.id ? (
-                              <button className="mem-card-act show" title="保存" onClick={() => void saveEdit()}>
-                                <CheckIcon size={14} />
-                              </button>
-                            ) : (
-                              <button className="mem-card-act" title="编辑" onClick={() => setEditing({ id: m.id, text: m.text })}>
-                                <EditIcon size={14} />
-                              </button>
-                            )}
-                            <button className="mem-card-act" title="删除" onClick={() => void del(m.id)}>
-                              <TrashIcon size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
+              ))}
+            </>
+          )}
         </div>
+
+        {/* 单列卡片信息流 */}
+        {feed.length === 0 ? (
+          <div className="mem-empty feed">
+            <BrainIcon size={26} />
+            <p>{q ? `无匹配「${query}」` : "暂无记忆 · 点右上「添加」教 Agent 记住点什么"}</p>
+          </div>
+        ) : (
+          <div className="mem-feed">
+            {feed.map((m) => (
+              <div key={m.id} className="mem-fcard">
+                {editing?.id === m.id ? (
+                  <input
+                    className="mem-ov-edit"
+                    autoFocus
+                    value={editing.text}
+                    onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void saveEdit();
+                      else if (e.key === "Escape") setEditing(null);
+                    }}
+                  />
+                ) : (
+                  <div className="mem-fcard-txt">{m.text}</div>
+                )}
+                <div className="mem-fcard-meta">
+                  <span className="mem-fscope">
+                    {scopeOf(m) === GLOBAL_SCOPE ? <UserIcon size={12} /> : <FolderClosedIcon size={11} />}
+                    {scopeName(scopeOf(m))}
+                  </span>
+                  <span className="mem-fcat">
+                    <span className="mem-dot" style={{ background: LAYER_COLOR[m.layer] ?? "var(--accent)" }} />
+                    {LAYER_LABEL[m.layer] ?? m.layer}
+                  </span>
+                  <span className={`mem-src ${m.sessionId ? "auto" : "man"}`}>{m.sessionId ? "自动" : "手动"}</span>
+                  <span className="mem-time">{relTime(m.updatedAt)}</span>
+                  <span className="ad-spacer" />
+                  {editing?.id === m.id ? (
+                    <button className="mem-card-act show" title="保存" onClick={() => void saveEdit()}>
+                      <CheckIcon size={14} />
+                    </button>
+                  ) : (
+                    <button className="mem-card-act" title="编辑" onClick={() => setEditing({ id: m.id, text: m.text })}>
+                      <EditIcon size={14} />
+                    </button>
+                  )}
+                  <button className="mem-card-act" title="删除" onClick={() => void del(m.id)}>
+                    <TrashIcon size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* 添加记忆弹层 */}
         {adding && (

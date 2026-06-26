@@ -112,7 +112,7 @@ export function Settings({
 
   return (
     <div className="set-page">
-      <div className="set-nav" style={navWidth ? { width: navWidth } : undefined}>
+      <div className="set-nav" style={navWidth ? { width: navWidth } : undefined} data-tauri-drag-region>
         <button className="set-back" onClick={onBack}>
           <ArrowLeftIcon size={15} /> 返回工作区
         </button>
@@ -124,50 +124,52 @@ export function Settings({
       </div>
 
       <div className="set-main">
+        <div className="set-phead">
+          <h1 className="set-title">{SECS.find((s) => s.id === sec)?.label}</h1>
+        </div>
+        <div className="set-mbody">
         {CARD_SECS.has(sec) && (
           <div className="set-content">
-            <h1 className="set-title">{SECS.find((s) => s.id === sec)?.label}</h1>
             {note && <div className="note">{note}</div>}
 
             {sec === "general" && (
               <div className="set-group">
                 <div className="set-row">
-              <div className="set-row-info">
-                <div className="set-row-title">明暗模式</div>
-                <div className="set-row-desc">选择应用界面主题。</div>
-              </div>
-              <div className="seg">
-                {APPEARANCES.map(({ id, label, Icon }) => (
-                  <button
-                    key={id}
-                    className={theme.appearance === id ? "on" : ""}
-                    onClick={() => onThemeChange({ ...theme, appearance: id })}
+                  <div className="set-row-info">
+                    <div className="set-row-title">界面主题</div>
+                    <div className="set-row-desc">切换应用界面使用的主题外观。</div>
+                  </div>
+                  <select
+                    className="set-select"
+                    value={theme.appearance}
+                    onChange={(e) => onThemeChange({ ...theme, appearance: e.target.value as Appearance })}
                   >
-                    <Icon size={14} style={{ marginRight: 5, verticalAlign: "-2px" }} />
-                    {label}
-                  </button>
-                ))}
+                    {APPEARANCES.map(({ id, label }) => (
+                      <option key={id} value={id}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            )}
 
         {sec === "general" && (
           <>
             <div className="set-group">
               <div className="set-row">
                 <div className="set-row-info">
-                  <div className="set-row-title">网络访问</div>
-                  <div className="set-row-desc">仅本机，或暴露到局域网供其它设备直连（0.0.0.0 须 api-key）。</div>
+                  <div className="set-row-title">暴露到局域网</div>
+                  <div className="set-row-desc">开启后局域网内其它设备可直连（绑定 0.0.0.0，须 api-key）；关闭则仅本机。</div>
                 </div>
-                <div className="seg">
-                  <button className={net?.bindHost !== "0.0.0.0" ? "on" : ""} disabled={netBusy} onClick={() => void changeBind("127.0.0.1")}>
-                    仅本机
-                  </button>
-                  <button className={net?.bindHost === "0.0.0.0" ? "on" : ""} disabled={netBusy} onClick={() => void changeBind("0.0.0.0")}>
-                    局域网
-                  </button>
-                </div>
+                <button
+                  className={`set-toggle ${net?.bindHost === "0.0.0.0" ? "on" : ""}`}
+                  disabled={netBusy}
+                  onClick={() => void changeBind(net?.bindHost === "0.0.0.0" ? "127.0.0.1" : "0.0.0.0")}
+                  title={net?.bindHost === "0.0.0.0" ? "收回到仅本机" : "暴露到局域网"}
+                >
+                  <span />
+                </button>
               </div>
               <div className="set-row">
                 <div className="set-row-info">
@@ -235,6 +237,7 @@ export function Settings({
             <MemoryOverlay embedded />
           </div>
         )}
+        </div>
       </div>
     </div>
   );

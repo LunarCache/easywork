@@ -279,7 +279,7 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 - **配置**：`McpServerConfig = {id, displayName, transport, enabled}`；transport = stdio `{command, args[], env?}` 或 http `{url, headers?, useOAuth?}`。工具命名空间 **`mcp__<serverId>__<toolName>`**。
 - **连接**（`connect.ts`）：**动态 import** `@modelcontextprotocol/sdk`（测试/无 SDK 环境可注入）；stdio→StdioClientTransport，http→StreamableHTTPClientTransport；`callTool(name,args,signal)` 把 AbortSignal 透传进 SDK。
 - **安全/探测/cooloff**（`manager.ts`）：**stdio 默认禁用**（跑任意本地命令），仅 `EW_ALLOW_STDIO_MCP=1` 开；probe 用 `withTimeout`（15s，`.finally(clearTimeout)` 不泄漏定时器）；失败 cooloff（普通 60s / OAuth HTTP 300s），cooloff 期内返回**缓存**工具列表不破坏注册表；`callTool` 先按缓存的 `inputSchema` 轻量校验参数、再扁平化 MCP content 为模型可读字符串。
-- **桥成 pi customTools**（`toolProvider`）：每个启用、非 cooloff 的工具变 EW `Tool`（`requiresApproval:"first-use"`）。**关键 signal 细节**：`execute` 用**每次调用的 `exec.signal`**（pi 经 toPiTool 传入），而非 provider 级永不 abort 的占位 signal——否则取消/超时无法中断在途 MCP 调用。
+- **桥成 pi customTools**（`toolProvider`）：每个启用、非 cooloff 的工具变 EW `Tool`（`requiresApproval:"first-use"`）。`!config.enabled` 的服务器**贡献 0 工具**（`listTools`/`toolProvider` 双重门控），改 enabled 经 `invalidateAll` 重建会话即从 customTools 移除；UI 端（`Mcp.tsx`）相应**只探测已启用服务器**、禁用项显示「已禁用」而非沿用旧探测的「已连接」。**关键 signal 细节**：`execute` 用**每次调用的 `exec.signal`**（pi 经 toPiTool 传入），而非 provider 级永不 abort 的占位 signal——否则取消/超时无法中断在途 MCP 调用。
 - **路由**：`GET/POST/DELETE /mcp/servers`、`POST /mcp/probe`、`GET /mcp/servers/:id/tools`。**任何 server 变更 `invalidateAll`** 重建会话刷新 customTools。`mcpServers` JSON 批量导入在 **UI 端**翻译成逐个 upsert（无服务端 import 路由）。
 
 ---
@@ -340,10 +340,10 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 ### 13.2 外壳（App.tsx）
 
-- **两段式 Titlebar（46px）**：段 A 宽 = 实时侧栏宽（右边框与分隔线像素对齐）+ macOS 红绿灯让位（desktop 左 pad 88px）+ 侧栏开关；段 B 面包屑（任务名 + 工作区/分支 pill）+ 工作台开关（动态图标，仅聊天/工作区会话显示）。
+- **两段式 Titlebar（46px，无下边框、与下方内容同底色无缝）**：段 A 宽 = 实时侧栏宽（右边框与分隔线像素对齐）+ macOS 红绿灯让位（desktop 左 pad 88px）+ 侧栏开关；段 B 面包屑（任务名 + 工作区/分支 pill）+ 工作台开关（动态图标，仅聊天/工作区会话显示）。
 - **展开式侧栏**：快捷操作（新对话 ⌘N / **搜索 ⌘K** / 打开工作区 / 收件箱）+「项目」折叠组（CWD 角标 / hover 新建会话 ＋·文件树·删除 / 分区头「折叠全部」`toggleAll`）+「对话」分区（相对时间）+ 底部设置 + 连接状态点。可拖拽列宽（200–460，持久化）。**全局搜索 `SearchPalette`（⌘K，App 全局 keydown）**：居中浮层跨 对话/工作区/工作区会话 模糊匹配，↑↓/Enter/Esc。注意 eyebrow 控件类名勿用 `row`（命中全局 `.row > button` 主按钮样式）。
 - **dockOpen 是 App 级共享态**，切模式/会话/工作区时重置（面板不跨会话"跟着"）。
-- 主区按 `mode` 切换 Chat（按 threadId 重挂载）/ Workspace / FilesPage / inbox 占位；**设置为整页内嵌**（非弹层）。打开设置时 `.ad-body` 保持挂载、仅 CSS 隐藏（`display:none`），避免卸载 Chat/Workspace 而中断在途流式运行。
+- 主区按 `mode` 切换 Chat（按 threadId 重挂载）/ Workspace / FilesPage / inbox 占位；**设置为整页内嵌**（非弹层）。`.set-page` 用 `position:absolute; inset:0; z-index` **覆盖整窗（含标题栏）**——否则上一页的标题会在顶部露出；桌面端 `.set-nav` 顶部留白让位红绿灯 + `data-tauri-drag-region` 保留拖拽。打开设置时 `.ad-body` 保持挂载、仅 CSS 隐藏（`display:none`），避免卸载 Chat/Workspace 而中断在途流式运行。
 - **⌘N** 全局 keydown 新建对话。
 
 ### 13.3 Chat vs Workspace + SSE
@@ -375,9 +375,10 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 ### 13.6 设置（统一壳 Settings.tsx）
 
 整页内嵌（非弹层），左导航 6 项：**通用 / 模型 / 知识库 / Skills / MCP / 记忆**。左导航宽度 = 主侧栏 `sessionWidth`（经 `navWidth` 传入，分割线与默认页对齐）。
-- **两类区**：通用是**卡片行**（`.set-group`/`.set-row`，标题+说明左、控件右，ZCode 式对齐）——**本地网络**（网络访问 / API Key / 端点 / 0.0.0.0 警告）已并入通用，卡片堆叠无小标题；模型 / 知识库 / Skills / MCP / 记忆 五管理页以 **lazy keep-alive 内嵌**（访问过的 `.set-pane` `display:none` 保活，避免 KB 上传/索引轮询中断）。**向量召回**控件原独立「向量记忆」页已删除——记忆页（`MemoryOverlay`）工具栏本就自带状态点 + `向量召回·N维` / `未启用 + 启用`。取代旧「插件页」+ 弹窗。
+- **统一外壳**：`.set-main` 顶部一个共享 `.set-phead`（大标题 h1，由 Settings 集中渲染）+ `.set-mbody`（各 section body）；横向内边距统一用 `--set-x: clamp(24px,3.2vw,56px)`（标题与内容对齐、随窗口自适应、切 tab 不跳动）。模型/Skills/MCP 原本无标题、知识库/记忆原本是「图标+副标题」头 → 现统一为纯大标题（嵌入态隐藏自带头，KB 保留上传按钮、副信息降为一行）。
+- **两类区**：通用是**卡片行**（`.set-group`/`.set-row`，标题+说明左、控件右，ZCode 式对齐）——界面主题为 `.set-select` **下拉**、暴露到局域网为 `.set-toggle` **开关**（开=0.0.0.0、关=127.0.0.1）；**本地网络**（网络访问 / API Key / 端点 / 0.0.0.0 警告）已并入通用；模型 / 知识库 / Skills / MCP / 记忆 五管理页以 **lazy keep-alive 内嵌**（访问过的 `.set-pane` `display:none` 保活，避免 KB 上传/索引轮询中断）。**向量召回**控件原独立「向量记忆」页已删除——记忆页（`MemoryOverlay`）工具栏本就自带状态点 + `向量召回·N维` / `未启用 + 启用`。取代旧「插件页」+ 弹窗。
 - **知识库（卡片网格）**：左集合栏（主导文件类型图标 + 计数 + 处理中脉冲点）+ 中文档卡片网格 + 右滑出预览（统一 `FileViewer`，`docReqRef` 时序保护）；顶部两步上传（先选/建目标集合，kbId 规范化）；900ms job 轮询。
-- **记忆（档案 Dossier）**：左作用域栏（全局/你 + 各工作区，带计数、空作用域变灰）+ 右按层分区（层语义色点 + 计数 + 行内添加）；记忆卡带**来源徽章（手动 / 自动抽取，按 `sessionId` 区分）** + 时间 + 行内编辑/删除；顶部搜索（作用域内过滤）+ 向量召回状态（含一键启用 nomic）；空作用域/空层可从「+ 添加」选目标加第一条。
+- **记忆（卡片信息流，`MemoryOverlay`）**：顶部搜索 + 向量召回状态（含一键启用 nomic）+ 添加；下方**筛选 chips**——作用域单选（`scopeFilter`：`all` / `global` / `ws:<id>`，带计数），选中具体作用域时分隔线后再现该作用域的**分类层 chips**（`layerFilter`，语义色点；「全部」视图不按层筛避免跨作用域层语义混淆）。**单列卡片流** `feed`（按作用域/分类/搜索过滤、时间倒序）：每卡 = 文本 + 元信息行〔作用域 pill（👤全局/你 或 📁工作区名）· 分类色点+标签 · **来源徽章（手动 / 自动，按 `sessionId` 区分）** · 相对时间〕+ hover 编辑/删除（行内）。`添加` 智能定向：具体作用域+层已筛则直达，否则弹层自选 scope/层。空态居中提示。
 - **模型**：本地/云端分页；本地按 kind（文本/嵌入/视觉）显示，load/unload 或"启用向量"，**hover 显形删除钮**（删的若是当前向量记忆引擎模型→后端 `/models/local/delete` 一并停嵌入进程 + 清持久化设置）；嵌入模型删除分级提示；无 llama 二进制时一键安装 banner；HF 搜索下载（流式 %）；云端 provider 预设 + 手填上下文窗口。
 - **Skills/MCP**：SKILL.md frontmatter 卡 + 启停；MCP server 列表自动探测 + 增删改导入。
 
