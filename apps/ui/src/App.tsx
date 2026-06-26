@@ -330,11 +330,14 @@ export function App() {
               <Workspace
                 key={project.id}
                 project={project}
+                projects={projects}
                 models={models}
                 threadId={workThreadId || latestWorkThread(project.id)}
                 onChanged={refreshProjects}
                 onThreadsChanged={refreshThreads}
                 onBranchChange={setWorkBranch}
+                onSelectProject={(id) => void selectProject(id)}
+                onOpenFolder={() => void newWorkspace()}
                 dockOpen={dockOpen}
                 setDockOpen={setDockOpen}
               />

@@ -5,6 +5,7 @@ import { getClient } from "../lib/client.js";
 import { loadDisabledSkills, loadThink, saveThink } from "../lib/prefs.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
+import { ContextBar } from "../components/ContextBar.js";
 import { SideDock } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
@@ -31,10 +32,10 @@ import {
 } from "../icons.js";
 
 const APPROVAL_OPTS: { id: ApprovalMode; label: string; desc: string }[] = [
-  { id: "read-only", label: "Read only", desc: "No file writes or commands" },
-  { id: "approve-each", label: "Ask each change", desc: "Approve every edit & command" },
-  { id: "auto-edits", label: "Auto-edit files", desc: "Edits auto, commands ask" },
-  { id: "full-auto", label: "Full auto", desc: "Edits & commands run automatically" },
+  { id: "read-only", label: "只读", desc: "不写文件、不执行命令" },
+  { id: "approve-each", label: "逐项确认", desc: "每次编辑与命令都需批准" },
+  { id: "auto-edits", label: "自动编辑", desc: "编辑自动，命令需批准" },
+  { id: "full-auto", label: "完全访问", desc: "编辑与命令全部自动执行" },
 ];
 const APPROVAL_LABEL: Record<ApprovalMode, string> = Object.fromEntries(
   APPROVAL_OPTS.map((o) => [o.id, o.label]),
@@ -42,15 +43,20 @@ const APPROVAL_LABEL: Record<ApprovalMode, string> = Object.fromEntries(
 
 export function Workspace({
   project,
+  projects,
   models,
   threadId,
   onChanged,
   onThreadsChanged,
   onBranchChange,
+  onSelectProject,
+  onOpenFolder,
   dockOpen,
   setDockOpen,
 }: {
   project: Project;
+  /** 全部工作区（供 composer 上下文条切换）。 */
+  projects: Project[];
   models: string[];
   /** 当前会话（由 App/会话列表 控制）。 */
   threadId: string;
@@ -59,6 +65,10 @@ export function Workspace({
   onThreadsChanged: () => void;
   /** 当前 git 分支变化 → 上报给 App（用于标题栏面包屑分支 pill）；非 git 仓库报 undefined。 */
   onBranchChange?: (branch?: string) => void;
+  /** 上下文条切换工作区。 */
+  onSelectProject: (id: string) => void;
+  /** 上下文条「打开文件夹」新建工作区。 */
+  onOpenFolder: () => void;
   dockOpen: boolean;
   setDockOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
@@ -72,6 +82,8 @@ export function Workspace({
   const [notice, setNotice] = useState<string | null>(null);
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [git, setGit] = useState<GitStatus>({ repo: false, files: [] });
+  const [branch, setBranch] = useState<string | undefined>(undefined);
+  const [branches, setBranches] = useState<string[]>([]);
   const [remote, setRemote] = useState<GitRemoteInfo>({ hasRemote: false, hasUpstream: false, ahead: 0, behind: 0 });
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [dockTarget, setDockTarget] = useState<{ path: string; nonce: number } | null>(null);
@@ -146,9 +158,14 @@ export function Workspace({
       ]);
       setGit(s);
       setRemote(rm);
-      onBranchChange?.(s.repo ? b.current || s.branch || undefined : undefined);
+      const cur = s.repo ? b.current || s.branch || undefined : undefined;
+      setBranch(cur);
+      setBranches(s.repo ? b.all : []);
+      onBranchChange?.(cur);
     } catch {
       setGit({ repo: false, files: [] });
+      setBranch(undefined);
+      setBranches([]);
       onBranchChange?.(undefined);
     }
   };
@@ -327,53 +344,41 @@ export function Workspace({
     }
   };
 
-  return (
-    <div className="workspace">
-      <div className="ws-main">
-        <header className="bar ws-bar">
-          <ModelSelect models={models} value={model} onChange={setModel} />
-          <span className="bar-spacer" />
-        </header>
+  const empty = msgs.length === 0;
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 6) return "夜深了，有什么想让我帮忙的吗";
+    if (h < 12) return "上午好呀，有什么想让我帮忙的吗";
+    if (h < 14) return "中午好，有什么想让我帮忙的吗";
+    if (h < 18) return "下午好，有什么想让我帮忙的吗";
+    return "晚上好，有什么想让我帮忙的吗";
+  })();
 
-        <div className="messages" ref={scrollRef} onScroll={onMessagesScroll}>
-          {msgs.length === 0 && (
-            <div className="empty">
-              <div className="ring">
-                <TerminalIcon size={26} />
-              </div>
-              <h2>工作区就绪</h2>
-              <p>
-                目录：<code>{project.workspaceDir}</code>
-                <br />
-                让 AI 读写文件、运行命令完成编码任务；右侧实时审阅改动。
-              </p>
-            </div>
-          )}
-          <MessageStream
-            msgs={msgs}
-            busy={busy}
-            onOpenUrl={(u) => {
-              setPreviewUrl(u);
-              setDockOpen(true);
-            }}
-            onOpenFile={(p) => {
-              setDockOpen(true);
-              setDockTarget({ path: p, nonce: Date.now() });
-            }}
-            onRetry={retry}
-            onEdit={editRetry}
+  const switchBranch = (name: string) => {
+    setNotice(`切换到分支 ${name}…`);
+    void getClient()
+      .gitSwitch(project.id, name)
+      .then((r) => {
+        setNotice(r.ok ? null : `切换失败：${r.error ?? "未知错误"}`);
+        void refreshGit();
+        void refreshWsFiles();
+      })
+      .catch(() => setNotice("切换分支失败"));
+  };
+
+  const composer = (
+    <footer className="composer">
+          <ContextBar
+            project={project}
+            projects={projects}
+            branch={branch}
+            branches={branches}
+            uncommitted={git.files.length}
+            onSelectProject={onSelectProject}
+            onOpenFolder={onOpenFolder}
+            onSwitchBranch={switchBranch}
+            onOpenGitGraph={() => setDockOpen(true)}
           />
-        </div>
-        {showJump && (
-          <button className="jump-bottom" title="跳到最新" onClick={jumpToBottom}>
-            <ChevronDownIcon size={18} />
-          </button>
-        )}
-
-        {approval && (
-          <ApprovalCard toolName={approval.toolName} args={approval.args} onRespond={(v) => void respondApproval(v)} />
-        )}
-        <footer className="composer">
           <div className="composer-box">
             {images.length > 0 && (
               <div className="composer-images">
@@ -418,16 +423,12 @@ export function Workspace({
               <button className="cbtn" title="上传图片（需视觉模型）" onClick={() => fileRef.current?.click()}>
                 <PlusBtnIcon size={18} />
               </button>
-              <button
-                className={`cchip ${thinkLevel !== "off" ? "on" : ""}`}
-                onClick={cycleThink}
-                title="思考档位（点击循环：关/低/中/高）"
-              >
-                <ThinkIcon size={15} />
-                <span className="cchip-lvl">{THINK_LABEL[thinkLevel]}</span>
-              </button>
               <div className="perm-wrap">
-                <button className="perm-pill" onClick={() => setPermOpen((v) => !v)} title="Approval policy">
+                <button
+                  className={`perm-pill ${approvalMode === "full-auto" ? "warn" : ""}`}
+                  onClick={() => setPermOpen((v) => !v)}
+                  title="审批策略"
+                >
                   <ShieldIcon size={15} />
                   <span>{APPROVAL_LABEL[approvalMode]}</span>
                   <ChevronDownIcon size={13} className="perm-chev" />
@@ -457,6 +458,15 @@ export function Workspace({
                 )}
               </div>
               <span className="cspacer" />
+              <ModelSelect models={models} value={model} onChange={setModel} />
+              <button
+                className={`cchip ${thinkLevel !== "off" ? "on" : ""}`}
+                onClick={cycleThink}
+                title="思考档位（点击循环：关/低/中/高）"
+              >
+                <ThinkIcon size={15} />
+                <span className="cchip-lvl">{THINK_LABEL[thinkLevel]}</span>
+              </button>
               <button className="csend" onClick={() => void send()} disabled={busy || !model} title="发送">
                 <ArrowUpIcon size={18} />
               </button>
@@ -464,6 +474,49 @@ export function Workspace({
             {notice && <div className="composer-note"><span className="composer-status">{notice}</span></div>}
           </div>
         </footer>
+  );
+
+  return (
+    <div className="workspace">
+      <div className={`ws-main ${empty ? "empty-state" : ""}`}>
+        {empty ? (
+          <div className="ws-hero">
+            <div className="ws-hero-mark">
+              <TerminalIcon size={30} />
+            </div>
+            <h1 className="ws-hero-greet">{greeting}</h1>
+            {composer}
+          </div>
+        ) : (
+          <>
+            <div className="messages" ref={scrollRef} onScroll={onMessagesScroll}>
+              <MessageStream
+                msgs={msgs}
+                busy={busy}
+                onOpenUrl={(u) => {
+                  setPreviewUrl(u);
+                  setDockOpen(true);
+                }}
+                onOpenFile={(p) => {
+                  setDockOpen(true);
+                  setDockTarget({ path: p, nonce: Date.now() });
+                }}
+                onRetry={retry}
+                onEdit={editRetry}
+              />
+            </div>
+            {showJump && (
+              <button className="jump-bottom" title="跳到最新" onClick={jumpToBottom}>
+                <ChevronDownIcon size={18} />
+              </button>
+            )}
+
+            {approval && (
+              <ApprovalCard toolName={approval.toolName} args={approval.args} onRespond={(v) => void respondApproval(v)} />
+            )}
+            {composer}
+          </>
+        )}
       </div>
 
       <SideDock

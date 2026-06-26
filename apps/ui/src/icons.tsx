@@ -50,6 +50,8 @@ export {
   ShieldCheck as ShieldIcon,
   RefreshCw as RefreshIcon,
   GitBranch as GitBranchIcon,
+  GitFork as GitGraphIcon,
+  FolderPlus as FolderPlusIcon,
   Undo2 as UndoIcon,
   GitCommitHorizontal as CommitIcon,
   Sun as SunIcon,
