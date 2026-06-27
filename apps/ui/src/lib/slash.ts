@@ -9,15 +9,23 @@ export interface SlashCmd {
 }
 
 export const SLASH_CMDS: SlashCmd[] = [
-  { name: "think", arg: "off|low|medium|high", desc: "切换思考档位" },
-  { name: "model", arg: "模型名", desc: "切换模型" },
+  { name: "model", arg: "模型名", desc: "切换当前会话模型" },
+  { name: "think", arg: "off|low|medium|high", desc: "调整思考强度" },
   { name: "compact", desc: "压缩上下文" },
 ];
 
 /** 思考档位循环顺序（= 候选）。 */
 export const THINK_LEVELS: ThinkLevel[] = ["off", "low", "medium", "high"];
+export const THINK_META: Record<ThinkLevel, { label: string; hint: string }> = {
+  off: { label: "关", hint: "更快，适合短问答" },
+  low: { label: "低", hint: "轻推理，保持响应速度" },
+  medium: { label: "中", hint: "默认强度，兼顾速度与质量" },
+  high: { label: "高", hint: "深推理，适合复杂任务" },
+};
 /** 思考档位中文短标签（composer 控件显示）。 */
-export const THINK_LABEL: Record<ThinkLevel, string> = { off: "关", low: "低", medium: "中", high: "高" };
+export const THINK_LABEL: Record<ThinkLevel, string> = Object.fromEntries(
+  Object.entries(THINK_META).map(([k, v]) => [k, v.label]),
+) as Record<ThinkLevel, string>;
 /** 循环到下一档（关→低→中→高→关）。 */
 export function nextThink(level: ThinkLevel): ThinkLevel {
   return THINK_LEVELS[(THINK_LEVELS.indexOf(level) + 1) % THINK_LEVELS.length]!;

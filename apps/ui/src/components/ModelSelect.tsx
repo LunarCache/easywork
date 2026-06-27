@@ -8,19 +8,23 @@ export function ModelSelect({
   value,
   onChange,
   up,
+  align = "left",
+  variant = "default",
 }: {
   models: string[];
   value: string;
   onChange: (m: string) => void;
   /** 弹出菜单向上展开（用于贴底的 composer）。 */
   up?: boolean;
+  align?: "left" | "right";
+  variant?: "default" | "strip";
 }) {
   const [open, setOpen] = useState(false);
   const empty = models.length === 0;
   return (
     <div className="model-sel">
       <button
-        className="model-sel-btn"
+        className={`model-sel-btn ${variant === "strip" ? "strip" : ""}`}
         disabled={empty}
         onClick={() => setOpen((v) => !v)}
         title={value || undefined}
@@ -33,7 +37,7 @@ export function ModelSelect({
       {open && !empty && (
         <>
           <div className="menu-backdrop" onClick={() => setOpen(false)} />
-          <div className={`model-pop ${up ? "up" : ""}`}>
+          <div className={`model-pop ${up ? "up" : ""} ${align === "right" ? "right" : ""}`}>
             {models.map((m) => (
               <button
                 key={m}

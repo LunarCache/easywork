@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { Project } from "@ew/shared";
 import {
   FolderClosedIcon,
@@ -21,6 +21,7 @@ export function ContextBar({
   branch,
   branches,
   uncommitted,
+  children,
   onSelectProject,
   onOpenFolder,
   onSwitchBranch,
@@ -31,6 +32,7 @@ export function ContextBar({
   branch?: string;
   branches: string[];
   uncommitted: number;
+  children?: ReactNode;
   onSelectProject: (id: string) => void;
   onOpenFolder: () => void;
   onSwitchBranch: (name: string) => void;
@@ -154,6 +156,8 @@ export function ContextBar({
           )}
         </div>
       )}
+
+      {children}
     </div>
   );
 }

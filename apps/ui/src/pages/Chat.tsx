@@ -14,8 +14,8 @@ import {
 } from "../lib/message-runtime.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
+import { ComposerContextPill, ComposerContextStrip, ComposerUsagePill } from "../components/ComposerContextStrip.js";
 import { SideDock } from "../components/SideDock.js";
-import { ContextRing } from "../components/ContextRing.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
 import { THINK_LABEL, nextThink } from "../lib/slash.js";
@@ -45,7 +45,6 @@ import {
   ArrowUpIcon,
   BoxIcon,
   BrainIcon,
-  CheckIcon,
   ChevronDownIcon,
   CodeIcon,
   FileIcon,
@@ -101,7 +100,6 @@ export function Chat({
   const [kb, setKb] = useState(false);
   const [kbId, setKbId] = useState<string | undefined>(undefined); // undefined = 全部集合
   const [kbList, setKbList] = useState<{ kbId: string; docs: number; chunks: number }[]>([]);
-  const [addOpen, setAddOpen] = useState(false);
   const [paramsOpen, setParamsOpen] = useState(false);
   const [sampling, setSampling] = useState<Sampling>({});
   const [usage, setUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(
@@ -257,9 +255,20 @@ export function Chat({
       .then((r) => setNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
       .catch(() => setNotice("压缩失败"));
   }, [threadId]);
+  const contextLimit = contexts[model];
+  const contextPct = contextLimit ? (((usage?.promptTokens ?? 0) / contextLimit) * 100) : null;
+  const contextTitle =
+    contextLimit == null
+      ? undefined
+      : usage
+        ? `上下文已用 ${Math.round(contextPct ?? 0)}% · ${usage.promptTokens}/${contextLimit} tokens`
+        : `上下文窗口 ${contextLimit} tokens`;
 
   const slash = useSlashPalette(input, setInput, {
     models,
+    currentModel: model,
+    currentThink: thinkLevel,
+    usagePct: contextPct,
     onThink: changeThink,
     onModel: setModel,
     onCompact: doCompact,
@@ -460,6 +469,26 @@ export function Chat({
       )}
       <footer className="composer">
         <div className="composer-box">
+          <ComposerContextStrip>
+            <ModelSelect models={models} value={model} onChange={setModel} up variant="strip" />
+            <ComposerContextPill tone={thinkLevel !== "off" ? "on" : "default"} onClick={cycleThink} title="思考档位（点击循环：低/中/高/关）">
+              <ThinkIcon size={14} />
+              <span>思考 {THINK_LABEL[thinkLevel]}</span>
+            </ComposerContextPill>
+            <ComposerContextPill tone={web ? "on" : "default"} onClick={() => setWeb((v) => !v)} title="联网搜索">
+              <GlobeIcon size={14} />
+              <span>{web ? "联网已开" : "联网已关"}</span>
+            </ComposerContextPill>
+            <ComposerContextPill
+              tone={kb ? "on" : "default"}
+              onClick={() => setKb((v) => !v)}
+              title={kb ? `知识库${kbId ? `·${kbId}` : "·全部"}` : "知识库"}
+            >
+              <BoxIcon size={14} />
+              <span>{kb ? `知识库·${kbId ?? "全部"}` : "知识库已关"}</span>
+            </ComposerContextPill>
+            {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
+          </ComposerContextStrip>
           {images.length > 0 && (
             <div className="composer-images">
               {images.map((im, j) => (
@@ -505,161 +534,79 @@ export function Chat({
           />
           <div className="composer-bar">
             <div className="composer-bar-left">
-              <div className="cadd-wrap">
-                <button className="cbtn" title="添加 / 选项" onClick={() => setAddOpen((v) => !v)}>
-                  <PlusBtnIcon size={18} />
+              <button className="cbtn" title="上传图片" onClick={() => fileRef.current?.click()}>
+                <PlusBtnIcon size={18} />
+              </button>
+            </div>
+            <div className="composer-bar-right">
+              <div className="params-wrap">
+                <button
+                  className={`params-btn ${Object.keys(sampling).length ? "on" : ""}`}
+                  onClick={() => setParamsOpen((v) => !v)}
+                  disabled={!model}
+                  title="生成参数（按当前模型）"
+                >
+                  <SlidersIcon size={16} />
                 </button>
-                {addOpen && (
+                {paramsOpen && (
                   <>
-                    <div className="menu-backdrop" onClick={() => setAddOpen(false)} />
-                    <div className="cadd-menu up">
-                      <button
-                        className="cadd-item"
-                        onClick={() => {
-                          fileRef.current?.click();
-                          setAddOpen(false);
-                        }}
-                      >
-                        <PlusBtnIcon size={16} /> <span>上传图片</span>
-                      </button>
-                      <div className="cadd-sep" />
-                      <button
-                        className={`cadd-item ${thinkLevel !== "off" ? "on" : ""}`}
-                        onClick={cycleThink}
-                        title="点击循环：关 / 低 / 中 / 高"
-                      >
-                        <ThinkIcon size={16} /> <span>思考</span>
-                        <span className="cadd-lvl">{THINK_LABEL[thinkLevel]}</span>
-                      </button>
-                      <button className={`cadd-item ${web ? "on" : ""}`} onClick={() => setWeb((v) => !v)}>
-                        <GlobeIcon size={16} /> <span>联网</span>
-                        {web && <CheckIcon size={15} className="cadd-check" />}
-                      </button>
-                      <button className={`cadd-item ${kb ? "on" : ""}`} onClick={() => setKb((v) => !v)}>
-                        <BoxIcon size={16} /> <span>知识库</span>
-                        {kb && <CheckIcon size={15} className="cadd-check" />}
-                      </button>
-                      {kb && (
-                        <div className="cadd-kb">
-                          <button className={`cadd-kb-item ${!kbId ? "on" : ""}`} onClick={() => setKbId(undefined)}>
-                            全部集合
-                          </button>
-                          {kbList.map((k) => (
-                            <button
-                              key={k.kbId}
-                              className={`cadd-kb-item ${kbId === k.kbId ? "on" : ""}`}
-                              onClick={() => setKbId(k.kbId)}
-                            >
-                              {k.kbId} <small>{k.docs}</small>
-                            </button>
-                          ))}
-                          {kbList.length === 0 && <div className="cadd-kb-empty">暂无知识库</div>}
-                        </div>
-                      )}
+                    <div className="menu-backdrop" onClick={() => setParamsOpen(false)} />
+                    <div className="params-pop up">
+                      <div className="pp-head">
+                        <span>生成参数 · {modelLabel(model)}</span>
+                        <button
+                          className="pp-reset"
+                          onClick={() => {
+                            setSampling({});
+                            saveSampling(model, {});
+                          }}
+                        >
+                          重置
+                        </button>
+                      </div>
+                      {(
+                        [
+                          ["temperature", "温度", "0.7", "0.05"],
+                          ["topP", "top_p", "0.9", "0.05"],
+                          ["topK", "top_k", "40", "1"],
+                          ["minP", "min_p", "0", "0.01"],
+                          ["repeatPenalty", "重复惩罚", "1.0", "0.05"],
+                          ["maxTokens", "max_tokens", "无上限", "64"],
+                        ] as const
+                      ).map(([key, label, ph, step]) => (
+                        <label key={key} className="pp-row">
+                          <span>{label}</span>
+                          <input
+                            type="number"
+                            step={step}
+                            placeholder={`默认 ${ph}`}
+                            value={sampling[key] ?? ""}
+                            onChange={(e) => setParam(key, e.target.value)}
+                          />
+                        </label>
+                      ))}
+                      <div className="pp-note">仅对「{modelLabel(model)}」生效，自动保存。</div>
                     </div>
                   </>
                 )}
               </div>
-              {thinkLevel !== "off" && (
-                <button className="cchip on" onClick={cycleThink} title="思考档位（点击循环：低/中/高/关）">
-                  <ThinkIcon size={15} />
-                  <span className="cchip-lvl">{THINK_LABEL[thinkLevel]}</span>
+              {busy ? (
+                <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
+                  <StopIcon size={15} fill="currentColor" />
+                </button>
+              ) : (
+                <button className="csend" onClick={() => void send()} disabled={!model} title="发送">
+                  <ArrowUpIcon size={18} />
                 </button>
               )}
-              {web && (
-                <button className="cchip on" onClick={() => setWeb(false)} title="联网（点击关闭）">
-                  <GlobeIcon size={15} />
-                </button>
-              )}
-              {kb && (
-                <button
-                  className="cchip on"
-                  onClick={() => setKb(false)}
-                  title={`知识库${kbId ? `·${kbId}` : "·全部"}（点击关闭）`}
-                >
-                  <BoxIcon size={15} />
-                </button>
-              )}
-            </div>
-            <div className="composer-bar-right">
-            {contexts[model] ? (
-              <ContextRing pct={usage ? (usage.promptTokens / contexts[model]!) * 100 : 0} />
-            ) : null}
-            <ModelSelect models={models} value={model} onChange={setModel} up />
-            <div className="params-wrap">
-              <button
-                className={`params-btn ${Object.keys(sampling).length ? "on" : ""}`}
-                onClick={() => setParamsOpen((v) => !v)}
-                disabled={!model}
-                title="生成参数（按当前模型）"
-              >
-                <SlidersIcon size={16} />
-              </button>
-              {paramsOpen && (
-                <>
-                  <div className="menu-backdrop" onClick={() => setParamsOpen(false)} />
-                  <div className="params-pop up">
-                    <div className="pp-head">
-                      <span>生成参数 · {modelLabel(model)}</span>
-                      <button
-                        className="pp-reset"
-                        onClick={() => {
-                          setSampling({});
-                          saveSampling(model, {});
-                        }}
-                      >
-                        重置
-                      </button>
-                    </div>
-                    {(
-                      [
-                        ["temperature", "温度", "0.7", "0.05"],
-                        ["topP", "top_p", "0.9", "0.05"],
-                        ["topK", "top_k", "40", "1"],
-                        ["minP", "min_p", "0", "0.01"],
-                        ["repeatPenalty", "重复惩罚", "1.0", "0.05"],
-                        ["maxTokens", "max_tokens", "无上限", "64"],
-                      ] as const
-                    ).map(([key, label, ph, step]) => (
-                      <label key={key} className="pp-row">
-                        <span>{label}</span>
-                        <input
-                          type="number"
-                          step={step}
-                          placeholder={`默认 ${ph}`}
-                          value={sampling[key] ?? ""}
-                          onChange={(e) => setParam(key, e.target.value)}
-                        />
-                      </label>
-                    ))}
-                    <div className="pp-note">仅对「{modelLabel(model)}」生效，自动保存。</div>
-                  </div>
-                </>
-              )}
-            </div>
-            {busy ? (
-              <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
-                <StopIcon size={15} fill="currentColor" />
-              </button>
-            ) : (
-              <button className="csend" onClick={() => void send()} disabled={!model} title="发送">
-                <ArrowUpIcon size={18} />
-              </button>
-            )}
             </div>
           </div>
         </div>
-        <div className="composer-note">
-          {notice ? (
+        {notice && (
+          <div className="composer-note">
             <span className="composer-status">{notice}</span>
-          ) : (
-            <>
-              <span className="composer-tip">`+` 里可以开关联网、知识库和思考。</span>
-              <span className="composer-note-sep">·</span>
-              <span className="composer-tip">输入 `/` 可切模型、改思考档位、手动压缩上下文。</span>
-            </>
-          )}
-        </div>
+          </div>
+        )}
       </footer>
       </div>
       <SideDock

@@ -32,10 +32,12 @@
 
 ## 里程碑日志
 
-## 2026-06-27 — UI 一致性收口（composer / 设置记忆 / 运行态拆分）
+## 2026-06-27 — UI 一致性收口（composer / slash / 设置记忆 / 运行态拆分）
 
 - **聊天页入口更明确**：`Chat.tsx` 空态补一排快捷动作卡片（联网搜索 / 打开工作区 / 配置模型），把「直接提问」和「进入工作区做项目」两条路径讲清楚；点击后分别预填搜索提示、打开工作区创建流、直达设置里的模型分区。
-- **工作区 composer 与聊天页统一**：`Workspace.tsx` 的输入区改成轻量 `+` 菜单，收纳上传图片 / 思考档位 / 审批策略入口；保留右侧常驻审批策略 pill，避免危险权限藏太深。工作区空态也补了 starter actions 与说明文案，和聊天页的起手节奏一致。
+- **Chat / Workspace composer 统一成“前置运行态”**：聊天页新增 `ComposerContextStrip`，把 **模型 / 思考 / 联网 / 知识库 / 上下文压力**提到输入框上方；工作区把 `ContextBar` 扩成可接 children，把 **项目 / 分支 / 模型 / 思考 / 上下文压力**并到一行。`App.tsx` 也把 `contexts` 继续传进 `Workspace`，让历史线程回填 usage 后能算出正确百分比。
+- **`+` 按钮去重收口**：顶部状态条已经能直接改模型 / 思考 / 联网 / 知识库后，聊天与工作区的 `+` 不再展开重复菜单，统一退化为**上传图片**单一动作；工作区审批策略继续留在右侧常驻 pill。
+- **斜杠命令面板升级**：`SlashPalette.tsx` 改成两阶段 command palette 风格——头部显示当前阶段，列表右侧展示当前值 / 当前项，`/compact` 会带上当前上下文占比。`lib/slash.ts` 也补上 `THINK_META`，把文案与运行态标签统一起来。
 - **设置页记住上次分区**：`App.tsx` 把 `SettingsSection` 提升为应用级状态并持久化到 localStorage；`Settings.tsx` 新增 `initialSection` + `onSectionChange`，从聊天/工作区打开设置时可直达指定分区，返回后再次进入会回到上次停留位置。原有各 pane 继续保持挂载，避免切页引发知识库/记忆页面状态丢失或黑屏回归。
 - **原生 alert/confirm 收口到应用弹层**：`useConfirm()` 扩展 `alert()`，替换 `App.tsx` 与 `SideDock.tsx` 中的原生 `alert/confirm`，让新建工作区、删除项目/会话、git 提交失败提示都走同一套 UI。
 - **开始拆薄运行态逻辑**：抽出共享 hooks / helper，减少 `Chat.tsx` 与 `Workspace.tsx` 的重复：
@@ -44,7 +46,7 @@
   - `hooks/useMessageScroll.ts`：消息区自动滚底 / 跳到最新
   - `lib/composer.ts`：textarea 自适应高度、重置、聚焦尾部
   - `lib/message-runtime.ts`：用户轮次拼装、重新生成替换、取消、末条用户查找
-- **验证**：`npm run typecheck --workspace @ew/ui`、`npm run build --workspace @ew/ui` 通过；在 in-app browser 实测了设置页「记住上次分区」、聊天页快捷入口、工作区 composer 的 `+` 菜单与审批策略入口，确认设置页黑屏未回归。
+- **验证**：`npm run typecheck --workspace @ew/ui`、`npm run build --workspace @ew/ui` 通过；在 in-app browser 实测了设置页「记住上次分区」、聊天 / 工作区顶部运行态状态条、升级后的 slash 面板，以及 `+` 号已退化为单一上传动作，确认设置页黑屏未回归。
 
 ## 2026-06-25（续3）— 消息交互（复制/重试/编辑/重新生成）+ 思考开关真关
 

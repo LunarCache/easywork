@@ -96,7 +96,7 @@ npm run app:build --workspace @ew/desktop  # 出 macOS dmg + .app
 | [docs/FEATURES.md](docs/FEATURES.md) | 功能与设计详解（模型 / Agent / 记忆 / RAG / UI / `/v1` 端点） |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构（Core Daemon 模型）/ Monorepo / 技术栈 / 环境变量 / 平台说明 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 状态总览（已完成 / 待做）+ 里程碑日志 |
-| [CLAUDE.md](CLAUDE.md) | 开发约定与关键正确性约束（权威来源） |
+| [AGENTS.md](AGENTS.md) | 开发约定与关键正确性约束（权威来源） |
 
 ---
 

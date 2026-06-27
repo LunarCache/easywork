@@ -15,6 +15,7 @@ import {
 import { loadDisabledSkills, loadThink, saveThink } from "../lib/prefs.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
+import { ComposerContextPill, ComposerUsagePill } from "../components/ComposerContextStrip.js";
 import { ContextBar } from "../components/ContextBar.js";
 import { SideDock } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
@@ -70,6 +71,7 @@ export function Workspace({
   project,
   projects,
   models,
+  contexts,
   threadId,
   onChanged,
   onThreadsChanged,
@@ -83,6 +85,7 @@ export function Workspace({
   /** 全部工作区（供 composer 上下文条切换）。 */
   projects: Project[];
   models: string[];
+  contexts: Record<string, number>;
   /** 当前会话（由 App/会话列表 控制）。 */
   threadId: string;
   onChanged: () => void;
@@ -106,7 +109,6 @@ export function Workspace({
   const [thinkLevel, setThinkLevel] = useState<ThinkLevel>("off");
   const [notice, setNotice] = useState<string | null>(null);
   const [approval, setApproval] = useState<PendingApproval | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
   const [git, setGit] = useState<GitStatus>({ repo: false, files: [] });
   const [branch, setBranch] = useState<string | undefined>(undefined);
   const [branches, setBranches] = useState<string[]>([]);
@@ -114,6 +116,9 @@ export function Workspace({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [dockTarget, setDockTarget] = useState<{ path: string; nonce: number } | null>(null);
   const [wsFiles, setWsFiles] = useState<WsEntry[]>([]);
+  const [usage, setUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(
+    null,
+  );
   const { images, setImages, fileRef, onPickImages } = useComposerImages();
   const { scrollRef, showJump, onMessagesScroll, jumpToBottom } = useMessageScroll(msgs);
   const abortRef = useRef<AbortController | null>(null);
@@ -137,8 +142,19 @@ export function Workspace({
       .then((r) => setNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
       .catch(() => setNotice("压缩失败"));
   }, [threadId]);
+  const contextLimit = contexts[model];
+  const contextPct = contextLimit ? (((usage?.promptTokens ?? 0) / contextLimit) * 100) : null;
+  const contextTitle =
+    contextLimit == null
+      ? undefined
+      : usage
+        ? `上下文已用 ${Math.round(contextPct ?? 0)}% · ${usage.promptTokens}/${contextLimit} tokens`
+        : `上下文窗口 ${contextLimit} tokens`;
   const slash = useSlashPalette(input, setInput, {
     models,
+    currentModel: model,
+    currentThink: thinkLevel,
+    usagePct: contextPct,
     onThink: changeThink,
     onModel: setModel,
     onCompact: doCompact,
@@ -188,11 +204,17 @@ export function Workspace({
   useEffect(() => {
     abortRef.current?.abort();
     setApproval(null);
+    setUsage(null);
     let cancelled = false;
     void (async () => {
       try {
         const list = await getClient().threadMessages(threadId);
-        if (!cancelled) setMsgs(storedToUiMsgs(list as unknown as StoredMsg[]));
+        if (cancelled) return;
+        setMsgs(storedToUiMsgs(list as unknown as StoredMsg[]));
+        const u = await getClient()
+          .threadUsage(threadId)
+          .catch(() => ({ usage: null }));
+        if (!cancelled && u.usage) setUsage(u.usage);
       } catch {
         if (!cancelled) setMsgs([]);
       }
@@ -253,7 +275,8 @@ export function Workspace({
         { threadId, model, history, projectId: project.id, thinkingLevel: thinkLevel, ...(over?.regenerate ? { regenerate: true } : {}), ...(excludeSkills.length ? { excludeSkills } : {}) },
         { signal: ac.signal },
       )) {
-        if (ev.type === "approval-request") setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });
+        if (ev.type === "usage") setUsage(ev.usage);
+        else if (ev.type === "approval-request") setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });
         else if (ev.type === "retry") setNotice(`重试中 (${ev.attempt}/${ev.maxAttempts})…`);
         else if (ev.type === "compaction")
           setNotice(ev.phase === "start" ? "压缩上下文中…" : ev.ok === false ? "压缩未完成" : "已压缩上下文");
@@ -354,7 +377,14 @@ export function Workspace({
             onOpenFolder={onOpenFolder}
             onSwitchBranch={switchBranch}
             onOpenGitGraph={() => setDockOpen(true)}
-          />
+          >
+            <ModelSelect models={models} value={model} onChange={setModel} up variant="strip" />
+            <ComposerContextPill tone={thinkLevel !== "off" ? "on" : "default"} onClick={cycleThink} title="思考档位（点击循环：低/中/高/关）">
+              <ThinkIcon size={14} />
+              <span>思考 {THINK_LABEL[thinkLevel]}</span>
+            </ComposerContextPill>
+            {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
+          </ContextBar>
           <div className="composer-box">
             {images.length > 0 && (
               <div className="composer-images">
@@ -401,52 +431,9 @@ export function Workspace({
             />
             <div className="composer-bar">
               <div className="composer-bar-left">
-                <div className="cadd-wrap">
-                  <button className="cbtn" title="添加 / 选项" onClick={() => setAddOpen((v) => !v)}>
-                    <PlusBtnIcon size={18} />
-                  </button>
-                  {addOpen && (
-                    <>
-                      <div className="menu-backdrop" onClick={() => setAddOpen(false)} />
-                      <div className="cadd-menu up">
-                        <button
-                          className="cadd-item"
-                          onClick={() => {
-                            fileRef.current?.click();
-                            setAddOpen(false);
-                          }}
-                        >
-                          <PlusBtnIcon size={16} /> <span>上传图片</span>
-                        </button>
-                        <div className="cadd-sep" />
-                        <button
-                          className={`cadd-item ${thinkLevel !== "off" ? "on" : ""}`}
-                          onClick={cycleThink}
-                          title="点击循环：关 / 低 / 中 / 高"
-                        >
-                          <ThinkIcon size={16} /> <span>思考</span>
-                          <span className="cadd-lvl">{THINK_LABEL[thinkLevel]}</span>
-                        </button>
-                        <button
-                          className="cadd-item"
-                          onClick={() => {
-                            setPermOpen(true);
-                            setAddOpen(false);
-                          }}
-                        >
-                          <ShieldIcon size={16} /> <span>审批策略</span>
-                          <span className="cadd-lvl">{APPROVAL_LABEL[approvalMode]}</span>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-                {thinkLevel !== "off" && (
-                  <button className="cchip on" onClick={cycleThink} title="思考档位（点击循环：低/中/高/关）">
-                    <ThinkIcon size={15} />
-                    <span className="cchip-lvl">{THINK_LABEL[thinkLevel]}</span>
-                  </button>
-                )}
+                <button className="cbtn" title="上传图片" onClick={() => fileRef.current?.click()}>
+                  <PlusBtnIcon size={18} />
+                </button>
                 {images.length > 0 && (
                   <span className="cmini-chip" title={`已附加 ${images.length} 张图片`}>
                     <FileImageIcon size={14} />
@@ -489,7 +476,6 @@ export function Workspace({
                     </>
                   )}
                 </div>
-                <ModelSelect models={models} value={model} onChange={setModel} />
                 {busy ? (
                   <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
                     <StopIcon size={15} fill="currentColor" />
@@ -501,17 +487,11 @@ export function Workspace({
                 )}
               </div>
             </div>
-            <div className="composer-note">
-              {notice ? (
+            {notice && (
+              <div className="composer-note">
                 <span className="composer-status">{notice}</span>
-              ) : (
-                <>
-                  <span className="composer-tip">审批策略决定 AI 何时需要你确认。</span>
-                  <span className="composer-note-sep">·</span>
-                  <span className="composer-tip">输入 `/` 可切模型、改思考档位、手动压缩上下文。</span>
-                </>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </footer>
   );

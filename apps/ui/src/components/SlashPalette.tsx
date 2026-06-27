@@ -3,18 +3,31 @@
 //         ② 参数（think 4 档 / model 模糊匹配）→ 选中即执行并清空输入。
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { ThinkLevel } from "@ew/shared";
-import { matchCmds, parseCmd, slashQuery, THINK_LEVELS } from "../lib/slash.js";
+import { modelLabel } from "../lib/agent-stream.js";
+import { matchCmds, parseCmd, slashQuery, THINK_LEVELS, THINK_LABEL, THINK_META } from "../lib/slash.js";
+import { BrainIcon, CheckIcon, ClockIcon, EnterIcon, ThinkIcon } from "../icons.js";
+
+type SlashIcon = typeof BrainIcon;
 
 export interface SlashHandlers {
   models: string[];
+  currentModel: string;
+  currentThink: ThinkLevel;
+  usagePct?: number | null;
   onThink: (level: ThinkLevel) => void;
   onModel: (model: string) => void;
   onCompact: () => void;
 }
 
 interface Item {
-  label: string;
-  hint?: string;
+  key: string;
+  title: string;
+  desc: string;
+  cmd: string;
+  value?: string;
+  active?: boolean;
+  tone?: "default" | "warn";
+  Icon: SlashIcon;
   run: () => void;
 }
 
@@ -27,29 +40,61 @@ export function useSlashPalette(
   const [dismissed, setDismissed] = useState(false);
 
   const q = slashQuery(input);
+  const stage = q == null ? null : q.includes(" ") ? parseCmd(input).name : "root";
   const items = useMemo<Item[]>(() => {
     if (q == null) return [];
     const hasSpace = q.includes(" ");
     if (!hasSpace) {
-      // 命令名阶段
-      return matchCmds(q).map((c) => ({
-        label: `/${c.name}`,
-        hint: c.arg ? `${c.desc} · ${c.arg}` : c.desc,
-        run: () => {
-          if (c.name === "compact") {
+      const usagePct = h.usagePct == null ? null : Math.max(0, Math.min(100, h.usagePct));
+      return matchCmds(q).map((c) => {
+        if (c.name === "model") {
+          return {
+            key: c.name,
+            title: "切换模型",
+            desc: c.desc,
+            cmd: "/model",
+            value: modelLabel(h.currentModel),
+            Icon: BrainIcon,
+            run: () => setInput("/model "),
+          } satisfies Item;
+        }
+        if (c.name === "think") {
+          return {
+            key: c.name,
+            title: "思考强度",
+            desc: c.desc,
+            cmd: "/think",
+            value: THINK_LABEL[h.currentThink],
+            Icon: ThinkIcon,
+            run: () => setInput("/think "),
+          } satisfies Item;
+        }
+        return {
+          key: c.name,
+          title: "压缩上下文",
+          desc: "整理会话历史，回收窗口空间",
+          cmd: "/compact",
+          value: usagePct == null ? undefined : `${Math.round(usagePct)}%`,
+          tone: usagePct != null && usagePct > 65 ? "warn" : "default",
+          Icon: ClockIcon,
+          run: () => {
             h.onCompact();
             setInput("");
-          } else {
-            setInput(`/${c.name} `); // 进入参数阶段
-          }
-        },
-      }));
+          },
+        } satisfies Item;
+      });
     }
     // 参数阶段
     const { name, arg } = parseCmd(input);
     if (name === "think") {
       return THINK_LEVELS.filter((l) => l.startsWith(arg.toLowerCase())).map((lv) => ({
-        label: lv,
+        key: lv,
+        title: THINK_LABEL[lv],
+        desc: THINK_META[lv].hint,
+        cmd: "/think",
+        value: lv === h.currentThink ? "当前" : undefined,
+        active: lv === h.currentThink,
+        Icon: ThinkIcon,
         run: () => {
           h.onThink(lv);
           setInput("");
@@ -62,7 +107,13 @@ export function useSlashPalette(
         .filter((m) => m.toLowerCase().includes(a))
         .slice(0, 8)
         .map((m) => ({
-          label: m,
+          key: m,
+          title: modelLabel(m),
+          desc: m,
+          cmd: "/model",
+          value: m === h.currentModel ? "当前" : undefined,
+          active: m === h.currentModel,
+          Icon: BrainIcon,
           run: () => {
             h.onModel(m);
             setInput("");
@@ -104,9 +155,21 @@ export function useSlashPalette(
 
   const palette: ReactNode = active ? (
     <div className="slash-pal" role="listbox">
+      <div className="slash-head">
+        <div className="slash-breadcrumb">
+          <span className="slash-kbd">/</span>
+          <span className="slash-stage">
+            {stage === "root" ? "命令" : stage === "model" ? "正在设置 /model" : "正在设置 /think"}
+          </span>
+        </div>
+        <div className="slash-help">
+          <EnterIcon size={13} />
+          <span>回车应用</span>
+        </div>
+      </div>
       {items.map((it, i) => (
         <button
-          key={it.label}
+          key={it.key}
           type="button"
           className={`slash-item ${i === sel ? "on" : ""}`}
           role="option"
@@ -118,8 +181,17 @@ export function useSlashPalette(
             setIdx(0);
           }}
         >
-          <span className="slash-label">{it.label}</span>
-          {it.hint && <span className="slash-hint">{it.hint}</span>}
+          <span className={`slash-icon ${it.tone === "warn" ? "warn" : ""}`}>
+            <it.Icon size={16} />
+          </span>
+          <span className="slash-main">
+            <span className="slash-title">{it.title}</span>
+            <span className="slash-sub">{it.desc}</span>
+          </span>
+          <span className="slash-meta">
+            {it.value && <span className="set-pill">{it.value}</span>}
+            {it.active ? <CheckIcon size={14} /> : <code>{it.cmd}</code>}
+          </span>
         </button>
       ))}
     </div>

@@ -1,6 +1,6 @@
 # EasyWork · 架构
 
-> 功能见 [FEATURES](FEATURES.md)；进度见 [PROGRESS](PROGRESS.md)；开发约定的权威来源是 [CLAUDE.md](../CLAUDE.md)。
+> 功能见 [FEATURES](FEATURES.md)；进度见 [PROGRESS](PROGRESS.md)；开发约定的权威来源是 [AGENTS.md](../AGENTS.md)。
 
 ## Core Daemon 模型
 

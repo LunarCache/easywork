@@ -107,7 +107,7 @@
 # EasyWork · 系统设计与功能详解（学习向）
 
 > 这是一份**讲透原理**的长文：把整体架构与各子系统的功能设计、关键数据流、以及"为什么这样设计"一并讲清，供学习与上手。
-> 速查功能清单见 [FEATURES](FEATURES.md)；架构/环境变量见 [ARCHITECTURE](ARCHITECTURE.md)；开发约定与正确性约束的权威来源是 [CLAUDE.md](../CLAUDE.md)。
+> 速查功能清单见 [FEATURES](FEATURES.md)；架构/环境变量见 [ARCHITECTURE](ARCHITECTURE.md)；开发约定与正确性约束的权威来源是 [AGENTS.md](../AGENTS.md)。
 > 文中 `file:line` 形式的锚点便于跳转源码核对。
 
 ---
@@ -454,14 +454,14 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 ### 13.3 Chat vs Workspace + SSE
 
-共用 MessageStream / SideDock / ModelSelect / composer / 审批卡 / **斜杠命令面板** / **思考分级 chip**。
-- **Chat**：composer `+` 菜单（上传图片 + 联网/知识库 开关，KB 开可选集合）+ 思考档位 chip；右侧 ContextRing + ModelSelect + 参数 + 发送；工件面板（fs 工具后刷新、首件自动开 dock）。
-- **Workspace**：composer 有**审批策略 pill**（中文档位 只读/逐项确认/自动编辑/完全访问，full-auto 橙色警示；改档 PATCH `project.approvalMode`，`send()` 前 await 在途 PATCH 防"切档即发"）+ 思考档位 chip + **内嵌 ModelSelect**（移出原顶部 ws-bar，底栏右侧）；**空态居中**（`msgs.length===0` 渲染 `.ws-hero`：品牌标 + 时段问候语 + 居中限宽 composer，否则消息流在上、composer 在底）；**上下文条 `ContextBar`**（输入卡上方，项目/分支两个可选下拉：搜索过滤 + 列表 + 页脚动作，`menu-backdrop` 点击关；分支取 `gitBranches.all`、当前显示未提交改动数、`gitSwitch` 切换、「Git 图谱」开 dock）。SideDock 带 git 上下文；mutating 工具后刷 git + ws 文件 + 上报分支给标题栏。
+共用 MessageStream / SideDock / ModelSelect / composer / 审批卡 / **斜杠命令面板** / **运行态上下文 pill**。
+- **Chat**：composer 输入卡顶部用 `ComposerContextStrip` 前置本轮生效的 **模型 / 思考 / 联网 / 知识库 / 上下文压力**；底栏左侧 `+` 仅做**上传图片**，右侧保留生成参数与发送。历史工件仍走 SideDock（fs 工具后刷新、首件自动开 dock）。
+- **Workspace**：`ContextBar` 除项目 / 分支下拉外，还接收 children，把 **模型 / 思考 / 上下文压力**注入到同一行；底栏左侧 `+` 同样只做**上传图片**，右侧保留**审批策略 pill**（中文档位 只读/逐项确认/自动编辑/完全访问，full-auto 橙色警示；改档 PATCH `project.approvalMode`，`send()` 前 await 在途 PATCH 防"切档即发"）与发送。**空态居中**（`msgs.length===0` 渲染 `.ws-hero`：品牌标 + 时段问候语 + 居中限宽 composer，否则消息流在上、composer 在底）。SideDock 带 git 上下文；mutating 工具后刷 git + ws 文件 + 上报分支给标题栏。
 - **审批卡**（`.approval-wrap`）：危险工具挂起时在 **composer 正上方内嵌弹出**（与输入框同宽、从下滑入），非遮罩弹层——不挡对话；含工具名 + 命令 JSON + 拒绝/本会话总是允许/允许。Chat 与 Workspace 一致。
-- **斜杠命令**（`lib/slash.ts` + `components/SlashPalette.tsx` 的 `useSlashPalette` hook，两 composer 共用）：输入「/」弹两阶段自动补全（命令名→参数）；`onKeyDown` 优先消费 ↑↓/Enter/Tab/Esc。`/think <档位>` 设思考、`/model <名>` 切模型（下一轮 run 带新 modelId，复用 getOrCreate 重建保上下文）、`/compact` 调 `POST /threads/:id/compact`。
-- **思考分级**：composer chip（关/低/中/高，点击循环）+ `/think`；`thinkingLevel` **按模型持久化**（`prefs.ts`，默认 off），run 时随 `runAgent` 下发。
+- **斜杠命令**（`lib/slash.ts` + `components/SlashPalette.tsx` 的 `useSlashPalette` hook，两 composer 共用）：输入「/」弹两阶段自动补全（命令名→参数），面板头显示当前阶段，列表右侧直接带**当前值 / 当前项**；`/compact` 还会显示当前上下文占比。`onKeyDown` 优先消费 ↑↓/Enter/Tab/Esc。支持 `/think <档位>` 设思考、`/model <名>` 切模型（下一轮 run 带新 modelId，复用 getOrCreate 重建保上下文）、`/compact` 调 `POST /threads/:id/compact`。
+- **思考分级**：思考状态统一以前置 pill 呈现（关/低/中/高，点击循环）+ `/think`；`thinkingLevel` **按模型持久化**（`prefs.ts`，默认 off），run 时随 `runAgent` 下发。
 - **SSE 处理**：`runAgent` 流 → `usage`(驱动环)/`approval-request`(审批卡)/`retry`·`compaction`(状态条瞬态提示，有新 text 即清)/`final`/`error`/其余→`applyAgentEvent` reducer。`AbortController` 卸载或停止时取消（后端回滚 + 不落库，UI 标"已停止·本轮不计入上下文")。**图片**经 FileReader→base64→`{type:"image",mimeType,data}` 内容片段。采样参数**按模型**存。
-- **ContextRing**：20px SVG，`promptTokens/contexts[model]`，accent→琥珀>65%→红>85%。
+- **ContextRing / Usage pill**：20px SVG 环包进 `ComposerUsagePill`，统一显示 `promptTokens/contexts[model]`；accent → 琥珀 >65% → 红 >85%，聊天与工作区复用同一视觉语义。
 
 ### 13.4 MessageStream
 

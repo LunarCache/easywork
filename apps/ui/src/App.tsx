@@ -389,6 +389,7 @@ export function App() {
                 project={project}
                 projects={projects}
                 models={models}
+                contexts={contexts}
                 threadId={workThreadId || latestWorkThread(project.id)}
                 onChanged={refreshProjects}
                 onThreadsChanged={refreshThreads}
