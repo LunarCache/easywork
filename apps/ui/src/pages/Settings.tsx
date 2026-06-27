@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { type Appearance, type ThemePrefs } from "../lib/prefs.js";
 import { Models } from "./Models.js";
 import { Skills } from "./Skills.js";
@@ -67,6 +67,8 @@ function AppearanceSelect({ value, onChange }: { value: Appearance; onChange: (a
 export function Settings({
   theme,
   navWidth,
+  initialSection,
+  onSectionChange,
   onThemeChange,
   onBack,
   onModelsChange,
@@ -74,16 +76,20 @@ export function Settings({
   theme: ThemePrefs;
   /** 与主侧栏同宽，保证设置页的左栏分割线与默认页对齐。 */
   navWidth?: number;
+  initialSection?: SettingsSection;
+  onSectionChange?: (section: SettingsSection) => void;
   onThemeChange: (next: ThemePrefs) => void;
   onBack: () => void;
   onModelsChange: () => void;
 }) {
-  const [sec, setSec] = useState<SettingsSection>("general");
+  const start = initialSection ?? "general";
+  const [sec, setSec] = useState<SettingsSection>(start);
   // 已访问的「页」型分区保持挂载（CSS 隐藏非当前），避免切走丢状态（如知识库上传/索引轮询）。
-  const [visited, setVisited] = useState<Set<SettingsSection>>(() => new Set<SettingsSection>(["general"]));
+  const [visited, setVisited] = useState<Set<SettingsSection>>(() => new Set<SettingsSection>([start]));
   const openSec = (id: SettingsSection) => {
     setVisited((v) => (v.has(id) ? v : new Set(v).add(id)));
     setSec(id);
+    onSectionChange?.(id);
   };
   const SECS: { id: SettingsSection; label: string; Icon: typeof PaletteIcon }[] = [
     { id: "general", label: "通用", Icon: PaletteIcon },
@@ -95,6 +101,12 @@ export function Settings({
   ];
   // 「卡片行」型分区（自带标题 + 卡片）；其余是直接铺满的管理页（自带头部）。
   const CARD_SECS = new Set<SettingsSection>(["general"]);
+
+  useEffect(() => {
+    if (!initialSection) return;
+    setSec(initialSection);
+    setVisited((v) => (v.has(initialSection) ? v : new Set(v).add(initialSection)));
+  }, [initialSection]);
 
   return (
     <div className="set-page">

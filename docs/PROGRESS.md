@@ -32,6 +32,20 @@
 
 ## 里程碑日志
 
+## 2026-06-27 — UI 一致性收口（composer / 设置记忆 / 运行态拆分）
+
+- **聊天页入口更明确**：`Chat.tsx` 空态补一排快捷动作卡片（联网搜索 / 打开工作区 / 配置模型），把「直接提问」和「进入工作区做项目」两条路径讲清楚；点击后分别预填搜索提示、打开工作区创建流、直达设置里的模型分区。
+- **工作区 composer 与聊天页统一**：`Workspace.tsx` 的输入区改成轻量 `+` 菜单，收纳上传图片 / 思考档位 / 审批策略入口；保留右侧常驻审批策略 pill，避免危险权限藏太深。工作区空态也补了 starter actions 与说明文案，和聊天页的起手节奏一致。
+- **设置页记住上次分区**：`App.tsx` 把 `SettingsSection` 提升为应用级状态并持久化到 localStorage；`Settings.tsx` 新增 `initialSection` + `onSectionChange`，从聊天/工作区打开设置时可直达指定分区，返回后再次进入会回到上次停留位置。原有各 pane 继续保持挂载，避免切页引发知识库/记忆页面状态丢失或黑屏回归。
+- **原生 alert/confirm 收口到应用弹层**：`useConfirm()` 扩展 `alert()`，替换 `App.tsx` 与 `SideDock.tsx` 中的原生 `alert/confirm`，让新建工作区、删除项目/会话、git 提交失败提示都走同一套 UI。
+- **开始拆薄运行态逻辑**：抽出共享 hooks / helper，减少 `Chat.tsx` 与 `Workspace.tsx` 的重复：
+  - `hooks/useAvailableModel.ts`：模型变更时自动纠正当前选中值
+  - `hooks/useComposerImages.ts`：图片附件选择与 base64 转换
+  - `hooks/useMessageScroll.ts`：消息区自动滚底 / 跳到最新
+  - `lib/composer.ts`：textarea 自适应高度、重置、聚焦尾部
+  - `lib/message-runtime.ts`：用户轮次拼装、重新生成替换、取消、末条用户查找
+- **验证**：`npm run typecheck --workspace @ew/ui`、`npm run build --workspace @ew/ui` 通过；在 in-app browser 实测了设置页「记住上次分区」、聊天页快捷入口、工作区 composer 的 `+` 菜单与审批策略入口，确认设置页黑屏未回归。
+
 ## 2026-06-25（续3）— 消息交互（复制/重试/编辑/重新生成）+ 思考开关真关
 
 - **代码块**：`pre` 覆写 `CodeBlock`，顶栏语言标签 + 复制（取高亮 span 树纯文本）；内联代码不受影响。

@@ -9,8 +9,10 @@ import { FilesPage } from "./pages/FilesPage.js";
 import { Titlebar } from "./components/Titlebar.js";
 import { Sidebar, type Mode } from "./components/Sidebar.js";
 import { SearchPalette } from "./components/SearchPalette.js";
+import { useConfirm } from "./components/ConfirmDialog.js";
 import { Settings } from "./pages/Settings.js";
 import { FolderTreeIcon, InboxIcon } from "./icons.js";
+import type { SettingsSection } from "./pages/Settings.js";
 
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
 type Overlay = "settings" | null;
@@ -22,12 +24,21 @@ interface ThreadItem {
 }
 
 const SESSION_W_KEY = "ew.sessionWidth";
+const SETTINGS_SEC_KEY = "ew.settingsSection";
+const SETTINGS_SECTIONS: SettingsSection[] = ["general", "models", "kb", "skills", "mcp", "memory"];
+
 const loadSessionWidth = (): number => {
   const n = Number(localStorage.getItem(SESSION_W_KEY));
   return Number.isFinite(n) && n >= 200 && n <= 460 ? n : 272;
 };
 
+const loadSettingsSection = (): SettingsSection => {
+  const value = localStorage.getItem(SETTINGS_SEC_KEY);
+  return SETTINGS_SECTIONS.includes(value as SettingsSection) ? (value as SettingsSection) : "general";
+};
+
 export function App() {
+  const { confirm: askConfirm, alert: showAlert, dialog: confirmDialog } = useConfirm();
   const [mode, setMode] = useState<Mode>("chat");
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -47,6 +58,7 @@ export function App() {
   const [workBranch, setWorkBranch] = useState<string | undefined>(undefined);
   // 点项目「查看文件」→ 主区切到该项目的文件浏览页（替代对话，左上角「返回任务」回退）。
   const [filesProjectId, setFilesProjectId] = useState<string | null>(null);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(loadSettingsSection);
 
   // 外观：应用到 <html>；跟随系统时监听 OS 明暗变化实时切换。
   useEffect(() => {
@@ -63,6 +75,14 @@ export function App() {
     setDockOpen(false);
     setWorkBranch(undefined);
   }, [mode, threadId, workThreadId, projectId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SETTINGS_SEC_KEY, settingsSection);
+    } catch {
+      /* ignore */
+    }
+  }, [settingsSection]);
 
   const changeTheme = useCallback((next: ThemePrefs) => {
     setTheme(next);
@@ -90,7 +110,15 @@ export function App() {
 
   const newWorkspace = async () => {
     const dir = await pickWorkspaceDir();
-    if (!dir && !confirm("未选择目录。在默认工作区下新建 NewProject？")) return;
+    if (
+      !dir &&
+      !(await askConfirm({
+        title: "未选择目录，改为创建默认工作区？",
+        body: "将使用 EasyWork 的默认工作区目录创建一个新的本地工作区，你之后仍可再切换到任意项目文件夹。",
+        okLabel: "创建工作区",
+      }))
+    )
+      return;
     try {
       const p = dir
         ? await getClient().createProject({ name: dir.split(/[/\\]/).filter(Boolean).pop() || "工作区", workspaceDir: dir })
@@ -99,18 +127,23 @@ export function App() {
       setProjectId(p.id);
       setMode("work");
     } catch (e) {
-      alert(`创建工作区失败：${e instanceof Error ? e.message : String(e)}`);
+      await showAlert({
+        title: "创建工作区失败",
+        body: e instanceof Error ? e.message : String(e),
+      });
     }
   };
 
   const delProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const p = projects.find((x) => x.id === id);
-    const ok = confirm(
-      `删除工作区「${p?.name ?? "该工作区"}」？\n\n` +
-        `仅删除本软件内的会话历史（含其下全部对话及由其抽取的记忆事实），不会删除工作区目录中的任何文件：\n` +
-        `${p?.workspaceDir ?? ""}`,
-    );
+    const ok = await askConfirm({
+      title: `删除工作区「${p?.name ?? "该工作区"}」？`,
+      body:
+        `仅删除本软件内的会话历史（含其下全部对话及由其抽取的记忆事实），不会删除工作区目录中的任何文件。\n\n` +
+        `工作区目录：\n${p?.workspaceDir ?? "默认工作区"}`,
+      danger: true,
+    });
     if (!ok) return;
     await getClient().deleteProject(id);
     setProjectId((cur) => (cur === id ? null : cur));
@@ -143,6 +176,23 @@ export function App() {
   useEffect(() => {
     void check();
   }, [check]);
+
+  useEffect(() => {
+    const openSettings = ((ev?: Event) => {
+      const section = (ev as CustomEvent<SettingsSection | undefined> | undefined)?.detail;
+      setSettingsSection((current) => section ?? current);
+      setOverlay("settings");
+    }) as EventListener;
+    const createWorkspace = () => {
+      void newWorkspace();
+    };
+    window.addEventListener("ew:open-settings", openSettings);
+    window.addEventListener("ew:new-workspace", createWorkspace as EventListener);
+    return () => {
+      window.removeEventListener("ew:open-settings", openSettings);
+      window.removeEventListener("ew:new-workspace", createWorkspace as EventListener);
+    };
+  }, []);
 
   const newChat = () => {
     setFilesProjectId(null);
@@ -216,7 +266,14 @@ export function App() {
   const delThread = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const t = threads.find((x) => x.id === id);
-    if (!confirm(`删除对话「${t?.title || "新会话"}」？此操作不可撤销（删除会话记录及由其抽取的记忆事实）。`)) return;
+    if (
+      !(await askConfirm({
+        title: `删除对话「${t?.title || "新会话"}」？`,
+        body: "此操作不可撤销，会同时删除会话记录以及由该对话抽取出的记忆事实。",
+        danger: true,
+      }))
+    )
+      return;
     await getClient().deleteThread(id);
     if (id === threadId) newChat();
     if (id === workThreadId) {
@@ -362,7 +419,15 @@ export function App() {
         </main>
       </div>
       {overlay === "settings" && (
-        <Settings theme={theme} navWidth={sessionWidth} onThemeChange={changeTheme} onModelsChange={check} onBack={() => setOverlay(null)} />
+        <Settings
+          theme={theme}
+          navWidth={sessionWidth}
+          initialSection={settingsSection}
+          onSectionChange={setSettingsSection}
+          onThemeChange={changeTheme}
+          onModelsChange={check}
+          onBack={() => setOverlay(null)}
+        />
       )}
       {searchOpen && (
         <SearchPalette
@@ -374,6 +439,7 @@ export function App() {
           onClose={() => setSearchOpen(false)}
         />
       )}
+      {confirmDialog}
     </div>
   );
 }

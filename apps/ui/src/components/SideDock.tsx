@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ExecResult, GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
+import { useConfirm } from "./ConfirmDialog.js";
 import { FileViewer } from "./FileViewer.js";
 import { fileType } from "../lib/filetype.js";
 import type { UiMsg } from "../lib/agent-stream.js";
@@ -415,6 +416,7 @@ function PreviewTab({ url, onClear }: { url: string | null; onClear: () => void 
 
 // ===== 改动 tab：git 审查（分组/hunk/commit/push/pull/history）=====
 function DiffTab({ git }: { git: GitContext }) {
+  const { alert: showAlert, dialog: confirmDialog } = useConfirm();
   const { projectId, status, remote, onRefresh } = git;
   const [commitMsg, setCommitMsg] = useState("");
   const [committing, setCommitting] = useState(false);
@@ -437,7 +439,9 @@ function DiffTab({ git }: { git: GitContext }) {
       if (r.ok) {
         setCommitMsg("");
         setHistoryNonce((n) => n + 1);
-      } else alert(`提交失败：${r.error ?? ""}`);
+      } else {
+        await showAlert({ title: "提交失败", body: r.error ?? "未知错误" });
+      }
       await onRefresh();
     } finally {
       setCommitting(false);
@@ -541,6 +545,7 @@ function DiffTab({ git }: { git: GitContext }) {
           </button>
         </div>
       )}
+      {confirmDialog}
     </>
   );
 }

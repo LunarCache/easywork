@@ -2,6 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage, ThinkLevel } from "@ew/shared";
 import type { WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
+import { autoGrowComposer, focusComposerEnd, resetComposer } from "../lib/composer.js";
+import {
+  appendUserTurn,
+  findLastUser,
+  markLastAssistantCancelled,
+  replaceLastAssistantTurn,
+  toRunHistory,
+  toUserContent,
+  updateLastAssistant,
+} from "../lib/message-runtime.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
 import { SideDock } from "../components/SideDock.js";
@@ -13,7 +23,6 @@ import {
   applyAgentEvent,
   messageText,
   modelLabel,
-  splitThink,
   storedToUiMsgs,
   type StoredMsg,
   type PendingApproval,
@@ -29,6 +38,9 @@ import {
   saveThink,
   type Sampling,
 } from "../lib/prefs.js";
+import { useAvailableModel } from "../hooks/useAvailableModel.js";
+import { useComposerImages } from "../hooks/useComposerImages.js";
+import { useMessageScroll } from "../hooks/useMessageScroll.js";
 import {
   ArrowUpIcon,
   BoxIcon,
@@ -54,6 +66,12 @@ const STARTERS: { label: string; prompt: string; Icon: typeof CodeIcon }[] = [
   { label: "头脑风暴", prompt: "我想做一个项目，帮我头脑风暴一些点子：", Icon: SparkIcon },
 ];
 
+const QUICK_ACTIONS: { label: string; hint: string; action: "search" | "workspace" | "settings"; Icon: typeof GlobeIcon }[] = [
+  { label: "试试联网搜索", hint: "直接从网页找资料", action: "search", Icon: GlobeIcon },
+  { label: "打开工作区", hint: "让 AI 读写你的项目", action: "workspace", Icon: FileIcon },
+  { label: "配置模型", hint: "本地模型或云端 provider", action: "settings", Icon: SlidersIcon },
+];
+
 // 工具卡 / 消息渲染已抽到 components/MessageStream.tsx（聊天与工作区共用）。
 
 const DEMO = !!new URLSearchParams(location.search).get("demo");
@@ -73,7 +91,7 @@ export function Chat({
   dockOpen: boolean;
   setDockOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
-  const [model, setModel] = useState(models[0] ?? "");
+  const { model, setModel } = useAvailableModel(models);
   const [msgs, setMsgs] = useState<UiMsg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -90,16 +108,15 @@ export function Chat({
     null,
   );
   const [approval, setApproval] = useState<PendingApproval | null>(null);
-  const [images, setImages] = useState<UiImage[]>([]);
+  const { images, setImages, fileRef, onPickImages } = useComposerImages();
   // 右侧「工件」面板：本会话目录下产出的文件（fs 工具写入 / 命令生成的网页/构建物）。
   const [files, setFiles] = useState<WsEntry[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   // 点「文件改动」卡 → 工作台跳到该文件（{path, nonce} 让连点同一文件也触发）。
   const [dockTarget, setDockTarget] = useState<{ path: string; nonce: number } | null>(null);
   const autoOpenedRef = useRef(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const { scrollRef, showJump, onMessagesScroll, jumpToBottom } = useMessageScroll(msgs);
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // 卸载（切换会话会因 key 重挂载）时中断在途的 agent 流。
@@ -131,25 +148,19 @@ export function Chat({
     }
   }, [files]);
 
-  const onPickImages = async (files: FileList | null) => {
-    if (!files) return;
-    const next: UiImage[] = [];
-    for (const f of Array.from(files)) {
-      if (!f.type.startsWith("image/")) continue;
-      const dataUrl = await new Promise<string>((resolve) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result));
-        r.readAsDataURL(f);
-      });
-      const base64 = dataUrl.replace(/^data:[^;]+;base64,/, "");
-      next.push({ mimeType: f.type, data: base64 });
+  const openQuickAction = (action: "search" | "workspace" | "settings") => {
+    if (action === "search") {
+      setWeb(true);
+      setInput("帮我搜索并总结一下：");
+      requestAnimationFrame(() => focusComposerEnd(taRef.current));
+      return;
     }
-    if (next.length) setImages((cur) => [...cur, ...next]);
+    if (action === "workspace") {
+      window.dispatchEvent(new CustomEvent("ew:new-workspace"));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent("ew:open-settings", { detail: "models" }));
   };
-
-  // 模型列表变化时校正选中项：当前模型被卸载/移除 → 退回首个可用或清空（避免状态点常绿 + select 残留旧值）。
-  if (model && !models.includes(model)) setModel(models[0] ?? "");
-  else if (model === "" && models.length > 0) setModel(models[0]!);
 
   // 切换会话时加载历史（新会话 → 空）。
   useEffect(() => {
@@ -222,21 +233,6 @@ export function Chat({
     };
   }, [threadId]);
 
-  // 仅当用户已在底部附近时才自动滚到底（否则尊重其上滚位置）；离底则显示「跳到最新」浮钮。
-  const atBottomRef = useRef(true);
-  const [showJump, setShowJump] = useState(false);
-  const onMessagesScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const at = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    atBottomRef.current = at;
-    setShowJump(!at);
-  };
-  const jumpToBottom = () => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  useEffect(() => {
-    if (atBottomRef.current) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [msgs]);
-
   // 切换模型 → 载入该模型的采样覆盖。
   useEffect(() => {
     setSampling(loadSampling(model));
@@ -287,12 +283,6 @@ export function Chat({
     saveSampling(model, next);
   };
 
-  const autoGrow = (el: HTMLTextAreaElement) => {
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-    el.style.overflowY = el.scrollHeight > 160 ? "auto" : "hidden";
-  };
-
   const send = async (over?: { text: string; images: UiImage[]; regenerate?: boolean }) => {
     const text = (over?.text ?? input).trim();
     const sentImages = over?.images ?? images;
@@ -301,51 +291,23 @@ export function Chat({
       // 普通发送才清空 composer；重试用上一次输入、不动输入框。
       setInput("");
       setImages([]);
-      if (taRef.current) taRef.current.style.height = "24px";
+      resetComposer(taRef.current);
     }
     setBusy(true);
-    const history: ChatMessage[] = msgs.map((m) => ({
-      role: m.role,
-      content: m.role === "assistant" ? splitThink(m.raw).answer : m.raw,
-    }));
+    const history: ChatMessage[] = toRunHistory(msgs);
     // 含图片时用多模态 content parts（走 mmproj 视觉模型）。
-    const userContent: ChatMessage["content"] =
-      sentImages.length > 0
-        ? [
-            ...(text ? [{ type: "text" as const, text }] : []),
-            ...sentImages.map((im) => ({ type: "image" as const, mimeType: im.mimeType, data: im.data })),
-          ]
-        : text;
+    const userContent: ChatMessage["content"] = toUserContent(text, sentImages);
     // 始终把本轮用户消息推进 history —— 后端据 history 末条取本轮 text/images（重新生成也要带原文）。
     history.push({ role: "user", content: userContent });
     if (over?.regenerate) {
       // 重新生成：UI 保留末条用户消息（编辑场景把其文本更新为本轮 text；普通重试 text 不变），
       // 移除其后旧助手回答，换成新的空助手（流式目标）。
-      setMsgs((cur) => {
-        const next = cur.slice();
-        for (let k = next.length - 1; k >= 0; k--)
-          if (next[k]!.role === "user") {
-            next[k] = { ...next[k]!, raw: text };
-            break;
-          }
-        while (next.length && next[next.length - 1]!.role === "assistant") next.pop();
-        next.push({ role: "assistant", raw: "", reasoning: "", tools: [] });
-        return next;
-      });
+      setMsgs((cur) => replaceLastAssistantTurn(cur, text));
     } else {
-      setMsgs((m) => [
-        ...m,
-        { role: "user", raw: text, reasoning: "", tools: [], at: Date.now(), ...(sentImages.length ? { images: sentImages } : {}) },
-        { role: "assistant", raw: "", reasoning: "", tools: [] },
-      ]);
+      setMsgs((current) => appendUserTurn(current, text, sentImages));
     }
 
-    const apply = (fn: (m: UiMsg) => UiMsg) =>
-      setMsgs((cur) => {
-        const next = cur.slice();
-        next[next.length - 1] = fn(next[next.length - 1]!);
-        return next;
-      });
+    const apply = (fn: (m: UiMsg) => UiMsg) => setMsgs((current) => updateLastAssistant(current, fn));
 
     const excludeTools = web ? [] : ["web_search", "http_get"];
     const sampling = samplingToRequest(loadSampling(model));
@@ -401,25 +363,20 @@ export function Chat({
   const stop = () => {
     abortRef.current?.abort();
     setApproval(null);
-    setMsgs((cur) => {
-      const next = cur.slice();
-      const last = next[next.length - 1];
-      if (last && last.role === "assistant") next[next.length - 1] = { ...last, cancelled: true };
-      return next;
-    });
+    setMsgs((current) => markLastAssistantCancelled(current));
   };
 
   // 重新生成：用最后一条用户输入重跑（不动 composer），UI 替换旧回答，后端回滚上一轮保证上下文正确。
   const retry = () => {
     if (busy) return;
-    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    const lastUser = findLastUser(msgs);
     if (!lastUser) return;
     void send({ text: lastUser.raw, images: lastUser.images ?? [], regenerate: true });
   };
   // 编辑后重发：用改过的文本重跑（= 带新 text 的重新生成；保留原图）。
   const editRetry = (text: string) => {
     if (busy || !text.trim()) return;
-    const lastUser = [...msgs].reverse().find((m) => m.role === "user");
+    const lastUser = findLastUser(msgs);
     void send({ text, images: lastUser?.images ?? [], regenerate: true });
   };
 
@@ -445,8 +402,8 @@ export function Chat({
             </span>
             <h1>有什么可以帮你？</h1>
             <p className="greet-sub">
-              本地或云端模型、工具调用、Skills/MCP，带记忆。
-              {!model && "先到「模型」页加载模型或在「设置」配置 provider。"}
+              EasyWork 适合两类事：直接问模型，或者进入工作区让 AI 帮你动项目。
+              {!model && " 还没加载模型，先去配置一下就能开始。"}
             </p>
             <div className="greet-pills">
               {STARTERS.map(({ label, prompt, Icon }) => (
@@ -455,18 +412,24 @@ export function Chat({
                   className="greet-pill"
                   onClick={() => {
                     setInput(prompt);
-                    requestAnimationFrame(() => {
-                      const ta = taRef.current;
-                      if (ta) {
-                        ta.focus();
-                        ta.setSelectionRange(prompt.length, prompt.length);
-                        autoGrow(ta);
-                      }
-                    });
+                    requestAnimationFrame(() => focusComposerEnd(taRef.current));
                   }}
                 >
                   <Icon size={14} />
                   {label}
+                </button>
+              ))}
+            </div>
+            <div className="greet-quick">
+              {QUICK_ACTIONS.map(({ label, hint, action, Icon }) => (
+                <button key={label} className="greet-quick-card" onClick={() => openQuickAction(action)}>
+                  <span className="greet-quick-ico">
+                    <Icon size={15} />
+                  </span>
+                  <span className="greet-quick-copy">
+                    <strong>{label}</strong>
+                    <small>{hint}</small>
+                  </span>
                 </button>
               ))}
             </div>
@@ -528,7 +491,7 @@ export function Chat({
             placeholder="发送消息…（/ 唤起命令）"
             onChange={(e) => {
               setInput(e.target.value);
-              autoGrow(e.target);
+              autoGrowComposer(e.target);
             }}
             onKeyDown={(e) => {
               // 输入法组词中按回车只确认候选词，不发送（中文/日文等 IME）
@@ -687,7 +650,15 @@ export function Chat({
           </div>
         </div>
         <div className="composer-note">
-          {notice ? <span className="composer-status">{notice}</span> : "本地 AI 也可能出错，请自行核实重要信息。"}
+          {notice ? (
+            <span className="composer-status">{notice}</span>
+          ) : (
+            <>
+              <span className="composer-tip">`+` 里可以开关联网、知识库和思考。</span>
+              <span className="composer-note-sep">·</span>
+              <span className="composer-tip">输入 `/` 可切模型、改思考档位、手动压缩上下文。</span>
+            </>
+          )}
         </div>
       </footer>
       </div>
