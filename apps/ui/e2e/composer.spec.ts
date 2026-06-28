@@ -1,6 +1,25 @@
 import { test, expect } from "./fixtures.js";
 
 test.describe("composer e2e", () => {
+  test("聊天与工作区的 + 入口都能上传图片，并显示已附加图片", async ({ page, openApp, client, workspaceDir, sampleImagePath }) => {
+    const project = await client.createProject({ name: "Upload Workspace", workspaceDir });
+
+    await openApp();
+
+    await expect(page.getByTestId("chat-composer-input")).toBeVisible();
+    await page.getByTestId("chat-upload-button").click();
+    await page.getByTestId("chat-upload-input").setInputFiles(sampleImagePath);
+    await expect(page.getByTestId("chat-image-chip")).toContainText("1 张图");
+    await page.getByTestId("chat-image-remove-0").click();
+    await expect(page.getByTestId("chat-image-chip")).toHaveCount(0);
+
+    await page.getByTestId(`sidebar-project-${project.id}`).click();
+    await expect(page.getByTestId("workspace-composer-input")).toBeVisible();
+    await page.getByTestId("workspace-upload-button").click();
+    await page.getByTestId("workspace-upload-input").setInputFiles(sampleImagePath);
+    await expect(page.getByTestId("workspace-image-chip")).toContainText("1 张图");
+  });
+
   test("聊天页 slash palette 可筛选并切换思考档位", async ({ page, openApp }) => {
     await openApp();
 

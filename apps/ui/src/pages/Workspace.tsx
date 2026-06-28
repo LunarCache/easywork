@@ -392,11 +392,11 @@ export function Workspace({
           </ContextBar>
           <div className="composer-box">
             {images.length > 0 && (
-              <div className="composer-images">
+              <div className="composer-images" data-testid="workspace-image-strip">
                 {images.map((im, j) => (
                   <div key={j} className="cimg">
                     <img src={`data:${im.mimeType};base64,${im.data}`} alt="" />
-                    <button onClick={() => setImages((cur) => cur.filter((_, k) => k !== j))}>
+                    <button data-testid={`workspace-image-remove-${j}`} onClick={() => setImages((cur) => cur.filter((_, k) => k !== j))}>
                       <XIcon size={12} />
                     </button>
                   </div>
@@ -405,6 +405,7 @@ export function Workspace({
             )}
             <input
               ref={fileRef}
+              data-testid="workspace-upload-input"
               type="file"
               accept="image/*"
               multiple
@@ -437,11 +438,11 @@ export function Workspace({
             />
             <div className="composer-bar">
               <div className="composer-bar-left">
-                <button className="cbtn" title="上传图片" onClick={() => fileRef.current?.click()}>
+                <button className="cbtn" data-testid="workspace-upload-button" title="上传图片" onClick={() => fileRef.current?.click()}>
                   <PlusBtnIcon size={18} />
                 </button>
                 {images.length > 0 && (
-                  <span className="cmini-chip" title={`已附加 ${images.length} 张图片`}>
+                  <span className="cmini-chip" data-testid="workspace-image-chip" title={`已附加 ${images.length} 张图片`}>
                     <FileImageIcon size={14} />
                     <span>{images.length} 张图</span>
                   </span>

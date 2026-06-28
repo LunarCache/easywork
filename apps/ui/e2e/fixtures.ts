@@ -15,20 +15,22 @@ interface DaemonInfo {
 interface E2eContext {
   dataDir: string;
   workspaceDir: string;
+  sampleImagePath: string;
   info: DaemonInfo;
   client: EasyWorkClient;
   openApp: (opts?: { resetStorage?: boolean }) => Promise<void>;
 }
 
-async function waitForDaemon(proc: ChildProcessWithoutNullStreams): Promise<DaemonInfo> {
-  return await new Promise<DaemonInfo>((resolve, reject) => {
+async function waitForJsonLine<T>(proc: ChildProcessWithoutNullStreams, label: string): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
+    let buffer = "";
     let settled = false;
 
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(`daemon 启动超时\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+      reject(new Error(`${label} 启动超时\nstdout:\n${stdout}\nstderr:\n${stderr}`));
     }, 30_000);
 
     const cleanup = () => {
@@ -47,21 +49,28 @@ async function waitForDaemon(proc: ChildProcessWithoutNullStreams): Promise<Daem
     };
 
     const onStdout = (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
-      const line = stdout.split(/\r?\n/, 1)[0]?.trim();
-      if (!line) return;
-      try {
-        const info = JSON.parse(line) as DaemonInfo;
-        settle(() => resolve(info));
-      } catch {
-        /* 继续等首行 JSON */
+      const text = chunk.toString("utf8");
+      stdout += text;
+      buffer += text;
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line) continue;
+        try {
+          const info = JSON.parse(line) as T;
+          settle(() => resolve(info));
+          return;
+        } catch {
+          /* 继续等下一行 JSON */
+        }
       }
     };
     const onStderr = (chunk: Buffer) => {
       stderr += chunk.toString("utf8");
     };
     const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
-      settle(() => reject(new Error(`daemon 提前退出 code=${code} signal=${signal}\nstdout:\n${stdout}\nstderr:\n${stderr}`)));
+      settle(() => reject(new Error(`${label} 提前退出 code=${code} signal=${signal}\nstdout:\n${stdout}\nstderr:\n${stderr}`)));
     };
     const onError = (error: Error) => settle(() => reject(error));
 
@@ -99,6 +108,12 @@ export const test = base.extend<E2eContext>({
     }
   },
 
+  sampleImagePath: async ({ dataDir }, use) => {
+    const file = path.join(dataDir, "sample-image.svg");
+    fs.writeFileSync(file, '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#4f46e5"/></svg>');
+    await use(file);
+  },
+
   workspaceDir: async ({ dataDir }, use) => {
     const dir = path.join(dataDir, "workspace-fixture");
     fs.mkdirSync(dir, { recursive: true });
@@ -119,7 +134,7 @@ export const test = base.extend<E2eContext>({
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    const info = await waitForDaemon(proc);
+    const info = await waitForJsonLine<DaemonInfo>(proc, "daemon");
     try {
       await use(info);
     } finally {
@@ -133,7 +148,9 @@ export const test = base.extend<E2eContext>({
 
   openApp: async ({ page, info }, use) => {
     await use(async (opts?: { resetStorage?: boolean }) => {
-      const url = new URL("/", `http://127.0.0.1:${Number(process.env.EW_E2E_UI_PORT ?? 4173)}`);
+      const uiPort = Number(process.env.EW_E2E_UI_PORT ?? 4173);
+      const uiBase = process.env.EW_E2E_UI_BASEURL ?? `http://127.0.0.1:${uiPort}`;
+      const url = new URL("/", uiBase);
       url.searchParams.set("baseUrl", info.baseUrl);
       url.searchParams.set("token", info.token);
       if (opts?.resetStorage !== false) {

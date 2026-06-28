@@ -184,23 +184,24 @@ export function Mcp() {
     return (
       <div className="page mcp-page">
         <div className="skill-detail-head">
-          <button className="files-back" onClick={() => { setEditing(null); setView("list"); }}>
+          <button className="files-back" data-testid="mcp-back" onClick={() => { setEditing(null); setView("list"); }}>
             <ArrowLeftIcon size={15} /> 返回
           </button>
-          <span className="skill-detail-name">{editing ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</span>
+          <span className="skill-detail-name" data-testid="mcp-form-title">{editing ? "编辑 MCP 服务器" : "添加 MCP 服务器"}</span>
         </div>
-        {note && <div className="note">{note}</div>}
+        {note && <div className="note" data-testid="mcp-note">{note}</div>}
 
-        <div className="seg" style={{ marginBottom: 10 }}>
-          <button className={kind === "http" ? "on" : ""} onClick={() => setKind("http")}>
+        <div className="seg" style={{ marginBottom: 10 }} data-testid="mcp-kind-switch">
+          <button className={kind === "http" ? "on" : ""} data-testid="mcp-kind-http" onClick={() => setKind("http")}>
             HTTP
           </button>
-          <button className={kind === "stdio" ? "on" : ""} onClick={() => setKind("stdio")}>
+          <button className={kind === "stdio" ? "on" : ""} data-testid="mcp-kind-stdio" onClick={() => setKind("stdio")}>
             stdio（本地命令）
           </button>
         </div>
-        <div className="form">
+        <div className="form" data-testid="mcp-form">
           <input
+            data-testid="mcp-form-id"
             placeholder="id（如 filesystem）"
             value={form.id}
             disabled={!!editing}
@@ -208,16 +209,17 @@ export function Mcp() {
           />
           {kind === "stdio" ? (
             <>
-              <input placeholder="command（如 npx）" value={form.command} onChange={(e) => setForm({ ...form, command: e.target.value })} />
-              <input placeholder="args（空格分隔）" value={form.args} onChange={(e) => setForm({ ...form, args: e.target.value })} />
+              <input data-testid="mcp-form-command" placeholder="command（如 npx）" value={form.command} onChange={(e) => setForm({ ...form, command: e.target.value })} />
+              <input data-testid="mcp-form-args" placeholder="args（空格分隔）" value={form.args} onChange={(e) => setForm({ ...form, args: e.target.value })} />
             </>
           ) : (
-            <input placeholder="URL（https://…/mcp 或 /sse）" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
+            <input data-testid="mcp-form-url" placeholder="URL（https://…/mcp 或 /sse）" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
           )}
-          <button className="set-btn primary" onClick={() => void save()}>{editing ? "保存" : "添加"}</button>
+          <button className="set-btn primary" data-testid="mcp-save" onClick={() => void save()}>{editing ? "保存" : "添加"}</button>
         </div>
         {kind === "http" && (
           <textarea
+            data-testid="mcp-form-headers"
             placeholder="自定义请求头（每行 Key: Value，可选）"
             rows={2}
             style={{ width: "100%", marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 12.5 }}
@@ -231,15 +233,16 @@ export function Mcp() {
 
         {!editing && (
           <>
-            <h3 style={{ fontSize: 13, margin: "22px 0 8px" }}>或粘贴 mcpServers JSON 批量导入</h3>
+            <h3 style={{ fontSize: 13, margin: "22px 0 8px" }} data-testid="mcp-import-title">或粘贴 mcpServers JSON 批量导入</h3>
             <textarea
+              data-testid="mcp-import-textarea"
               placeholder={'{\n  "mcpServers": {\n    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"] },\n    "remote": { "url": "https://example.com/mcp" }\n  }\n}'}
               rows={6}
               style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: 12.5 }}
               value={importText}
               onChange={(e) => setImportText(e.target.value)}
             />
-            <button className="set-btn secondary" style={{ marginTop: 8 }} onClick={() => void importJson()} disabled={!importText.trim()}>
+            <button className="set-btn secondary" style={{ marginTop: 8 }} data-testid="mcp-import-submit" onClick={() => void importJson()} disabled={!importText.trim()}>
               导入
             </button>
           </>
@@ -249,18 +252,18 @@ export function Mcp() {
   }
 
   return (
-    <div className="page mcp-page">
+    <div className="page mcp-page" data-testid="mcp-page">
       <div className="skills-head">
         <p className="skills-lead">接入 Model Context Protocol 工具服务器（stdio / HTTP），以 mcp__&lt;server&gt;__&lt;tool&gt; 暴露给模型。</p>
         <span className="bar-spacer" />
-        <button className="set-btn secondary icon" title="添加服务器" onClick={startAdd}>
+        <button className="set-btn secondary icon" data-testid="mcp-add-button" title="添加服务器" onClick={startAdd}>
           <PlusIcon size={16} />
         </button>
       </div>
-      {note && <div className="note">{note}</div>}
+      {note && <div className="note" data-testid="mcp-note">{note}</div>}
 
       {servers.length === 0 ? null : (
-        <div className="mcp-list">
+        <div className="mcp-list" data-testid="mcp-list">
           {servers.map((s) => {
             const on = s.enabled !== false;
             const pr = probe[s.id];
@@ -273,37 +276,38 @@ export function Mcp() {
               s.transport.kind === "stdio" ? `${s.transport.command} ${s.transport.args.join(" ")}` : s.transport.url;
             const status = !on ? "已禁用" : busy ? "连接中…" : ok ? "已连接" : err ? "连接失败" : "未探测";
             return (
-              <div key={s.id} className="mcp-card">
+              <div key={s.id} className="mcp-card" data-testid={`mcp-card-${s.id}`}>
                 <span className={`mcp-dot ${ok ? "ok" : err ? "err" : "busy"}`} />
                 <div className="mcp-card-body">
                   <div className="mcp-card-name">
-                    <span className="mono">{s.displayName || s.id}</span>
-                    {ok && res && <span className="set-pill">{res.toolCount} 工具</span>}
-                    <span className="set-pill ghost">{s.transport.kind}</span>
+                    <span className="mono" data-testid={`mcp-card-name-${s.id}`}>{s.displayName || s.id}</span>
+                    {ok && res && <span className="set-pill" data-testid={`mcp-card-tools-${s.id}`}>{res.toolCount} 工具</span>}
+                    <span className="set-pill ghost" data-testid={`mcp-card-kind-${s.id}`}>{s.transport.kind}</span>
                   </div>
-                  <div className="mcp-card-detail mono" title={detail}>
+                  <div className="mcp-card-detail mono" data-testid={`mcp-card-detail-${s.id}`} title={detail}>
                     {detail}
                   </div>
                   {err && res?.error && (
-                    <div className="mcp-card-err" title={res.error}>
+                    <div className="mcp-card-err" data-testid={`mcp-card-error-${s.id}`} title={res.error}>
                       {res.error}
                     </div>
                   )}
                 </div>
-                <button className="mcp-icon-btn" title="编辑配置" onClick={() => editConfig(s)}>
+                <button className="mcp-icon-btn" data-testid={`mcp-edit-${s.id}`} title="编辑配置" onClick={() => editConfig(s)}>
                   <GearIcon size={13} />
                 </button>
-                <button className="mcp-icon-btn" title="重新探测" onClick={() => void probeOne(s)}>
+                <button className="mcp-icon-btn" data-testid={`mcp-probe-${s.id}`} title="重新探测" onClick={() => void probeOne(s)}>
                   <RefreshIcon size={13} className={busy ? "spin" : ""} />
                 </button>
-                <button className="mcp-icon-btn danger" title="删除" onClick={() => void remove(s.id)}>
+                <button className="mcp-icon-btn danger" data-testid={`mcp-delete-${s.id}`} title="删除" onClick={() => void remove(s.id)}>
                   <TrashIcon size={13} />
                 </button>
-                <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} title={err ? (res?.error ?? "") : ""}>
+                <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} data-testid={`mcp-status-${s.id}`} title={err ? (res?.error ?? "") : ""}>
                   {status}
                 </span>
                 <button
                   className={`set-toggle ${on ? "on" : ""}`}
+                  data-testid={`mcp-toggle-${s.id}`}
                   title={on ? "已启用（点击禁用）" : "已禁用（点击启用）"}
                   aria-pressed={on}
                   onClick={(e) => void toggleEnabled(s, e)}

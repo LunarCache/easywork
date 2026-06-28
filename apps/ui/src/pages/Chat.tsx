@@ -50,6 +50,7 @@ import {
   FileIcon,
   GlobeIcon,
   PlusBtnIcon,
+  FileImageIcon,
   SlidersIcon,
   SparkIcon,
   StopIcon,
@@ -495,11 +496,11 @@ export function Chat({
             {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
           </ComposerContextStrip>
           {images.length > 0 && (
-            <div className="composer-images">
+            <div className="composer-images" data-testid="chat-image-strip">
               {images.map((im, j) => (
                 <div key={j} className="cimg">
                   <img src={`data:${im.mimeType};base64,${im.data}`} alt="" />
-                  <button onClick={() => setImages((cur) => cur.filter((_, k) => k !== j))}>
+                  <button data-testid={`chat-image-remove-${j}`} onClick={() => setImages((cur) => cur.filter((_, k) => k !== j))}>
                     <XIcon size={12} />
                   </button>
                 </div>
@@ -508,6 +509,7 @@ export function Chat({
           )}
           <input
             ref={fileRef}
+            data-testid="chat-upload-input"
             type="file"
             accept="image/*"
             multiple
@@ -540,9 +542,15 @@ export function Chat({
           />
           <div className="composer-bar">
             <div className="composer-bar-left">
-              <button className="cbtn" title="上传图片" onClick={() => fileRef.current?.click()}>
+              <button className="cbtn" data-testid="chat-upload-button" title="上传图片" onClick={() => fileRef.current?.click()}>
                 <PlusBtnIcon size={18} />
               </button>
+              {images.length > 0 && (
+                <span className="cmini-chip" data-testid="chat-image-chip" title={`已附加 ${images.length} 张图片`}>
+                  <FileImageIcon size={14} />
+                  <span>{images.length} 张图</span>
+                </span>
+              )}
             </div>
             <div className="composer-bar-right">
               <div className="params-wrap">

@@ -42,5 +42,18 @@ export default defineConfig({
     fileParallelism: false,
     // 隔离测试数据目录，避免污染 ~/.easywork。
     env: { EW_DATA_DIR: path.join(os.tmpdir(), "ew-vitest-data") },
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html", "json-summary"],
+      reportsDirectory: "coverage/vitest",
+      include: ["packages/**/src/**/*.{ts,tsx}", "apps/**/src/**/*.{ts,tsx}"],
+      exclude: [
+        "packages/**/src/**/*.d.ts",
+        "apps/**/src/**/*.d.ts",
+        "packages/**/src/**/index.ts",
+        "apps/**/src/**/main.tsx",
+        "apps/**/src/**/vite-env.d.ts",
+      ],
+    },
   },
 });
