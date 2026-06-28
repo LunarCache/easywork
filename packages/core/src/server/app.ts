@@ -183,7 +183,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
 
   const repo = new SqliteConversationRepo(opts.dbPath ?? defaultDbPath());
 
-  // 宿主：pi-coding-agent 内核（EW_KERNEL=pi 时托管 /agent/run；默认走 legacy loop）。
+  // 宿主：pi-coding-agent 内核托管 /agent/run。
   // R3：注入记忆/会话检索/知识库/MCP，使托管会话具备 EasyWork 专有能力。
   const sessionHost = new SessionHost({
     local,
