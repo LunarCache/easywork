@@ -98,7 +98,7 @@ export function Sidebar({
           <span className="ad-side-kbd">⌘N</span>
         </button>
         {onOpenSearch && (
-          <button className="ad-side-act" onClick={onOpenSearch}>
+          <button className="ad-side-act" data-testid="sidebar-search" onClick={onOpenSearch}>
             <SearchIcon size={18} className="ad-side-act-ico" />
             <span>搜索</span>
             <span className="ad-side-kbd">⌘K</span>
@@ -138,6 +138,7 @@ export function Sidebar({
               <div key={p.id} className="ad-side-group">
                 <button
                   className={`ad-side-folder ${p.id === projectId ? "active" : ""}`}
+                  data-testid={`sidebar-project-${p.id}`}
                   title={p.workspaceDir}
                   onClick={() => {
                     onSelectProject(p.id);
@@ -160,6 +161,7 @@ export function Sidebar({
                   </span>
                   <span
                     className="ad-task-del"
+                    data-testid={`sidebar-project-files-${p.id}`}
                     title="查看文件"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -227,7 +229,7 @@ export function Sidebar({
       </div>
 
       <div className="ad-side-foot">
-        <button className="ad-side-set" onClick={onOpenSettings}>
+        <button className="ad-side-set" data-testid="sidebar-settings" onClick={onOpenSettings}>
           <GearIcon size={17} />
           <span>设置</span>
         </button>

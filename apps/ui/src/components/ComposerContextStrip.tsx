@@ -11,22 +11,30 @@ export function ComposerContextPill({
   title,
   tone = "default",
   className = "",
+  testId,
 }: {
   children: ReactNode;
   onClick?: () => void;
   title?: string;
   tone?: "default" | "on" | "strong";
   className?: string;
+  testId?: string;
 }) {
   const classes = `composer-strip-pill ${tone}${onClick ? " interactive" : ""}${className ? ` ${className}` : ""}`;
   if (onClick)
     return (
-      <button type="button" onClick={onClick} className={classes} {...(title ? { title } : {})}>
+      <button
+        type="button"
+        onClick={onClick}
+        className={classes}
+        {...(title ? { title } : {})}
+        {...(testId ? { "data-testid": testId } : {})}
+      >
         {children}
       </button>
     );
   return (
-    <span className={classes} {...(title ? { title } : {})}>
+    <span className={classes} {...(title ? { title } : {})} {...(testId ? { "data-testid": testId } : {})}>
       {children}
     </span>
   );

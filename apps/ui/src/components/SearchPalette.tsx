@@ -91,13 +91,14 @@ export function SearchPalette({
   };
 
   return (
-    <div className="search-overlay" onMouseDown={onClose}>
-      <div className="search-box" onMouseDown={(e) => e.stopPropagation()}>
+    <div className="search-overlay" data-testid="search-overlay" onMouseDown={onClose}>
+      <div className="search-box" data-testid="search-box" onMouseDown={(e) => e.stopPropagation()}>
         <div className="search-head">
           <SearchIcon size={16} className="search-head-ico" />
           <input
             ref={inputRef}
             className="search-input"
+            data-testid="search-input"
             placeholder="搜索对话、工作区…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -105,14 +106,15 @@ export function SearchPalette({
           />
           <span className="search-esc">esc</span>
         </div>
-        <div className="search-results" role="listbox">
+        <div className="search-results" data-testid="search-results" role="listbox">
           {results.length === 0 ? (
-            <div className="search-empty">无匹配结果</div>
+            <div className="search-empty" data-testid="search-empty">无匹配结果</div>
           ) : (
             results.map((r, i) => (
               <button
                 key={`${r.kind}:${r.id}`}
                 className={`search-item ${i === idx ? "on" : ""}`}
+                data-testid={`search-item-${r.kind}-${r.id}`}
                 onMouseEnter={() => setIdx(i)}
                 onClick={() => choose(r)}
               >

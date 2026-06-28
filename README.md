@@ -75,6 +75,8 @@ easywork status / stop         # daemon 状态 / 停止
 npm install            # 安装依赖
 npm run build          # turbo 构建全部包
 npm test               # vitest（204 测试）  ·  npm run typecheck  ·  npm run lint
+npm run e2e:install    # 安装 Playwright Chromium（首次一次）
+npm run test:e2e       # Playwright UI e2e：隔离 data dir + 真 daemon + 真 Vite UI（CI 跑这层，当前 12 条）
 
 npm run dev:daemon     # 仅起 daemon（stdout 首行打印 {baseUrl, token, pid}）
 npm run dev:ui         # 起 Vite；浏览器连 daemon：http://localhost:5173/?baseUrl=<daemon>&token=<token>
@@ -83,6 +85,10 @@ npm run dev:desktop    # tauri dev：Rust 壳 + Vite + daemon sidecar
 node scripts/build-daemon-sea.mjs          # daemon → 单文件二进制（Node SEA）
 npm run app:build --workspace @ew/desktop  # 出 macOS dmg + .app
 ```
+
+> 当前 Playwright UI e2e 已覆盖：设置页状态与主入口、Chat / Workspace 共享 composer、全局搜索与工作区切换、文件页与记忆 CRUD、知识库管理、Skills 模板与详情。
+
+> 另保留一个依赖本地 `llama` + 真实 GGUF 的 core 真机 smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`。这层默认不进 CI，主要用于本地/发布前验证真实 runtime。
 
 > 发布：打 `v*` tag 触发 [`release.yml`](.github/workflows/release.yml)，macOS runner 构建 dmg 并发到 Releases。
 

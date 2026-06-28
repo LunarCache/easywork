@@ -471,7 +471,12 @@ export function Chat({
         <div className="composer-box">
           <ComposerContextStrip>
             <ModelSelect models={models} value={model} onChange={setModel} up variant="strip" />
-            <ComposerContextPill tone={thinkLevel !== "off" ? "on" : "default"} onClick={cycleThink} title="思考档位（点击循环：低/中/高/关）">
+            <ComposerContextPill
+              tone={thinkLevel !== "off" ? "on" : "default"}
+              onClick={cycleThink}
+              title="思考档位（点击循环：低/中/高/关）"
+              testId="chat-think-pill"
+            >
               <ThinkIcon size={14} />
               <span>思考 {THINK_LABEL[thinkLevel]}</span>
             </ComposerContextPill>
@@ -515,6 +520,7 @@ export function Chat({
           {slash.palette}
           <textarea
             ref={taRef}
+            data-testid="chat-composer-input"
             value={input}
             rows={1}
             placeholder="发送消息…（/ 唤起命令）"

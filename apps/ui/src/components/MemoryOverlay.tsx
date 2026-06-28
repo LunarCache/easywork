@@ -174,7 +174,11 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
 
   return (
     <div className={embedded ? "ad-page-embed" : "ad-overlay"} onClick={embedded ? undefined : onClose}>
-      <div className={`ad-overlay-card mem-ov-card ${embedded ? "embed" : ""}`} onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`ad-overlay-card mem-ov-card ${embedded ? "embed" : ""}`}
+        data-testid="memory-overlay"
+        onClick={(e) => e.stopPropagation()}
+      >
         {!embedded && (
           <div className="ad-ov-head mem-ov-head">
             <span className="mem-ov-ico">
@@ -195,18 +199,23 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
         <div className="mem-toolbar">
           <div className="mem-search">
             <SearchIcon size={15} />
-            <input placeholder="搜索记忆…" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <input
+              data-testid="memory-search-input"
+              placeholder="搜索记忆…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
           </div>
           <span className="mem-recall">
             <span className="mem-recall-dot" data-on={emb?.ready ? "1" : "0"} />
             {emb?.ready ? `向量召回 · ${emb.dim} 维` : "向量召回未启用"}
             {!emb?.ready && (
-              <button className="mem-recall-btn" onClick={() => void enableEmbedding()} disabled={embBusy}>
+              <button className="set-btn tiny" onClick={() => void enableEmbedding()} disabled={embBusy}>
                 {embBusy ? "处理中…" : "启用"}
               </button>
             )}
           </span>
-          <button className="mem-add-btn" onClick={openAddTop}>
+          <button className="set-btn primary" data-testid="memory-add-button" onClick={openAddTop}>
             <PlusIcon size={15} /> 添加
           </button>
         </div>
@@ -266,10 +275,11 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
         ) : (
           <div className="mem-feed">
             {feed.map((m) => (
-              <div key={m.id} className="mem-fcard">
+              <div key={m.id} className="mem-fcard" data-testid={`memory-card-${m.id}`}>
                 {editing?.id === m.id ? (
                   <input
                     className="mem-ov-edit"
+                    data-testid={`memory-edit-input-${m.id}`}
                     autoFocus
                     value={editing.text}
                     onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
@@ -294,15 +304,20 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                   <span className="mem-time">{relTime(m.updatedAt)}</span>
                   <span className="ad-spacer" />
                   {editing?.id === m.id ? (
-                    <button className="mem-card-act show" title="保存" onClick={() => void saveEdit()}>
+                    <button className="mem-card-act show" data-testid={`memory-save-${m.id}`} title="保存" onClick={() => void saveEdit()}>
                       <CheckIcon size={14} />
                     </button>
                   ) : (
-                    <button className="mem-card-act" title="编辑" onClick={() => setEditing({ id: m.id, text: m.text })}>
+                    <button
+                      className="mem-card-act"
+                      data-testid={`memory-edit-${m.id}`}
+                      title="编辑"
+                      onClick={() => setEditing({ id: m.id, text: m.text })}
+                    >
                       <EditIcon size={14} />
                     </button>
                   )}
-                  <button className="mem-card-act" title="删除" onClick={() => void del(m.id)}>
+                  <button className="mem-card-act" data-testid={`memory-delete-${m.id}`} title="删除" onClick={() => void del(m.id)}>
                     <TrashIcon size={14} />
                   </button>
                 </div>
@@ -314,11 +329,12 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
         {/* 添加记忆弹层 */}
         {adding && (
           <div className="confirm-mask" onClick={() => setAdding(null)}>
-            <div className="confirm-box wide" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-box wide" data-testid="memory-add-dialog" onClick={(e) => e.stopPropagation()}>
               <div className="confirm-title">{adding.pick ? "添加记忆" : `添加到「${adding.label}」`}</div>
               {adding.pick && (
                 <div className="mem-add-pickers">
                   <select
+                    data-testid="memory-add-scope"
                     value={adding.scope}
                     onChange={(e) => {
                       const scope = e.target.value;
@@ -333,7 +349,11 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                       </option>
                     ))}
                   </select>
-                  <select value={adding.layer} onChange={(e) => setAdding((a) => (a ? { ...a, layer: e.target.value } : a))}>
+                  <select
+                    data-testid="memory-add-layer"
+                    value={adding.layer}
+                    onChange={(e) => setAdding((a) => (a ? { ...a, layer: e.target.value } : a))}
+                  >
                     {layerOrder(adding.scope).map((l) => (
                       <option key={l} value={l}>
                         {LAYER_LABEL[l] ?? l}
@@ -344,6 +364,7 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
               )}
               <textarea
                 className="mem-add-textarea"
+                data-testid="memory-add-textarea"
                 autoFocus
                 placeholder="教 Agent 记住点什么…"
                 value={draft}
@@ -356,10 +377,10 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
               <div className="confirm-actions">
                 <span className="mem-add-hint">⌘↵ 保存</span>
                 <span className="ad-spacer" />
-                <button className="confirm-cancel" onClick={() => setAdding(null)}>
+                <button className="set-btn ghost soft" data-testid="memory-add-cancel" onClick={() => setAdding(null)}>
                   取消
                 </button>
-                <button className="confirm-ok" onClick={() => void add()} disabled={!draft.trim()}>
+                <button className="set-btn primary" data-testid="memory-add-submit" onClick={() => void add()} disabled={!draft.trim()}>
                   添加
                 </button>
               </div>

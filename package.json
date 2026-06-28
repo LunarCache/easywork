@@ -23,6 +23,10 @@
     "dev:ui": "npm run dev --workspace @ew/ui",
     "dev:desktop": "npm run dev --workspace @ew/desktop",
     "test": "vitest run",
+    "e2e:prepare": "npm run build -- --filter=@ew/daemon",
+    "e2e:install": "playwright install chromium",
+    "test:e2e": "npm run e2e:prepare && playwright test",
+    "test:e2e:headed": "npm run e2e:prepare && playwright test --headed",
     "test:watch": "vitest",
     "lint": "eslint .",
     "typecheck": "turbo run typecheck",
@@ -30,14 +34,15 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^24.0.0",
     "eslint": "^9.17.0",
-    "typescript-eslint": "^8.18.0",
     "prettier": "^3.4.0",
     "rimraf": "^6.0.1",
     "tsup": "^8.3.5",
     "turbo": "^2.3.0",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.18.0",
     "vitest": "^4.0.0"
   }
 }

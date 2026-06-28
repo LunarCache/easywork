@@ -123,10 +123,10 @@ export function FileViewer({ source }: { source: PreviewSource }) {
   const imgSrc = source.kind === "bytes" ? `data:${source.mime};base64,${source.data}` : blob.url;
 
   return (
-    <div className="fv">
+    <div className="fv" data-testid="file-viewer">
       <div className="fv-bar">
         <span className="fv-badge" style={{ background: ft.color }}>{ft.label}</span>
-        <span className="fv-name" title={meta.name}>{meta.name.split(/[/\\]/).pop()}</span>
+        <span className="fv-name" data-testid="file-viewer-name" title={meta.name}>{meta.name.split(/[/\\]/).pop()}</span>
         {meta.size > 0 && <span className="fv-size">{fmtBytes(meta.size)}</span>}
         <span className="fv-spacer" />
         {toggleable && (

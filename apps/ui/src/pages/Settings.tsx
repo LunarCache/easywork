@@ -109,13 +109,19 @@ export function Settings({
   }, [initialSection]);
 
   return (
-    <div className="set-page">
+    <div className="set-page" data-testid="settings-page">
       <div className="set-nav" style={navWidth ? { width: navWidth } : undefined} data-tauri-drag-region>
-        <button className="set-back" onClick={onBack}>
+        <button className="set-back" data-testid="settings-back" onClick={onBack}>
           <ArrowLeftIcon size={15} /> 返回工作区
         </button>
         {SECS.map(({ id, label, Icon }) => (
-          <button key={id} className={`set-navi ${sec === id ? "on" : ""}`} onClick={() => openSec(id)}>
+          <button
+            key={id}
+            className={`set-navi ${sec === id ? "on" : ""}`}
+            data-testid={`settings-nav-${id}`}
+            data-active={sec === id ? "1" : "0"}
+            onClick={() => openSec(id)}
+          >
             <Icon size={16} /> {label}
           </button>
         ))}
@@ -123,11 +129,11 @@ export function Settings({
 
       <div className="set-main">
         <div className="set-phead">
-          <h1 className="set-title">{SECS.find((s) => s.id === sec)?.label}</h1>
+          <h1 className="set-title" data-testid="settings-title">{SECS.find((s) => s.id === sec)?.label}</h1>
         </div>
         <div className="set-mbody">
         {CARD_SECS.has(sec) && (
-          <div className="set-content">
+          <div className="set-content" data-testid="settings-pane-general">
             {sec === "general" && (
               <div className="set-group">
                 <div className="set-row">
@@ -142,27 +148,27 @@ export function Settings({
           </div>
         )}
         {visited.has("models") && (
-          <div className={`set-pane ${sec === "models" ? "" : "hidden"}`}>
+          <div className={`set-pane ${sec === "models" ? "" : "hidden"}`} data-testid="settings-pane-models">
             <Models onChange={onModelsChange} />
           </div>
         )}
         {visited.has("kb") && (
-          <div className={`set-pane ${sec === "kb" ? "" : "hidden"}`}>
+          <div className={`set-pane ${sec === "kb" ? "" : "hidden"}`} data-testid="settings-pane-kb">
             <KnowledgeBaseOverlay embedded />
           </div>
         )}
         {visited.has("skills") && (
-          <div className={`set-pane ${sec === "skills" ? "" : "hidden"}`}>
+          <div className={`set-pane ${sec === "skills" ? "" : "hidden"}`} data-testid="settings-pane-skills">
             <Skills />
           </div>
         )}
         {visited.has("mcp") && (
-          <div className={`set-pane ${sec === "mcp" ? "" : "hidden"}`}>
+          <div className={`set-pane ${sec === "mcp" ? "" : "hidden"}`} data-testid="settings-pane-mcp">
             <Mcp />
           </div>
         )}
         {visited.has("memory") && (
-          <div className={`set-pane ${sec === "memory" ? "" : "hidden"}`}>
+          <div className={`set-pane ${sec === "memory" ? "" : "hidden"}`} data-testid="settings-pane-memory">
             <MemoryOverlay embedded />
           </div>
         )}

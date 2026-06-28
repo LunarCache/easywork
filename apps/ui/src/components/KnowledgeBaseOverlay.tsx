@@ -226,7 +226,11 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
 
   return (
     <div className={embedded ? "ad-page-embed" : "ad-overlay"} onClick={embedded ? undefined : onClose}>
-      <div className={`ad-overlay-card kb-ov-card ${embedded ? "embed" : ""}`} onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`ad-overlay-card kb-ov-card ${embedded ? "embed" : ""}`}
+        data-testid="kb-overlay"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className={`ad-ov-head kb-ov-head ${embedded ? "embed" : ""}`}>
           {!embedded && (
             <>
@@ -248,7 +252,8 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
           )}
           <span className="ad-spacer" />
           <button
-            className="kb-ov-upload"
+            className="set-btn primary"
+            data-testid="kb-upload-button"
             title="上传文档"
             onClick={() => {
               setNewName("");
@@ -289,6 +294,7 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                   <button
                     key={id}
                     className={`kb-coll ${isSel ? "on" : ""}`}
+                    data-testid={`kb-collection-${id}`}
                     onClick={() => {
                       setSelectedKb(id);
                       setQ("");
@@ -313,7 +319,7 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                 <span className="kb-docs-h-name">{currentKb ?? "—"}</span>
                 <span className="kb-docs-h-n">· {filteredDocs.length} 文档</span>
                 <div className="kb-search">
-                  <input placeholder="搜索文件名…" value={q} onChange={(e) => setQ(e.target.value)} />
+                  <input data-testid="kb-search-input" placeholder="搜索文件名…" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
               </div>
             )}
@@ -353,6 +359,7 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                     <button
                       key={d.id}
                       className={`kb-doc-card ${sel === d.id ? "on" : ""}`}
+                      data-testid={`kb-doc-${d.id}`}
                       onClick={() => void openDoc(d.id)}
                     >
                       <div className="kb-doc-card-top">
@@ -360,7 +367,12 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                           {b.label}
                         </span>
                         <span className="kb-doc-card-name">{d.source}</span>
-                        <span className="kb-doc-card-del" title="删除" onClick={(e) => void del(d.id, d.source, e)}>
+                        <span
+                          className="kb-doc-card-del"
+                          data-testid={`kb-doc-delete-${d.id}`}
+                          title="删除"
+                          onClick={(e) => void del(d.id, d.source, e)}
+                        >
                           <TrashIcon size={14} />
                         </span>
                       </div>
@@ -425,11 +437,12 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
           {/* 上传目标选择面板（点「上传」先选/建目标集合，再选文件） */}
           {picking && (
             <div className="confirm-mask" onClick={() => setPicking(false)}>
-              <div className="confirm-box list-box" onClick={(e) => e.stopPropagation()}>
+              <div className="confirm-box list-box" data-testid="kb-upload-dialog" onClick={(e) => e.stopPropagation()}>
                 <div className="confirm-title">上传到集合</div>
                 <div className="kb-pick-list">
                   <button
                     className={`kb-pick-item ${currentKb ? "" : "on"}`}
+                    data-testid="kb-pick-default"
                     onClick={() => pickTarget("default")}
                   >
                     default
@@ -438,6 +451,7 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                     <button
                       key={id}
                       className={`kb-pick-item ${currentKb === id ? "on" : ""}`}
+                      data-testid={`kb-pick-${id}`}
                       onClick={() => pickTarget(id)}
                     >
                       {id}
@@ -448,6 +462,7 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                 <div className="kb-pick-new">
                   <input
                     autoFocus
+                    data-testid="kb-new-name"
                     placeholder="集合名（英文 / 数字 / 连字符）"
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
@@ -456,7 +471,7 @@ export function KnowledgeBaseOverlay({ onClose, embedded }: { onClose?: () => vo
                       else if (e.key === "Escape") setPicking(false);
                     }}
                   />
-                  <button className="kb-pick-go" onClick={pickNew} disabled={!normalizeKbId(newName)}>
+                  <button className="set-btn secondary" data-testid="kb-new-submit" onClick={pickNew} disabled={!normalizeKbId(newName)}>
                     选择文件
                   </button>
                 </div>

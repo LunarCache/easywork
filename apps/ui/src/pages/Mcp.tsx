@@ -214,7 +214,7 @@ export function Mcp() {
           ) : (
             <input placeholder="URL（https://…/mcp 或 /sse）" value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
           )}
-          <button onClick={() => void save()}>{editing ? "保存" : "添加"}</button>
+          <button className="set-btn primary" onClick={() => void save()}>{editing ? "保存" : "添加"}</button>
         </div>
         {kind === "http" && (
           <textarea
@@ -239,7 +239,7 @@ export function Mcp() {
               value={importText}
               onChange={(e) => setImportText(e.target.value)}
             />
-            <button className="btn" style={{ marginTop: 8 }} onClick={() => void importJson()} disabled={!importText.trim()}>
+            <button className="set-btn secondary" style={{ marginTop: 8 }} onClick={() => void importJson()} disabled={!importText.trim()}>
               导入
             </button>
           </>
@@ -253,7 +253,7 @@ export function Mcp() {
       <div className="skills-head">
         <p className="skills-lead">接入 Model Context Protocol 工具服务器（stdio / HTTP），以 mcp__&lt;server&gt;__&lt;tool&gt; 暴露给模型。</p>
         <span className="bar-spacer" />
-        <button className="set-add icon" title="添加服务器" onClick={startAdd}>
+        <button className="set-btn secondary icon" title="添加服务器" onClick={startAdd}>
           <PlusIcon size={16} />
         </button>
       </div>

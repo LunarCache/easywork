@@ -295,7 +295,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   app.addHook("onRequest", async (req, reply) => {
     reply.header("access-control-allow-origin", req.headers.origin ?? "*");
     reply.header("vary", "origin");
-    reply.header("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
+    reply.header("access-control-allow-methods", "GET,POST,PATCH,DELETE,OPTIONS");
     reply.header("access-control-allow-headers", "authorization,content-type");
     reply.header("access-control-max-age", "86400");
     if (req.method === "OPTIONS") {

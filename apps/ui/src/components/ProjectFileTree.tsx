@@ -69,6 +69,7 @@ export function ProjectFileTree({
           <button
             key={e.path}
             className="ad-ft-row"
+            data-testid={`project-dir-${e.path.replaceAll("/", "__")}`}
             style={{ paddingLeft: pad }}
             onClick={() => toggleDir(e.path)}
             title={e.path}
@@ -84,6 +85,7 @@ export function ProjectFileTree({
           <button
             key={e.path}
             className={`ad-ft-row file ${activePath === e.path ? "on" : ""}`}
+            data-testid={`project-file-${e.path.replaceAll("/", "__")}`}
             style={{ paddingLeft: pad + 13 }}
             onClick={() => onOpenFile(e.path)}
             title={e.path}

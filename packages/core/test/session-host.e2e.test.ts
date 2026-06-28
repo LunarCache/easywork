@@ -9,8 +9,8 @@ import { resolveLlamaBin } from "../src/engine/resolve-llama.js";
 import { ProviderManager } from "../src/providers/manager.js";
 import { SessionHost } from "../src/agent/session-host.js";
 
-// R1 真机 e2e：SessionHost 经真实 `llama serve` router 跑通 pi AgentSession，产出我们的 AgentEvent。
-// 重，需本地模型 + 统一 llama（router 模式），默认跳过；EW_E2E=1 开启。
+// R1 真机 smoke：SessionHost 经真实 `llama serve` router 跑通 pi AgentSession，产出我们的 AgentEvent。
+// 这层用于本地/发布前验证真实 runtime，较重，需本地模型 + 统一 llama（router 模式），默认跳过；EW_E2E=1 开启。
 const RUN = process.env.EW_E2E === "1";
 const MODELS_DIR = path.join(os.homedir(), ".easywork/models");
 const GGUF = path.join(MODELS_DIR, "unsloth__Qwen3-4B-GGUF/Qwen3-4B-Q4_K_M.gguf");

@@ -55,7 +55,12 @@ export function ContextBar({
   return (
     <div className="composer-ctx">
       <div className="ctx-wrap">
-        <button className={`composer-ctx-pill ${open === "project" ? "active" : ""}`} onClick={() => toggle("project")} title={project.workspaceDir}>
+        <button
+          className={`composer-ctx-pill ${open === "project" ? "active" : ""}`}
+          data-testid="workspace-project-pill"
+          onClick={() => toggle("project")}
+          title={project.workspaceDir}
+        >
           <FolderClosedIcon size={14} />
           <span className="ctx-pill-name">{project.name}</span>
           <ChevronDownIcon size={12} className="ctx-pill-chev" />
@@ -63,16 +68,23 @@ export function ContextBar({
         {open === "project" && (
           <>
             <div className="menu-backdrop" onClick={close} />
-            <div className="ctx-menu up">
+            <div className="ctx-menu up" data-testid="workspace-project-menu">
               <div className="ctx-search">
                 <SearchIcon size={14} />
-                <input autoFocus placeholder="搜索工作区" value={q} onChange={(e) => setQ(e.target.value)} />
+                <input
+                  autoFocus
+                  data-testid="workspace-project-search"
+                  placeholder="搜索工作区"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
               </div>
               <div className="ctx-list">
                 {projMatch.map((p) => (
                   <button
                     key={p.id}
                     className={`ctx-item ${p.id === project.id ? "on" : ""}`}
+                    data-testid={`workspace-project-option-${p.id}`}
                     onClick={() => {
                       onSelectProject(p.id);
                       close();

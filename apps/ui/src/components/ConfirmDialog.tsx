@@ -92,15 +92,15 @@ export function useConfirm(): {
           <div className="confirm-actions">
             {pending ? (
               <>
-                <button className="confirm-cancel" onClick={() => close(false)}>
+                <button className="set-btn ghost soft" onClick={() => close(false)}>
                   取消
                 </button>
-                <button className={`confirm-ok ${pending.danger ? "danger" : ""}`} autoFocus onClick={() => close(true)}>
+                <button className={`set-btn ${pending.danger ? "danger-fill" : "primary"}`} autoFocus onClick={() => close(true)}>
                   {pending.okLabel ?? (pending.danger ? "删除" : "确定")}
                 </button>
               </>
             ) : (
-              <button className="confirm-ok" autoFocus onClick={closeAlert}>
+              <button className="set-btn primary" autoFocus onClick={closeAlert}>
                 知道了
               </button>
             )}

@@ -154,7 +154,7 @@ export function useSlashPalette(
   };
 
   const palette: ReactNode = active ? (
-    <div className="slash-pal" role="listbox">
+    <div className="slash-pal" role="listbox" data-testid="slash-palette">
       <div className="slash-head">
         <div className="slash-breadcrumb">
           <span className="slash-kbd">/</span>
@@ -174,6 +174,7 @@ export function useSlashPalette(
           className={`slash-item ${i === sel ? "on" : ""}`}
           role="option"
           aria-selected={i === sel}
+          data-testid={`slash-item-${it.key}`}
           onMouseEnter={() => setIdx(i)}
           onMouseDown={(e) => {
             e.preventDefault(); // 不抢 textarea 焦点

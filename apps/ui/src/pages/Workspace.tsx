@@ -379,7 +379,12 @@ export function Workspace({
             onOpenGitGraph={() => setDockOpen(true)}
           >
             <ModelSelect models={models} value={model} onChange={setModel} up variant="strip" />
-            <ComposerContextPill tone={thinkLevel !== "off" ? "on" : "default"} onClick={cycleThink} title="思考档位（点击循环：低/中/高/关）">
+            <ComposerContextPill
+              tone={thinkLevel !== "off" ? "on" : "default"}
+              onClick={cycleThink}
+              title="思考档位（点击循环：低/中/高/关）"
+              testId="workspace-think-pill"
+            >
               <ThinkIcon size={14} />
               <span>思考 {THINK_LABEL[thinkLevel]}</span>
             </ComposerContextPill>
@@ -412,6 +417,7 @@ export function Workspace({
             {slash.palette}
             <textarea
               ref={taRef}
+              data-testid="workspace-composer-input"
               value={input}
               rows={1}
               placeholder={`在「${project.name}」里让 AI 干活…（/ 唤起命令）`}
@@ -445,6 +451,7 @@ export function Workspace({
                 <div className="perm-wrap">
                   <button
                     className={`perm-pill ${approvalMode === "full-auto" ? "warn" : ""}`}
+                    data-testid="workspace-approval-pill"
                     onClick={() => setPermOpen((v) => !v)}
                     title="审批策略"
                   >
@@ -455,11 +462,12 @@ export function Workspace({
                   {permOpen && (
                     <>
                       <div className="menu-backdrop" onClick={() => setPermOpen(false)} />
-                      <div className="perm-menu up">
+                      <div className="perm-menu up" data-testid="workspace-approval-menu">
                         {APPROVAL_OPTS.map((o) => (
                           <button
                             key={o.id}
                             className={`perm-item ${approvalMode === o.id ? "on" : ""}`}
+                            data-testid={`workspace-approval-option-${o.id}`}
                             onClick={() => {
                               void setMode(o.id);
                               setPermOpen(false);

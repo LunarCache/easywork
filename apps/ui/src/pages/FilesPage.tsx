@@ -13,9 +13,9 @@ export function FilesPage({ project, onBack }: { project: Project; onBack: () =>
   const [sel, setSel] = useState<string | null>(null);
 
   return (
-    <div className="files-page">
+    <div className="files-page" data-testid="files-page">
       <header className="bar files-bar">
-        <button className="files-back" onClick={onBack} title="返回对话">
+        <button className="files-back" data-testid="files-back" onClick={onBack} title="返回对话">
           <ArrowLeftIcon size={15} /> 返回任务
         </button>
         <span className="files-title" title={project.workspaceDir}>

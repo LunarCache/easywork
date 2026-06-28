@@ -32,6 +32,24 @@
 
 ## 里程碑日志
 
+## 2026-06-28 — CI 友好的 Playwright UI e2e 扩容到 12 条
+
+- **补齐 Playwright 测试基建**：加入 `playwright.config.ts` 与 `apps/ui/e2e/fixtures.ts`，每条用例都在**隔离 `EW_DATA_DIR`** 下启动真实 `apps/daemon/dist/cli.js serve`，再用真实 Vite UI 通过 `?baseUrl=...&token=...` 连入；这层可直接进 CI，不依赖本地模型。
+- **把旧 core 真机 e2e 明确降级为 smoke**：`packages/core/test/session-host.e2e.test.ts` 保留，但文义与定位改成**本地/发布前 runtime smoke**，不再当作 CI 主层。
+- **新增稳定测试锚点**：为 `Sidebar`、`SearchPalette`、`SlashPalette`、`ContextBar`、`FilesPage`、`ProjectFileTree`、`FileViewer`、`KnowledgeBaseOverlay`、`MemoryOverlay`、`Skills`，以及 Chat / Workspace 的关键 composer 节点补最小量 `data-testid`，避免把断言绑死在易变文案上。
+- **第二层 e2e：设置与共享 composer**：
+  - `apps/ui/e2e/settings.spec.ts`：设置页打开、返回后记住上次分区、本地/云端模型 tab、知识库/记忆页主操作可见。
+  - `apps/ui/e2e/composer.spec.ts`：聊天页 slash palette、工作区 `/think`、工作区审批策略切换与刷新后持久化。
+- **第三层 e2e：导航与切换**：
+  - `apps/ui/e2e/navigation.spec.ts`：`⌃K` 全局搜索打开/筛选/回车切项目、工作区上下文条切项目、侧栏按钮打开搜索并用 `Esc` 关闭。
+- **第四层 e2e：文件页与记忆真实写状态**：
+  - `apps/ui/e2e/files-memory.spec.ts`：侧栏进入文件页 → 预览文件 → 返回任务；记忆页添加 / 编辑 / 搜索 / 删除闭环。
+- **第五层 e2e：知识库与 Skills 管理**：
+  - `apps/ui/e2e/kb-skills.spec.ts`：知识库已有文档的搜索 / 预览 / 删除；Skills 模板新建、列表出现、详情打开与返回。
+- **顺手修掉真实浏览器路径 bug**：新增审批策略 e2e 时发现浏览器端 `PATCH /projects/:id` 会被 daemon CORS 预检拦掉（缺少 `PATCH`）；`packages/core/src/server/app.ts` 已放行 `PATCH`，连带修复项目审批策略与记忆编辑这类浏览器 PATCH 流程。
+- **CI workflow 收口**：`.github/workflows/ci.yml` 从只跑 `settings.spec.ts` 升级为直接跑 `npm run test:e2e`，使整组 12 条 UI e2e 成为默认主跑层。
+- **验证**：`npm run test:e2e -- apps/ui/e2e/settings.spec.ts apps/ui/e2e/composer.spec.ts apps/ui/e2e/navigation.spec.ts apps/ui/e2e/files-memory.spec.ts apps/ui/e2e/kb-skills.spec.ts` → **12 passed**。
+
 ## 2026-06-27 — UI 一致性收口（composer / slash / 设置记忆 / 运行态拆分）
 
 - **聊天页入口更明确**：`Chat.tsx` 空态补一排快捷动作卡片（联网搜索 / 打开工作区 / 配置模型），把「直接提问」和「进入工作区做项目」两条路径讲清楚；点击后分别预填搜索提示、打开工作区创建流、直达设置里的模型分区。

@@ -350,7 +350,7 @@ export function Models({ onChange }: { onChange: () => void }) {
               onKeyDown={(e) => e.key === "Enter" && void search()}
             />
           </div>
-          <button onClick={() => void search()} disabled={searching}>
+          <button className="set-btn primary" onClick={() => void search()} disabled={searching}>
             {searching ? "搜索中…" : "搜索"}
           </button>
         </div>
@@ -381,7 +381,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                           {fmtSize(v.sizeBytes)}
                           {v.shardCount > 1 ? ` · ${v.shardCount} 分片` : ""}
                         </span>
-                        <button className="btn-sm" onClick={() => void download(v)}>
+                        <button className="set-btn small" onClick={() => void download(v)}>
                           <DownloadIcon size={13} /> 下载
                         </button>
                       </div>
@@ -410,7 +410,7 @@ export function Models({ onChange }: { onChange: () => void }) {
         <p className="hint" style={{ marginBottom: 10 }}>任意 OpenAI 兼容端点（/v1）。Key 持久化在本机 daemon。</p>
         <div className="prov-presets">
           {PROVIDER_PRESETS.map((p) => (
-            <button key={p.id} className="prov-preset" title={p.baseUrl} onClick={() => setProv({ ...prov, id: prov.id || p.id, baseUrl: p.baseUrl })}>
+            <button key={p.id} className="set-btn ghost soft small" title={p.baseUrl} onClick={() => setProv({ ...prov, id: prov.id || p.id, baseUrl: p.baseUrl })}>
               {p.label}
             </button>
           ))}
@@ -428,7 +428,7 @@ export function Models({ onChange }: { onChange: () => void }) {
             value={prov.context}
             onChange={(e) => setProv({ ...prov, context: e.target.value })}
           />
-          <button onClick={() => void addProvider()}>添加</button>
+          <button className="set-btn primary" onClick={() => void addProvider()}>添加</button>
         </div>
       </div>
     );
@@ -436,23 +436,33 @@ export function Models({ onChange }: { onChange: () => void }) {
 
   // ===== 主视图：本地 / 云端 卡片列表 =====
   return (
-    <div className="page mdl-page">
+    <div className="page mdl-page" data-testid="models-page">
       <div className="mdl-head">
-        <div className="seg mdl-tabs">
-          <button className={tab === "local" ? "on" : ""} onClick={() => setTab("local")}>
+        <div className="seg mdl-tabs" data-testid="models-tabs">
+          <button
+            className={tab === "local" ? "on" : ""}
+            data-testid="models-tab-local"
+            data-active={tab === "local" ? "1" : "0"}
+            onClick={() => setTab("local")}
+          >
             <BoxIcon size={14} /> 本地
           </button>
-          <button className={tab === "cloud" ? "on" : ""} onClick={() => setTab("cloud")}>
+          <button
+            className={tab === "cloud" ? "on" : ""}
+            data-testid="models-tab-cloud"
+            data-active={tab === "cloud" ? "1" : "0"}
+            onClick={() => setTab("cloud")}
+          >
             <GlobeIcon size={14} /> 云端
           </button>
         </div>
         <span className="bar-spacer" />
         {tab === "local" ? (
-          <button className="set-add icon" title="下载模型" onClick={() => setView("search")}>
+          <button className="set-btn secondary icon" title="下载模型" onClick={() => setView("search")}>
             <SearchIcon size={16} />
           </button>
         ) : (
-          <button className="set-add icon" title="添加 Provider" onClick={() => setView("add-provider")}>
+          <button className="set-btn secondary icon" title="添加 Provider" onClick={() => setView("add-provider")}>
             <PlusIcon size={16} />
           </button>
         )}
@@ -490,7 +500,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
                 />
-                <button className="set-add" disabled={netBusy} onClick={() => setApiKeyInput(genApiKey())}>
+                <button className="set-btn secondary" disabled={netBusy} onClick={() => setApiKeyInput(genApiKey())}>
                   生成
                 </button>
               </div>
@@ -523,7 +533,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                 </div>
                 <div className="rt-banner-cmd">一键安装（llama.app 官方）：<code>{runtime.install}</code></div>
               </div>
-              <button className="rt-install" disabled={rtInstalling} onClick={() => void installRuntime()}>
+              <button className="set-btn primary" disabled={rtInstalling} onClick={() => void installRuntime()}>
                 {rtInstalling ? "安装中…" : "安装运行时"}
               </button>
             </div>
@@ -569,20 +579,20 @@ export function Models({ onChange }: { onChange: () => void }) {
                     </div>
                     {isEmbed ? (
                       embedReady ? (
-                        <button className="set-add" disabled title="向量记忆已启用">
+                        <button className="set-btn secondary" disabled title="向量记忆已启用">
                           已启用
                         </button>
                       ) : (
-                        <button className="set-add primary" disabled={embedBusy} onClick={() => void enableEmbed(m)}>
+                        <button className="set-btn secondary" disabled={embedBusy} onClick={() => void enableEmbed(m)}>
                           {embedBusy ? "启用中…" : "启用向量"}
                         </button>
                       )
                     ) : isLoaded ? (
-                      <button className="set-add" disabled={isBusy} onClick={() => void unload(m)}>
+                      <button className="set-btn secondary" disabled={isBusy} onClick={() => void unload(m)}>
                         {isBusy ? "卸载中…" : "卸载"}
                       </button>
                     ) : (
-                      <button className="set-add primary" disabled={isBusy} onClick={() => void load(m)}>
+                      <button className="set-btn secondary" disabled={isBusy} onClick={() => void load(m)}>
                         {isBusy ? "加载中…" : "加载"}
                       </button>
                     )}

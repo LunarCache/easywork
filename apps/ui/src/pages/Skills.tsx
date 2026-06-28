@@ -87,13 +87,13 @@ export function Skills() {
     const fm = detail.skill.frontmatter;
     return (
       <div className="page skills-page">
-        <div className="skill-detail-head">
-          <button className="files-back" onClick={() => setDetail(null)}>
+      <div className="skill-detail-head">
+          <button className="files-back" data-testid="skills-detail-back" onClick={() => setDetail(null)}>
             <ArrowLeftIcon size={15} /> 返回
           </button>
-          <span className="skill-detail-name">{fm.name}</span>
+          <span className="skill-detail-name" data-testid="skills-detail-name">{fm.name}</span>
           <span className="bar-spacer" />
-          <button className="set-add" onClick={() => void openDir()}>
+          <button className="set-btn secondary" onClick={() => void openDir()}>
             <FolderIcon size={14} /> 打开目录
           </button>
         </div>
@@ -108,18 +108,19 @@ export function Skills() {
       <div className="skills-head">
         <p className="skills-lead">任务中 Agent 可调用的能力（来自技能目录的 SKILL.md，点卡片查看详情）。</p>
         <span className="bar-spacer" />
-        <button className="set-add icon" title="打开技能目录" onClick={() => void openDir()}>
+        <button className="set-btn ghost soft icon" title="打开技能目录" onClick={() => void openDir()}>
           <FolderIcon size={16} />
         </button>
-        <button className="set-add icon" title="新建技能" onClick={newTemplate}>
+        <button className="set-btn secondary icon" data-testid="skills-new-button" title="新建技能" onClick={newTemplate}>
           <PlusIcon size={16} />
         </button>
       </div>
       {creating && (
-        <div className="skills-new">
+        <div className="skills-new" data-testid="skills-new-inline">
           <PlusIcon size={14} />
           <input
             autoFocus
+            data-testid="skills-new-input"
             placeholder="技能名（英文 / 数字 / 连字符）"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
@@ -128,10 +129,10 @@ export function Skills() {
               else if (e.key === "Escape") cancelTemplate();
             }}
           />
-          <button title="创建" onClick={() => void confirmTemplate()}>
+          <button data-testid="skills-new-submit" title="创建" onClick={() => void confirmTemplate()}>
             <CheckIcon size={15} />
           </button>
-          <button title="取消" onClick={cancelTemplate}>
+          <button data-testid="skills-new-cancel" title="取消" onClick={cancelTemplate}>
             <XIcon size={15} />
           </button>
         </div>
@@ -144,7 +145,7 @@ export function Skills() {
           const name = s.frontmatter.name;
           const on = !disabled.includes(name);
           return (
-            <div key={s.id} className="skill-card" onClick={() => void openDetail(s)}>
+            <div key={s.id} className="skill-card" data-testid={`skill-card-${s.id}`} onClick={() => void openDetail(s)}>
               <span className="skill-ico">
                 <SparkIcon size={18} />
               </span>
