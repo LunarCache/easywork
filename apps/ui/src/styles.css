@@ -849,6 +849,19 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mcp-status.ok { color: var(--color-success); }
 .mcp-status.err { color: var(--err); }
 .set-pill.ghost { opacity: 0.65; font-weight: 500; }
+.channels-page .set-group { margin-bottom: 14px; }
+.channels-page .set-row-control { flex-wrap: wrap; }
+.channels-page .mcp-card { gap: 14px; }
+.channels-page .mcp-card-body { display: flex; flex-direction: column; gap: 3px; }
+.channels-page .mcp-card-name { flex-wrap: wrap; }
+.channels-page .mcp-card-detail { white-space: normal; }
+.channels-secret-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
+.channels-secret-grid input { min-width: 0; width: 100%; }
+.channels-page .empty-models { padding: 42px 20px; }
+.channels-page .empty-models .ring { margin-bottom: 14px; }
+.channels-page .empty-models h2 { margin: 0 0 6px; }
+.channels-page .empty-models p { margin: 0; }
+.channels-page .mcp-icon-btn { opacity: 1; }
 
 /* —— 模型页：本地 / 云端 卡片（统一风格）—— */
 .mdl-head { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }

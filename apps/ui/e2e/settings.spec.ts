@@ -43,6 +43,21 @@ test.describe("settings e2e", () => {
     await expect(page.getByTestId("models-tab-local")).toHaveAttribute("data-active", "1");
   });
 
+  test("渠道页可打开并记住上次分区", async ({ page, openApp }) => {
+    await openApp();
+
+    await page.getByTestId("sidebar-settings").click();
+    await page.getByTestId("settings-nav-channels").click();
+    await expect(page.getByTestId("settings-title")).toHaveText("渠道");
+    await expect(page.getByTestId("channels-page")).toBeVisible();
+    await expect(page.getByTestId("channels-list")).toBeVisible();
+    await expect(page.getByText("还没有渠道")).toBeVisible();
+
+    await page.getByTestId("settings-back").click();
+    await page.getByTestId("sidebar-settings").click();
+    await expect(page.getByTestId("settings-title")).toHaveText("渠道");
+  });
+
   test("知识库与记忆页主操作按钮可见", async ({ page, openApp, client, workspaceDir }) => {
     const project = await client.createProject({ name: "PW Project", workspaceDir });
     await client.kbIngest({ kbId: "docs", source: "guide.md", text: "# Guide\n\nhello e2e" });

@@ -25,7 +25,7 @@ interface ThreadItem {
 
 const SESSION_W_KEY = "ew.sessionWidth";
 const SETTINGS_SEC_KEY = "ew.settingsSection";
-const SETTINGS_SECTIONS: SettingsSection[] = ["general", "models", "kb", "skills", "mcp", "memory"];
+const SETTINGS_SECTIONS: SettingsSection[] = ["general", "models", "channels", "kb", "skills", "mcp", "memory"];
 
 const loadSessionWidth = (): number => {
   const n = Number(localStorage.getItem(SESSION_W_KEY));

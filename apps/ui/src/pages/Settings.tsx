@@ -3,6 +3,7 @@ import { type Appearance, type ThemePrefs } from "../lib/prefs.js";
 import { Models } from "./Models.js";
 import { Skills } from "./Skills.js";
 import { Mcp } from "./Mcp.js";
+import { Channels } from "./Channels.js";
 import { KnowledgeBaseOverlay } from "../components/KnowledgeBaseOverlay.js";
 import { MemoryOverlay } from "../components/MemoryOverlay.js";
 import {
@@ -16,11 +17,12 @@ import {
   SparkIcon,
   BrainIcon,
   PluginsIcon,
+  GitGraphIcon,
   ChevronDownIcon,
   CheckIcon,
 } from "../icons.js";
 
-export type SettingsSection = "general" | "models" | "kb" | "skills" | "mcp" | "memory";
+export type SettingsSection = "general" | "models" | "channels" | "kb" | "skills" | "mcp" | "memory";
 
 
 const APPEARANCES: { id: Appearance; label: string; Icon: typeof SunIcon }[] = [
@@ -94,6 +96,7 @@ export function Settings({
   const SECS: { id: SettingsSection; label: string; Icon: typeof PaletteIcon }[] = [
     { id: "general", label: "通用", Icon: PaletteIcon },
     { id: "models", label: "模型", Icon: BoxIcon },
+    { id: "channels", label: "渠道", Icon: GitGraphIcon },
     { id: "kb", label: "知识库", Icon: BookIcon },
     { id: "skills", label: "Skills", Icon: SparkIcon },
     { id: "mcp", label: "MCP", Icon: PluginsIcon },
@@ -150,6 +153,11 @@ export function Settings({
         {visited.has("models") && (
           <div className={`set-pane ${sec === "models" ? "" : "hidden"}`} data-testid="settings-pane-models">
             <Models onChange={onModelsChange} />
+          </div>
+        )}
+        {visited.has("channels") && (
+          <div className={`set-pane ${sec === "channels" ? "" : "hidden"}`} data-testid="settings-pane-channels">
+            <Channels />
           </div>
         )}
         {visited.has("kb") && (

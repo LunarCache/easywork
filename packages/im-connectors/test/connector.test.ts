@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type {
   AgentEvent,
   AgentRunInput,
+  ChannelOutbound,
   ChannelConnector,
   ConversationRepo,
   InboundMessage,
@@ -12,6 +13,9 @@ import type {
   Thread,
 } from "@ew/shared";
 import { ConnectorHost } from "../src/host.js";
+import { ChannelGateway } from "../src/gateway.js";
+import { ChannelAdapterRegistry } from "../src/registry.js";
+import type { ChannelAdapter, ChannelAdapterContext, SendResult } from "../src/adapter.js";
 import { TelegramConnector } from "../src/telegram.js";
 
 /** 内存版会话仓库（测试用）。 */
@@ -176,5 +180,144 @@ describe("TelegramConnector", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0].chat_id).toBe("77");
     expect(sent[0].text).toBe("hi there");
+  });
+
+  it("stop 会取消正在进行的 long-poll", async () => {
+    let aborted = false;
+    const fakeFetch = (async (_url: string, init?: RequestInit) => {
+      return await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          aborted = true;
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+    }) as unknown as typeof fetch;
+    const tg = new TelegramConnector({ token: "x", fetch: fakeFetch, pollTimeout: 25 });
+
+    const running = tg.start();
+    await new Promise((r) => setTimeout(r, 0));
+    await tg.stop();
+    await running;
+
+    expect(aborted).toBe(true);
+  });
+});
+
+describe("ChannelGateway", () => {
+  it("registry adapter：启动、转发 inbound、发送 reply、记录状态", async () => {
+    class TestAdapter implements ChannelAdapter {
+      readonly kind = "telegram" as const;
+      readonly meta = {
+        kind: "telegram" as const,
+        label: "Test Telegram",
+        requiredSecrets: [{ key: "token", label: "Token" }],
+      };
+      ctx?: ChannelAdapterContext;
+      sent: { target: { channelChatId: string; channelThreadId?: string; replyToMessageId?: string }; message: ChannelOutbound }[] = [];
+      async start(ctx: ChannelAdapterContext): Promise<void> {
+        this.ctx = ctx;
+      }
+      async stop(): Promise<void> {}
+      async send(target: { channelChatId: string; channelThreadId?: string; replyToMessageId?: string }, message: ChannelOutbound): Promise<SendResult> {
+        this.sent.push({ target, message });
+        return { ok: true };
+      }
+      trigger(message: InboundMessage): Promise<void> {
+        return this.ctx!.emitInbound(message);
+      }
+    }
+
+    const adapter = new TestAdapter();
+    const registry = new ChannelAdapterRegistry();
+    registry.register({ meta: adapter.meta, create: () => adapter });
+    const inbound: InboundMessage[] = [];
+    const gateway = new ChannelGateway({
+      registry,
+      configs: [{ id: "tg-main", kind: "telegram", enabled: true, secrets: { token: "x" }, options: {}, auth: { allowAll: true } }],
+      handleInbound: async (message) => {
+        inbound.push(message);
+      },
+    });
+
+    await gateway.startAll();
+    await adapter.trigger({
+      channel: "telegram",
+      channelUserId: "u1",
+      channelChatId: "c1",
+      channelThreadId: "topic-1",
+      messageId: "msg-1",
+      parts: [{ type: "text", text: "hello" }],
+    });
+    await gateway.reply("tg-main", { channelChatId: "c1", channelThreadId: "topic-1", replyToMessageId: "msg-1" }, (async function* () {
+      yield { text: "hi " };
+      yield { text: "there", final: true };
+    })());
+
+    expect(inbound).toHaveLength(1);
+    expect(adapter.sent).toEqual([
+      {
+        target: { channelChatId: "c1", channelThreadId: "topic-1", replyToMessageId: "msg-1" },
+        message: { text: "hi there", attachments: [] },
+      },
+    ]);
+    expect(gateway.statuses()[0]).toMatchObject({ id: "tg-main", running: true });
+  });
+
+  it("按连接器 allowlist 过滤入站消息", async () => {
+    class TestAdapter implements ChannelAdapter {
+      readonly kind = "telegram" as const;
+      readonly meta = {
+        kind: "telegram" as const,
+        label: "Test Telegram",
+        requiredSecrets: [{ key: "token", label: "Token" }],
+      };
+      ctx?: ChannelAdapterContext;
+      async start(ctx: ChannelAdapterContext): Promise<void> {
+        this.ctx = ctx;
+      }
+      async stop(): Promise<void> {}
+      async send(): Promise<SendResult> {
+        return { ok: true };
+      }
+      trigger(message: InboundMessage): Promise<void> {
+        return this.ctx!.emitInbound(message);
+      }
+    }
+
+    const adapter = new TestAdapter();
+    const registry = new ChannelAdapterRegistry();
+    registry.register({ meta: adapter.meta, create: () => adapter });
+    const inbound: InboundMessage[] = [];
+    const gateway = new ChannelGateway({
+      registry,
+      configs: [{
+        id: "tg-main",
+        kind: "telegram",
+        enabled: true,
+        secrets: { token: "x" },
+        options: {},
+        auth: { allowedUsers: ["u-ok"] },
+      }],
+      handleInbound: async (message) => {
+        inbound.push(message);
+      },
+    });
+
+    await gateway.startAll();
+    await adapter.trigger({
+      channel: "telegram",
+      channelUserId: "u-no",
+      channelChatId: "c1",
+      parts: [{ type: "text", text: "blocked" }],
+    });
+    await adapter.trigger({
+      channel: "telegram",
+      channelUserId: "u-ok",
+      channelChatId: "c1",
+      parts: [{ type: "text", text: "allowed" }],
+    });
+
+    expect(inbound.map((m) => (m.parts[0] as any).text)).toEqual(["allowed"]);
+    expect(gateway.statuses()[0]).toMatchObject({ running: true });
   });
 });

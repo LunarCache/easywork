@@ -4,6 +4,7 @@ import {
   type AgentEvent,
   type AgentRunInput,
   type ChannelConnector,
+  type ChannelTarget,
   type ChatMessage,
   type ConversationRepo,
   type InboundMessage,
@@ -21,6 +22,11 @@ export interface ConnectorHostDeps {
   persist?: boolean;
 }
 
+export interface ReplyAdapter {
+  readonly kind: string;
+  reply(target: ChannelTarget, stream: AsyncIterable<OutboundChunk>): Promise<void>;
+}
+
 /**
  * 连接器宿主：把任意 ChannelConnector 接到"同一个大脑"。
  * inbound → resolveThreadForChannel → 取历史 → runAgent → 把文本批量回复 → 持久化。
@@ -31,7 +37,7 @@ export class ConnectorHost {
   constructor(private readonly deps: ConnectorHostDeps) {}
 
   attach(connector: ChannelConnector): void {
-    connector.onInbound((msg) => this.handle(connector, msg));
+    connector.onInbound((msg) => this.handleInbound(connector, msg));
     this.connectors.push(connector);
   }
 
@@ -47,7 +53,7 @@ export class ConnectorHost {
     return this.deps.repo.nextSeq ? this.deps.repo.nextSeq(threadId) : 0;
   }
 
-  private async handle(connector: ChannelConnector, msg: InboundMessage): Promise<void> {
+  async handleInbound(connector: ReplyAdapter, msg: InboundMessage): Promise<void> {
     const persist = this.deps.persist !== false;
     const thread = this.deps.repo.resolveThreadForChannel(msg.channel, msg.channelUserId, {
       modelId: this.deps.defaultModel,
@@ -86,7 +92,14 @@ export class ConnectorHost {
       }
     }
 
-    await connector.reply({ channelChatId: msg.channelChatId }, toChunks());
+    await connector.reply(
+      {
+        channelChatId: msg.channelChatId,
+        ...(msg.channelThreadId ? { channelThreadId: msg.channelThreadId } : {}),
+        ...(msg.messageId ? { replyToMessageId: msg.messageId } : {}),
+      },
+      toChunks(),
+    );
 
     if (persist && finalText) {
       const asstMsg: StoredMessage = {

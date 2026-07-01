@@ -51,6 +51,7 @@ export {
   RefreshCw as RefreshIcon,
   GitBranch as GitBranchIcon,
   GitFork as GitGraphIcon,
+  Play as PlayIcon,
   FolderPlus as FolderPlusIcon,
   Undo2 as UndoIcon,
   GitCommitHorizontal as CommitIcon,

@@ -99,7 +99,7 @@ async function killProcessTree(proc: ChildProcessWithoutNullStreams): Promise<vo
 }
 
 export const test = base.extend<E2eContext>({
-  dataDir: async ({}, use) => {
+  dataDir: async (_, use) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ew-playwright-"));
     try {
       await use(dir);

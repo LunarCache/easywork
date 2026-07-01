@@ -9,6 +9,9 @@ import type {
   HFModelSummary,
   LocalLoadOptions,
   LocalModel,
+  ChannelAdapterMeta,
+  ChannelConfig,
+  ChannelStatus,
   McpServerConfig,
   McpProbeResult,
   McpToolInfo,
@@ -19,7 +22,7 @@ import type {
   ThinkLevel,
 } from "@ew/shared";
 
-export type { Project, ApprovalMode } from "@ew/shared";
+export type { Project, ApprovalMode, ChannelAdapterMeta, ChannelConfig, ChannelStatus } from "@ew/shared";
 
 /** 工作区文件树条目。 */
 export interface WsEntry {
@@ -106,6 +109,15 @@ export interface ProviderInfo {
   models: string[];
   /** 手动配置的上下文窗口（token）。 */
   contextWindow?: number;
+}
+
+export interface ChannelAdaptersInfo {
+  adapters: ChannelAdapterMeta[];
+}
+
+export interface ChannelConnectorsInfo {
+  connectors: ChannelConfig[];
+  status: ChannelStatus[];
 }
 
 export interface AddProviderConfig {
@@ -276,6 +288,46 @@ export class EasyWorkClient {
     return this.postJSON<LocalNetInfo & { ok: boolean }>("/settings/local-net", {
       bindHost,
       ...(apiKey !== undefined ? { apiKey } : {}),
+    });
+  }
+
+  async listChannelAdapters(): Promise<ChannelAdapterMeta[]> {
+    return (await this.getJSON<ChannelAdaptersInfo>("/im/adapters")).adapters;
+  }
+
+  async listChannelConnectors(): Promise<ChannelConfig[]> {
+    return (await this.getJSON<ChannelConnectorsInfo>("/im/connectors")).connectors;
+  }
+
+  async listChannelStatuses(): Promise<ChannelStatus[]> {
+    return (await this.getJSON<ChannelConnectorsInfo>("/im/connectors")).status;
+  }
+
+  async upsertChannelConnector(config: ChannelConfig): Promise<ChannelStatus> {
+    const { status } = await this.postJSON<{ ok: boolean; status: ChannelStatus }>("/im/connectors", config);
+    return status;
+  }
+
+  async startChannelConnector(id: string): Promise<ChannelStatus> {
+    const { status } = await this.postJSON<{ ok: boolean; status: ChannelStatus }>(
+      `/im/connectors/${encodeURIComponent(id)}/start`,
+      {},
+    );
+    return status;
+  }
+
+  async stopChannelConnector(id: string): Promise<ChannelStatus> {
+    const { status } = await this.postJSON<{ ok: boolean; status: ChannelStatus }>(
+      `/im/connectors/${encodeURIComponent(id)}/stop`,
+      {},
+    );
+    return status;
+  }
+
+  async removeChannelConnector(id: string): Promise<void> {
+    await this.fetchImpl(`${this.baseUrl}/im/connectors/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: this.headers(),
     });
   }
 

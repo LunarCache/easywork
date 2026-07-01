@@ -17,7 +17,7 @@
                  └──────────────────────────────────────────┘
     spawn sidecar ▲       ▲ HTTP+SSE        ▲ HTTP+SSE    ▲ HTTP /v1
   ┌───────────────┘       │                 │            │
-  │ Tauri 主进程(Rust)    │ IM connectors   │ React UI   │ Claude Code /
+  │ Tauri 主进程(Rust)    │ Channel Gateway │ React UI   │ Claude Code /
   │  └ webview(React)     │ (TG/Discord/…)  │ (@ew/sdk)  │ 任意 /v1 客户端
   └───────────────────────┴─────────────────┴────────────┘
 ```
@@ -37,7 +37,7 @@ packages/
   tools/          @ew/tools         内置工具 + SSRF 防护
   skills/         @ew/skills        Skills 发现 / 渐进披露 / 执行
   mcp/            @ew/mcp           MCP client（stdio + HTTP）
-  im-connectors/  @ew/im-connectors telegram（discord / wecom / feishu 规划中）
+  im-connectors/  @ew/im-connectors Channel Gateway + adapter registry（Telegram 已迁入；Discord / WeCom / Feishu 规划中）
   sdk/            @ew/sdk           daemon HTTP API 的类型化客户端
 apps/
   desktop/        @ew/desktop       Tauri 2 外壳（Rust src-tauri）+ sidecar 启动 daemon
@@ -46,6 +46,17 @@ apps/
 ```
 
 依赖方向：所有包依赖 `shared`；`core` 是库，被 `apps/daemon` 与 `apps/desktop` 共同消费。
+
+## Channel Gateway
+
+外部 IM 不直接调用 `SessionHost`。`@ew/im-connectors` 提供小接口的 **Channel Gateway**：
+
+- `ChannelAdapter`：平台实现的 seam，负责 `start/stop/send/handleWebhook?`，并把平台消息归一成 `InboundMessage`。
+- `ChannelAdapterRegistry`：注册平台 adapter；当前内置 Telegram，后续 Discord gateway、WeCom/Feishu callback 都挂这里。
+- `ChannelGateway`：托管配置、状态、生命周期、allowlist 鉴权、webhook 分发和出站 `ChannelTarget` 透传。
+- `ConnectorHost`：唯一把入站消息接到同一个大脑的宿主层，负责 `resolveThreadForChannel`、载历史、调用 `SessionHost.run`、把 `AgentEvent` 聚合为 IM 回复并落库。
+
+`@ew/core` 暴露管理面：`GET /im/adapters`、`GET/POST/DELETE /im/connectors`、`POST /im/connectors/:id/start|stop`，这些都走 daemon Bearer 鉴权。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。渠道配置先落 SQLite settings；平台 secret 目前随配置存储，后续可在不改 adapter seam 的情况下迁到 keychain/secret ref。
 
 ## 技术栈
 

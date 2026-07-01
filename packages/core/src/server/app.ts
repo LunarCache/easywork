@@ -22,6 +22,8 @@ import {
   isWorkspaceScope,
   type AgentEvent,
   type ContentPart,
+  ChannelConfigSchema,
+  type ChannelConfig,
   type DownloadEvent,
   type McpServerConfig,
 } from "@ew/shared";
@@ -29,6 +31,14 @@ import { LlamaServeEngine } from "@ew/providers";
 import { builtinTools } from "@ew/tools";
 import { SkillManager } from "@ew/skills";
 import { McpClientManager } from "@ew/mcp";
+import {
+  ChannelGateway,
+  ConnectorHost,
+  ChannelAdapterRegistry,
+  registerBuiltInChannelAdapters,
+  type WebhookRequest,
+  type WebhookResult,
+} from "@ew/im-connectors";
 import { LocalMemoryProvider } from "@ew/memory";
 import { z } from "zod";
 import { EngineRegistry } from "../engine/registry.js";
@@ -66,6 +76,7 @@ export interface CoreServer {
   providers: ProviderManager;
   skills: SkillManager;
   mcp: McpClientManager;
+  channels: ChannelGateway;
   memory: LocalMemoryProvider;
   embeddings: EmbeddingService;
   kb: KnowledgeBaseStore;
@@ -143,6 +154,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   const skillsDirs = opts.skillsDirs ?? [fsPath.join(defaultDataDir(), "skills")];
   const skills = new SkillManager(skillsDirs);
   const mcp = new McpClientManager();
+  const channelRegistry = registerBuiltInChannelAdapters(new ChannelAdapterRegistry());
   // 交互式审批跨请求登记表（/agent/run 挂起 ↔ /agent/approve 解析）。
   const approvalRegistry = new ApprovalRegistry();
 
@@ -199,6 +211,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   // ---- 持久化 provider / MCP 配置（重启后恢复）----
   const PROVIDERS_KEY = "providers";
   const MCP_KEY = "mcp.servers";
+  const CHANNELS_KEY = "im.connectors";
   const LOCAL_BIND_KEY = "local.bindHost";
   const LOCAL_APIKEY_KEY = "local.apiKey";
   const persistProviders = (): void => {
@@ -239,6 +252,56 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       /* 损坏的配置忽略 */
     }
   })();
+
+  const loadChannelConfigs = (): ChannelConfig[] => {
+    try {
+      const raw = repo.getSetting(CHANNELS_KEY);
+      if (!raw) return [];
+      const parsed = z.array(ChannelConfigSchema).safeParse(JSON.parse(raw));
+      return parsed.success ? parsed.data : [];
+    } catch {
+      return [];
+    }
+  };
+  const resolveChannelModel = (requested?: string): string => {
+    if (requested) return requested;
+    const first = registry.routedModels()[0];
+    if (first) return first;
+    throw new Error("no_model_available");
+  };
+  const connectorHost = new ConnectorHost({
+    repo,
+    defaultModel: "",
+    run: (input) => {
+      const modelId = resolveChannelModel(input.model);
+      const last = input.history[input.history.length - 1];
+      return sessionHost.run({
+        threadId: input.threadId,
+        modelId,
+        text: last?.role === "user" ? messageText(last.content) : "",
+        cwd: chatWorkspaceDir(input.threadId),
+        workspace: false,
+        memoryScope: GLOBAL_SCOPE,
+        approvalMode: "auto-edits",
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.sampling ? { sampling: input.sampling } : {}),
+      });
+    },
+  });
+  const channels = new ChannelGateway({
+    registry: channelRegistry,
+    configs: loadChannelConfigs(),
+    handleInbound: async (message, adapter) => {
+      await connectorHost.handleInbound(adapter, message);
+    },
+  });
+  const persistChannels = (): void => {
+    try {
+      repo.setSetting(CHANNELS_KEY, JSON.stringify(channels.configs()));
+    } catch {
+      /* 持久化失败不影响运行 */
+    }
+  };
 
   const DEFAULT_EMBED_REPO = "nomic-ai/nomic-embed-text-v1.5-GGUF";
   const DEFAULT_EMBED_FILE = "nomic-embed-text-v1.5.Q4_K_M.gguf";
@@ -303,10 +366,13 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     }
   });
 
-  // bearer 鉴权（/health 与预检 OPTIONS 免鉴权）。
+  const isExternalWebhook = (url: string): boolean => /^\/im\/[^/?#]+\/webhook(?:[?#]|$)/.test(url);
+
+  // bearer 鉴权（/health、预检 OPTIONS 与外部 IM webhook 免鉴权；webhook 自身由 adapter 校验平台签名/secret）。
   app.addHook("onRequest", async (req, reply) => {
     if (req.method === "OPTIONS") return;
     if (req.url === "/health" || req.url.startsWith("/health?")) return;
+    if (isExternalWebhook(req.url)) return;
     if (req.headers.authorization !== `Bearer ${token}`) {
       return reply.code(401).send({ error: "unauthorized" });
     }
@@ -511,6 +577,79 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     persistProviders();
     sessionHost.syncCloudProviders();
     return { ok: true };
+  });
+
+  // ---- 外部 IM 渠道 Gateway ----
+  app.get("/im/adapters", async () => ({ adapters: channels.metas() }));
+
+  app.get("/im/connectors", async () => ({
+    connectors: channels.configs(),
+    status: channels.statuses(),
+  }));
+
+  app.post("/im/connectors", async (req, reply) => {
+    const parsed = ChannelConfigSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_channel_config", detail: parsed.error.format() });
+    }
+    try {
+      let status = await channels.upsert(parsed.data);
+      persistChannels();
+      if (parsed.data.enabled) status = await channels.start(parsed.data.id);
+      return { ok: true, status };
+    } catch (err) {
+      return reply.code(400).send({ error: "channel_config_failed", message: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/im/connectors/:id/start", async (req, reply) => {
+    try {
+      return { ok: true, status: await channels.start((req.params as { id: string }).id) };
+    } catch (err) {
+      return reply.code(400).send({ error: "channel_start_failed", message: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post("/im/connectors/:id/stop", async (req, reply) => {
+    try {
+      return { ok: true, status: await channels.stop((req.params as { id: string }).id) };
+    } catch (err) {
+      return reply.code(400).send({ error: "channel_stop_failed", message: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.delete("/im/connectors/:id", async (req) => {
+    await channels.remove((req.params as { id: string }).id);
+    persistChannels();
+    return { ok: true };
+  });
+
+  app.all("/im/:id/webhook", async (req, reply) => {
+    const headers: WebhookRequest["headers"] = {};
+    for (const [key, value] of Object.entries(req.headers)) headers[key] = value;
+    const query: WebhookRequest["query"] = {};
+    for (const [key, value] of Object.entries(req.query as Record<string, string | string[] | undefined>)) {
+      query[key] = value;
+    }
+    let result: WebhookResult;
+    try {
+      result = await channels.handleWebhook((req.params as { id: string }).id, {
+        method: req.method,
+        path: req.url,
+        query,
+        headers,
+        body: req.body,
+      });
+    } catch (err) {
+      return reply.code(404).send({
+        error: "unknown_channel_connector",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    if (result.headers) {
+      for (const [key, value] of Object.entries(result.headers)) reply.header(key, value);
+    }
+    return reply.code(result.status ?? 200).send(result.body ?? { ok: true });
   });
 
   // ---- 流式对话（内部 SSE，渠道无关事件） ----
@@ -1116,7 +1255,7 @@ version: "0.1.0"
       return reply.code(400).send({ error: "reveal_error", message: e instanceof Error ? e.message : String(e) });
     }
   });
-  app.post("/chat/:threadId/reveal", async (req, reply) => {
+  app.post("/chat/:threadId/reveal", async (req) => {
     const dir = chatWorkspaceDir((req.params as { threadId: string }).threadId);
     revealDir(dir);
     return { ok: true, dir };
@@ -1340,6 +1479,7 @@ version: "0.1.0"
     providers,
     skills,
     mcp,
+    channels,
     memory,
     embeddings,
     kb,
@@ -1351,6 +1491,9 @@ version: "0.1.0"
       await app.listen({ port, host });
       const addr = app.server.address();
       const actualPort = typeof addr === "object" && addr ? addr.port : port;
+      await channels.startAll().catch((err) => {
+        console.error("[easywork] IM 渠道启动失败:", err);
+      });
       // 启动后台自动启用向量记忆（不阻塞 listen）。
       void autoEnableEmbedding();
       return { port: actualPort, host };
@@ -1366,6 +1509,7 @@ version: "0.1.0"
         /* ignore */
       }
       await local.stopAll().catch(() => {});
+      await channels.stopAll().catch(() => {});
       await embeddings.stop().catch(() => {});
       try {
         repo.close();

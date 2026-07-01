@@ -23,6 +23,7 @@
     "@earendil-works/pi-agent-core": "0.79.9",
     "@earendil-works/pi-ai": "0.79.9",
     "@earendil-works/pi-coding-agent": "0.79.9",
+    "@ew/im-connectors": "*",
     "@ew/mcp": "*",
     "@ew/memory": "*",
     "@ew/providers": "*",
