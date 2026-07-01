@@ -99,7 +99,9 @@ async function killProcessTree(proc: ChildProcessWithoutNullStreams): Promise<vo
 }
 
 export const test = base.extend<E2eContext>({
-  dataDir: async (_, use) => {
+  // Playwright fixtures require object destructuring for the first argument.
+  // eslint-disable-next-line no-empty-pattern
+  dataDir: async ({}, use) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ew-playwright-"));
     try {
       await use(dir);
