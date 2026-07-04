@@ -57,6 +57,53 @@ interface ToolAccum {
   started: boolean;
 }
 
+interface OpenAIUsageShape {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+}
+
+interface OpenAIToolCallShape {
+  id?: string;
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
+}
+
+interface OpenAIChatCompletionShape {
+  model?: string;
+  usage?: OpenAIUsageShape;
+  choices?: Array<{
+    finish_reason?: string | null;
+    message?: {
+      content?: string | null;
+      tool_calls?: OpenAIToolCallShape[];
+    };
+  }>;
+}
+
+interface OpenAIStreamToolCallShape extends OpenAIToolCallShape {
+  index?: number;
+}
+
+interface OpenAIStreamChunkShape {
+  usage?: OpenAIUsageShape;
+  choices?: Array<{
+    finish_reason?: string | null;
+    delta?: {
+      content?: string;
+      reasoning_content?: string;
+      tool_calls?: OpenAIStreamToolCallShape[];
+    };
+  }>;
+}
+
+interface OpenAIEmbeddingShape {
+  model?: string;
+  data?: Array<{ embedding?: number[] }>;
+}
+
 /** 通用 OpenAI 兼容引擎。覆盖 OpenAI / vLLM / OpenRouter / 各家兼容 API。 */
 export class OpenAICompatibleEngine implements InferenceEngine {
   readonly id: string;
@@ -129,11 +176,11 @@ export class OpenAICompatibleEngine implements InferenceEngine {
       signal: req.signal,
     });
     if (!res.ok) throw new Error(`${this.id} chat failed: ${res.status} ${await res.text()}`);
-    const json = (await res.json()) as any;
+    const json = (await res.json()) as OpenAIChatCompletionShape;
     const choice = json.choices?.[0];
     const msg = choice?.message ?? {};
-    const toolCalls: ToolCall[] | undefined = msg.tool_calls?.map((tc: any) => ({
-      id: tc.id,
+    const toolCalls: ToolCall[] | undefined = msg.tool_calls?.map((tc) => ({
+      id: tc.id ?? "",
       name: tc.function?.name ?? "",
       arguments: tc.function?.arguments ?? "",
     }));
@@ -178,7 +225,7 @@ export class OpenAICompatibleEngine implements InferenceEngine {
     const harmony = new HarmonyParser();
 
     for await (const chunk of parseSSE(res.body)) {
-      const c = chunk as any;
+      const c = chunk as OpenAIStreamChunkShape;
       if (c.usage) {
         usage = {
           promptTokens: c.usage.prompt_tokens ?? 0,
@@ -258,8 +305,8 @@ export class OpenAICompatibleEngine implements InferenceEngine {
       body: JSON.stringify({ model: req.model, input: req.input }),
     });
     if (!res.ok) throw new Error(`${this.id} embed failed: ${res.status}`);
-    const json = (await res.json()) as any;
-    const vectors: number[][] = (json.data ?? []).map((d: any) => d.embedding as number[]);
+    const json = (await res.json()) as OpenAIEmbeddingShape;
+    const vectors: number[][] = (json.data ?? []).map((d) => d.embedding ?? []);
     return { vectors, model: json.model ?? req.model };
   }
 }

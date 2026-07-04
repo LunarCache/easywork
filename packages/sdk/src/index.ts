@@ -120,6 +120,27 @@ export interface ChannelConnectorsInfo {
   status: ChannelStatus[];
 }
 
+export interface FeishuRegistrationSession {
+  id: string;
+  connectorId: string;
+  displayName?: string;
+  status: "initializing" | "waiting" | "completed" | "error" | "aborted";
+  createdAt: string;
+  qrUrl?: string;
+  expireAt?: string;
+  statusDetail?: string;
+  error?: string;
+  channelStatus?: ChannelStatus;
+}
+
+export interface StartFeishuRegistrationInput {
+  id?: string;
+  displayName?: string;
+  enabled?: boolean;
+  region?: "feishu" | "lark";
+  auth?: ChannelConfig["auth"];
+}
+
 export interface AddProviderConfig {
   id: string;
   baseUrl: string;
@@ -326,6 +347,25 @@ export class EasyWorkClient {
 
   async removeChannelConnector(id: string): Promise<void> {
     await this.fetchImpl(`${this.baseUrl}/im/connectors/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+  }
+
+  async startFeishuRegistration(input: StartFeishuRegistrationInput = {}): Promise<FeishuRegistrationSession> {
+    const { session } = await this.postJSON<{ session: FeishuRegistrationSession }>("/im/feishu/register", input);
+    return session;
+  }
+
+  async getFeishuRegistration(id: string): Promise<FeishuRegistrationSession> {
+    const { session } = await this.getJSON<{ session: FeishuRegistrationSession }>(
+      `/im/feishu/register/${encodeURIComponent(id)}`,
+    );
+    return session;
+  }
+
+  async cancelFeishuRegistration(id: string): Promise<void> {
+    await this.fetchImpl(`${this.baseUrl}/im/feishu/register/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers: this.headers(),
     });

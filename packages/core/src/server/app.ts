@@ -2,7 +2,8 @@ import fs from "node:fs";
 import fsPath from "node:path";
 import os from "node:os";
 import { createRequire } from "node:module";
-import Fastify, { type FastifyInstance } from "fastify";
+import { Readable } from "node:stream";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import {
   ChatMessageSchema,
   ApprovalModeSchema,
@@ -24,6 +25,7 @@ import {
   type ContentPart,
   ChannelConfigSchema,
   type ChannelConfig,
+  type ChannelStatus,
   type DownloadEvent,
   type McpServerConfig,
 } from "@ew/shared";
@@ -36,6 +38,7 @@ import {
   ConnectorHost,
   ChannelAdapterRegistry,
   registerBuiltInChannelAdapters,
+  registerFeishuApp,
   type WebhookRequest,
   type WebhookResult,
 } from "@ew/im-connectors";
@@ -105,6 +108,8 @@ export interface CreateCoreOptions {
   kbDbPath?: string;
   /** 覆盖 fetch（测试用，拦截 HF / 云端调用）。 */
   fetch?: typeof fetch;
+  /** 覆盖 Feishu/Lark 扫码注册（测试用，避免真实外网轮询）。 */
+  feishuRegister?: typeof registerFeishuApp;
   /** 统一 `llama`（llama.app）可执行文件路径（默认走 PATH 中的 "llama"）。 */
   llamaBinPath?: string;
 }
@@ -117,6 +122,41 @@ const ProviderConfigSchema = z.object({
   models: z.array(z.string()),
   contextWindow: z.number().int().positive().optional(),
 });
+
+const BODY_LIMIT_BYTES = 32 * 1024 * 1024;
+
+function requestBodyTooLargeError(): Error & { statusCode?: number; code?: string } {
+  const err = new Error("request body too large") as Error & { statusCode?: number; code?: string };
+  err.statusCode = 413;
+  err.code = "FST_ERR_CTP_BODY_TOO_LARGE";
+  return err;
+}
+
+const FeishuSetupSchema = z.object({
+  id: z.string().optional(),
+  displayName: z.string().optional(),
+  enabled: z.boolean().default(true),
+  region: z.enum(["feishu", "lark"]).default("feishu"),
+  auth: ChannelConfigSchema.shape.auth.optional(),
+});
+
+type RawBodyRequest = FastifyRequest & { rawBody?: Buffer };
+
+type FeishuSetupStatus = "initializing" | "waiting" | "completed" | "error" | "aborted";
+
+interface FeishuSetupSession {
+  id: string;
+  connectorId: string;
+  displayName?: string;
+  status: FeishuSetupStatus;
+  createdAt: string;
+  qrUrl?: string;
+  expireAt?: string;
+  statusDetail?: string;
+  error?: string;
+  channelStatus?: ChannelStatus;
+  abort: AbortController;
+}
 
 /** 创建核心守护进程（Fastify server + 引擎/模型/provider 管理）。 */
 export function createCore(opts: CreateCoreOptions = {}): CoreServer {
@@ -302,6 +342,22 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       /* 持久化失败不影响运行 */
     }
   };
+  const feishuSetupSessions = new Map<string, FeishuSetupSession>();
+  const serializeFeishuSetup = (session: FeishuSetupSession) => ({
+    id: session.id,
+    connectorId: session.connectorId,
+    ...(session.displayName ? { displayName: session.displayName } : {}),
+    status: session.status,
+    createdAt: session.createdAt,
+    ...(session.qrUrl ? { qrUrl: session.qrUrl } : {}),
+    ...(session.expireAt ? { expireAt: session.expireAt } : {}),
+    ...(session.statusDetail ? { statusDetail: session.statusDetail } : {}),
+    ...(session.error ? { error: session.error } : {}),
+    ...(session.channelStatus ? { channelStatus: session.channelStatus } : {}),
+  });
+  const scheduleFeishuSetupCleanup = (id: string): void => {
+    setTimeout(() => feishuSetupSessions.delete(id), 10 * 60 * 1000).unref?.();
+  };
 
   const DEFAULT_EMBED_REPO = "nomic-ai/nomic-embed-text-v1.5-GGUF";
   const DEFAULT_EMBED_FILE = "nomic-embed-text-v1.5.Q4_K_M.gguf";
@@ -352,7 +408,29 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     }
   }
 
-  const app = Fastify({ logger: false, bodyLimit: 32 * 1024 * 1024 });
+  const app = Fastify({ logger: false, bodyLimit: BODY_LIMIT_BYTES });
+
+  const isExternalWebhook = (url: string): boolean => /^\/im\/[^/?#]+\/webhook(?:[?#]|$)/.test(url);
+
+  // Feishu/Lark 等平台签名依赖原始 body；只为外部 webhook 缓冲一次，再交回 Fastify 正常 JSON 解析。
+  app.addHook("preParsing", async (req, _reply, payload) => {
+    if (!isExternalWebhook(req.url)) return payload;
+    const contentLength = Number(req.headers["content-length"]);
+    if (Number.isFinite(contentLength) && contentLength > BODY_LIMIT_BYTES) throw requestBodyTooLargeError();
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of payload as AsyncIterable<Buffer | string>) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buf.length;
+      if (total > BODY_LIMIT_BYTES) throw requestBodyTooLargeError();
+      chunks.push(buf);
+    }
+    const body = Buffer.concat(chunks);
+    (req as RawBodyRequest).rawBody = body;
+    const replay = Readable.from(body);
+    (replay as Readable & { receivedEncodedLength?: number }).receivedEncodedLength = body.length;
+    return replay;
+  });
 
   // CORS（本地工作台：放行浏览器 UI 跨域）。必须在鉴权之前，且预检 OPTIONS 不走鉴权。
   app.addHook("onRequest", async (req, reply) => {
@@ -365,8 +443,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       return reply.code(204).send();
     }
   });
-
-  const isExternalWebhook = (url: string): boolean => /^\/im\/[^/?#]+\/webhook(?:[?#]|$)/.test(url);
 
   // bearer 鉴权（/health、预检 OPTIONS 与外部 IM webhook 免鉴权；webhook 自身由 adapter 校验平台签名/secret）。
   app.addHook("onRequest", async (req, reply) => {
@@ -580,6 +656,99 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   });
 
   // ---- 外部 IM 渠道 Gateway ----
+  app.post("/im/feishu/register", async (req, reply) => {
+    const parsed = FeishuSetupSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_feishu_setup", detail: parsed.error.format() });
+    }
+
+    const sessionId = crypto.randomUUID();
+    const connectorId = parsed.data.id?.trim() || `feishu-${sessionId.slice(0, 8)}`;
+    const abort = new AbortController();
+    const session: FeishuSetupSession = {
+      id: sessionId,
+      connectorId,
+      ...(parsed.data.displayName ? { displayName: parsed.data.displayName } : {}),
+      status: "initializing",
+      createdAt: new Date().toISOString(),
+      abort,
+    };
+    feishuSetupSessions.set(sessionId, session);
+
+    let resolveQr: (() => void) | undefined;
+    let rejectQr: ((err: Error) => void) | undefined;
+    const qrReady = new Promise<void>((resolve, reject) => {
+      resolveQr = resolve;
+      rejectQr = reject;
+    });
+
+    void (opts.feishuRegister ?? registerFeishuApp)({
+      region: parsed.data.region,
+      signal: abort.signal,
+      onQRCodeReady: (info) => {
+        session.status = "waiting";
+        session.qrUrl = info.url;
+        session.expireAt = new Date(Date.now() + info.expireIn * 1000).toISOString();
+        resolveQr?.();
+      },
+      onStatusChange: (info) => {
+        session.statusDetail = info.status;
+      },
+    }).then(async (result) => {
+      if (abort.signal.aborted || session.status === "aborted") {
+        session.status = "aborted";
+        scheduleFeishuSetupCleanup(sessionId);
+        return;
+      }
+      const config: ChannelConfig = {
+        id: connectorId,
+        kind: "feishu",
+        enabled: parsed.data.enabled,
+        ...(parsed.data.displayName ? { displayName: parsed.data.displayName } : {}),
+        secrets: { appId: result.appId, appSecret: result.appSecret },
+        options: {
+          transport: "websocket",
+          domain: result.tenantBrand ?? parsed.data.region,
+          receiveIdType: "chat_id",
+        },
+        auth: parsed.data.auth ?? { allowAll: true },
+      };
+      let status = await channels.upsert(config);
+      persistChannels();
+      if (config.enabled) status = await channels.start(config.id);
+      session.status = "completed";
+      session.channelStatus = status;
+      scheduleFeishuSetupCleanup(sessionId);
+    }).catch((err) => {
+      session.status = abort.signal.aborted ? "aborted" : "error";
+      session.error = err instanceof Error ? err.message : String(err);
+      rejectQr?.(err instanceof Error ? err : new Error(String(err)));
+      scheduleFeishuSetupCleanup(sessionId);
+    });
+
+    await Promise.race([
+      qrReady.catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, 10_000)),
+    ]);
+    return { session: serializeFeishuSetup(session) };
+  });
+
+  app.get("/im/feishu/register/:id", async (req, reply) => {
+    const session = feishuSetupSessions.get((req.params as { id: string }).id);
+    if (!session) return reply.code(404).send({ error: "unknown_feishu_setup" });
+    return { session: serializeFeishuSetup(session) };
+  });
+
+  app.delete("/im/feishu/register/:id", async (req) => {
+    const session = feishuSetupSessions.get((req.params as { id: string }).id);
+    if (session && (session.status === "initializing" || session.status === "waiting")) {
+      session.abort.abort();
+      session.status = "aborted";
+      scheduleFeishuSetupCleanup(session.id);
+    }
+    return { ok: true };
+  });
+
   app.get("/im/adapters", async () => ({ adapters: channels.metas() }));
 
   app.get("/im/connectors", async () => ({
@@ -639,6 +808,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         query,
         headers,
         body: req.body,
+        rawBody: (req as RawBodyRequest).rawBody,
       });
     } catch (err) {
       return reply.code(404).send({
@@ -1500,6 +1670,12 @@ version: "0.1.0"
     },
     async stop() {
       await app.close();
+      for (const session of feishuSetupSessions.values()) {
+        if (session.status === "initializing" || session.status === "waiting") {
+          session.abort.abort();
+          session.status = "aborted";
+        }
+      }
       stopMemWatch();
       // 停模型前先 flush 待抽取的记忆（抽取要用模型；停了就抽不成）。
       await sessionHost.flushAllExtraction().catch(() => {});

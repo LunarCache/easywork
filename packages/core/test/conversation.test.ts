@@ -57,7 +57,10 @@ describe("SqliteConversationRepo", () => {
       });
     }
     const h = r.history(t.id, 2);
-    expect(h.map((m) => m.parts[0] && (m.parts[0] as any).text)).toEqual(["msg3", "msg4"]);
+    expect(h.map((m) => {
+      const part = m.parts[0];
+      return part?.type === "text" ? part.text : undefined;
+    })).toEqual(["msg3", "msg4"]);
     r.close();
   });
 

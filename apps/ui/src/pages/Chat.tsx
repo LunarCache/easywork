@@ -99,8 +99,7 @@ export function Chat({
   const [notice, setNotice] = useState<string | null>(null); // 重试/压缩等瞬态状态提示
   const [web, setWeb] = useState(true);
   const [kb, setKb] = useState(false);
-  const [kbId, setKbId] = useState<string | undefined>(undefined); // undefined = 全部集合
-  const [kbList, setKbList] = useState<{ kbId: string; docs: number; chunks: number }[]>([]);
+  const [kbId] = useState<string | undefined>(undefined); // undefined = 全部集合
   const [paramsOpen, setParamsOpen] = useState(false);
   const [sampling, setSampling] = useState<Sampling>({});
   const [usage, setUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(
@@ -274,15 +273,6 @@ export function Chat({
     onModel: setModel,
     onCompact: doCompact,
   });
-
-  // 开启知识库时拉取可用集合。
-  useEffect(() => {
-    if (!kb) return;
-    void getClient()
-      .kbList()
-      .then((r) => setKbList(r.kbs))
-      .catch(() => setKbList([]));
-  }, [kb]);
 
   const setParam = (key: keyof Sampling, raw: string) => {
     const v = raw.trim() === "" ? undefined : Number(raw);

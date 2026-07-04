@@ -7,6 +7,28 @@ export interface HFFile {
   size: number;
 }
 
+interface HFModelApiEntry {
+  id?: string;
+  modelId?: string;
+  author?: string;
+  downloads?: number;
+  likes?: number;
+  tags?: string[];
+  lastModified?: string;
+  createdAt?: string;
+}
+
+interface HFTreeApiEntry {
+  type?: string;
+  path?: string;
+  size?: number;
+}
+
+interface HFTreeFileEntry extends HFTreeApiEntry {
+  type: "file";
+  path: string;
+}
+
 const SHARD_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
 const QUANT_RE = /(IQ\d[_A-Z0-9]*|Q\d[_A-Z0-9]*|BF16|F16|F32)/i;
 
@@ -86,9 +108,9 @@ export class HFClient {
     if (opts.ggufOnly !== false) params.set("filter", "gguf");
     const res = await this.fetchImpl(`${HF_BASE}/api/models?${params}`, { headers: this.headers() });
     if (!res.ok) throw new Error(`HF search failed: ${res.status}`);
-    const list = (await res.json()) as any[];
+    const list = (await res.json()) as HFModelApiEntry[];
     return list.map((m) => ({
-      repoId: m.id ?? m.modelId,
+      repoId: m.id ?? m.modelId ?? "",
       author: m.author ?? (m.id ?? "").split("/")[0] ?? "",
       downloads: m.downloads ?? 0,
       likes: m.likes ?? 0,
@@ -105,10 +127,10 @@ export class HFClient {
       { headers: this.headers() },
     );
     if (!res.ok) throw new Error(`HF tree failed: ${res.status}`);
-    const list = (await res.json()) as any[];
+    const list = (await res.json()) as HFTreeApiEntry[];
     return list
-      .filter((e) => e.type === "file")
-      .map((e) => ({ path: e.path as string, size: (e.size as number) ?? 0 }));
+      .filter((e): e is HFTreeFileEntry => e.type === "file" && typeof e.path === "string")
+      .map((e) => ({ path: e.path, size: e.size ?? 0 }));
   }
 
   /** 列出仓库内的逻辑 GGUF 变体。 */

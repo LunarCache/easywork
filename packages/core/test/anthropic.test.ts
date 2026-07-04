@@ -6,6 +6,13 @@ import {
   AnthropicStreamTranslator,
 } from "../src/openai-compat/anthropic.js";
 
+interface AnthropicMessageResponseShape {
+  type: string;
+  stop_reason: string;
+  content: unknown[];
+  usage: { input_tokens: number };
+}
+
 describe("Anthropic ↔ ChatRequest 翻译", () => {
   it("system + 文本消息 + 工具定义 → ChatRequest", () => {
     const req = anthropicToChatRequest({
@@ -54,7 +61,7 @@ describe("Anthropic ↔ ChatRequest 翻译", () => {
       },
       "msg_1",
       "m",
-    ) as any;
+    ) as AnthropicMessageResponseShape;
     expect(out.type).toBe("message");
     expect(out.stop_reason).toBe("tool_use");
     expect(out.content[0]).toEqual({ type: "text", text: "结果" });

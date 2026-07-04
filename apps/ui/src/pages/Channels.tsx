@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChannelAdapterMeta, ChannelConfig, ChannelStatus } from "@ew/shared";
+import type { FeishuRegistrationSession } from "@ew/sdk";
+import * as QRCode from "qrcode";
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "../components/ConfirmDialog.js";
 import { PlusIcon, PlayIcon, StopIcon, TrashIcon, GearIcon } from "../icons.js";
@@ -33,12 +35,20 @@ function splitList(text: string): string[] {
     .filter(Boolean);
 }
 
+function optionText(options: ChannelConfig["options"], key: string): string {
+  const value = options[key];
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
 export function Channels() {
   const [adapters, setAdapters] = useState<ChannelAdapterMeta[]>([]);
   const [connectors, setConnectors] = useState<ChannelConfig[]>([]);
   const [statuses, setStatuses] = useState<ChannelStatus[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<ChannelConfig | null>(null);
+  const [feishuSetup, setFeishuSetup] = useState<FeishuRegistrationSession | null>(null);
+  const [feishuQr, setFeishuQr] = useState("");
+  const [showFeishuAdvanced, setShowFeishuAdvanced] = useState(false);
   const [note, setNote] = useState("");
   const { confirm: askConfirm, dialog: confirmDialog } = useConfirm();
 
@@ -68,6 +78,51 @@ export function Channels() {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    let alive = true;
+    setFeishuQr("");
+    if (!feishuSetup?.qrUrl) return;
+    void QRCode.toDataURL(feishuSetup.qrUrl, {
+      width: 190,
+      margin: 1,
+      color: { dark: "#0f172a", light: "#ffffff" },
+    }).then((url) => {
+      if (alive) setFeishuQr(url);
+    }).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [feishuSetup?.qrUrl]);
+
+  useEffect(() => {
+    if (!feishuSetup || feishuSetup.status === "completed" || feishuSetup.status === "error" || feishuSetup.status === "aborted") return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const next = await getClient().getFeishuRegistration(feishuSetup.id);
+        if (stopped) return;
+        setFeishuSetup(next);
+        if (next.status === "completed") {
+          setNote("Feishu / Lark 已连接");
+          setEditing(null);
+          await refresh();
+        } else if (next.status === "error") {
+          setNote(next.error || "Feishu / Lark 连接失败");
+        } else if (next.status === "aborted") {
+          setNote("已取消 Feishu / Lark 连接");
+        }
+      } catch (e) {
+        if (!stopped) setNote(e instanceof Error ? e.message : String(e));
+      }
+    };
+    const timer = window.setInterval(() => void tick(), 1500);
+    void tick();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [feishuSetup, refresh]);
+
   const startAdd = () => {
     const next = blankConfig(adapters);
     if (!next) {
@@ -75,6 +130,8 @@ export function Channels() {
       return;
     }
     setEditing(next);
+    setFeishuSetup(null);
+    setShowFeishuAdvanced(false);
     setNote("");
   };
 
@@ -125,6 +182,46 @@ export function Channels() {
     setEditing((cur) => (cur ? { ...cur, ...patch } : cur));
   };
 
+  const switchKind = (kind: ChannelConfig["kind"]) => {
+    setEditing((cur) => {
+      if (!cur) return cur;
+      const id = cur.id.startsWith(`${cur.kind}-`) ? `${kind}-${crypto.randomUUID().slice(0, 8)}` : cur.id;
+      return { ...cur, id, kind, secrets: {}, options: {}, auth: cur.auth };
+    });
+    setFeishuSetup(null);
+    setShowFeishuAdvanced(false);
+  };
+
+  const startFeishuRegistration = async () => {
+    if (!editing || editing.kind !== "feishu") return;
+    setBusy(editing.id);
+    setNote("");
+    setFeishuSetup(null);
+    try {
+      const region = optionText(editing.options, "domain") === "lark" ? "lark" : "feishu";
+      const session = await getClient().startFeishuRegistration({
+        id: editing.id,
+        displayName: editing.displayName || "Feishu / Lark",
+        enabled: editing.enabled,
+        region,
+        auth: editing.auth,
+      });
+      setFeishuSetup(session);
+      setNote("请用飞书 / Lark 扫码确认应用");
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const cancelFeishuRegistration = async () => {
+    if (!feishuSetup) return;
+    await getClient().cancelFeishuRegistration(feishuSetup.id).catch(() => {});
+    setFeishuSetup(null);
+    setFeishuQr("");
+  };
+
   return (
     <div className="page channels-page" data-testid="channels-page">
       <div className="skills-head">
@@ -164,7 +261,7 @@ export function Channels() {
                 <button
                   key={k.kind}
                   className={editing.kind === k.kind ? "on" : ""}
-                  onClick={() => patchEditing({ kind: k.kind })}
+                  onClick={() => switchKind(k.kind)}
                 >
                   {k.label}
                 </button>
@@ -186,22 +283,106 @@ export function Channels() {
               </button>
             </div>
           </div>
-          <div className="set-row col">
-            <div className="set-row-title">必需密钥</div>
-            <div className="set-row-desc">按平台要求填写。Telegram 目前需要 Bot Token。</div>
-            <div className="channels-secret-grid">
-              {(editingMeta?.requiredSecrets.length ? editingMeta.requiredSecrets : [{ key: "token", label: "Bot Token", password: true }]).map((s) => (
-                <input
-                  key={s.key}
-                  data-testid={`channels-secret-${s.key}`}
-                  type={s.password ? "password" : "text"}
-                  placeholder={s.label}
-                  value={String(editing.secrets[s.key] ?? "")}
-                  onChange={(e) => patchEditing({ secrets: { ...editing.secrets, [s.key]: e.target.value } })}
-                />
-              ))}
+          {editing.kind === "feishu" && (
+            <div className="set-row col">
+              <div className="set-row-title">扫码连接</div>
+              <div className="set-row-desc">默认使用长连接，不需要公网地址或 webhook 回调。</div>
+              <div className="channels-connect-panel">
+                <div className="channels-connect-main">
+                  <div className="seg compact" data-testid="channels-feishu-region">
+                    <button
+                      className={(optionText(editing.options, "domain") || "feishu") === "feishu" ? "on" : ""}
+                      onClick={() => patchEditing({ options: { ...editing.options, domain: "feishu" } })}
+                    >
+                      飞书
+                    </button>
+                    <button
+                      className={optionText(editing.options, "domain") === "lark" ? "on" : ""}
+                      onClick={() => patchEditing({ options: { ...editing.options, domain: "lark" } })}
+                    >
+                      Lark
+                    </button>
+                  </div>
+                  <button
+                    className="set-btn primary"
+                    data-testid="channels-feishu-register"
+                    onClick={() => void startFeishuRegistration()}
+                    disabled={busy === editing.id}
+                  >
+                    {feishuSetup ? "重新生成二维码" : "扫码连接"}
+                  </button>
+                  <button className="set-btn ghost soft" onClick={() => setShowFeishuAdvanced((v) => !v)}>
+                    {showFeishuAdvanced ? "收起高级配置" : "已有应用 / 高级配置"}
+                  </button>
+                </div>
+                {feishuSetup && (
+                  <div className="channels-qr-box" data-testid="channels-feishu-qr">
+                    {feishuQr ? <img src={feishuQr} alt="Feishu setup QR code" /> : <div className="channels-qr-placeholder" />}
+                    <div className="channels-qr-copy">
+                      <div className="set-row-title">
+                        {feishuSetup.status === "completed"
+                          ? "已连接"
+                          : feishuSetup.status === "error"
+                            ? "连接失败"
+                            : feishuSetup.status === "aborted"
+                              ? "已取消"
+                              : "等待扫码确认"}
+                      </div>
+                      <div className="set-row-desc">
+                        {feishuSetup.error || feishuSetup.statusDetail || "使用飞书 / Lark 手机端扫描二维码。"}
+                      </div>
+                      <div className="set-row-control">
+                        {feishuSetup.qrUrl && (
+                          <a className="set-btn secondary small" href={feishuSetup.qrUrl} target="_blank" rel="noreferrer">
+                            打开链接
+                          </a>
+                        )}
+                        <button className="set-btn ghost soft small" onClick={() => void cancelFeishuRegistration()}>
+                          取消
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
+          {(!editing.kind || editing.kind !== "feishu" || showFeishuAdvanced) && (
+            <div className="set-row col">
+              <div className="set-row-title">必需密钥</div>
+              <div className="set-row-desc">{editingMeta?.description ?? "按平台要求填写连接器密钥。"}</div>
+              <div className="channels-secret-grid">
+                {(editingMeta?.requiredSecrets.length ? editingMeta.requiredSecrets : [{ key: "token", label: "Bot Token", password: true }]).map((s) => (
+                  <input
+                    key={s.key}
+                    data-testid={`channels-secret-${s.key}`}
+                    type={s.password ? "password" : "text"}
+                    placeholder={s.label}
+                    value={String(editing.secrets[s.key] ?? "")}
+                    onChange={(e) => patchEditing({ secrets: { ...editing.secrets, [s.key]: e.target.value } })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {!!editingMeta?.optionalSecrets?.length && (!editing.kind || editing.kind !== "feishu" || showFeishuAdvanced) && (
+            <div className="set-row col">
+              <div className="set-row-title">可选密钥</div>
+              <div className="set-row-desc">用于平台回调校验、签名或加密事件解密。</div>
+              <div className="channels-secret-grid">
+                {editingMeta.optionalSecrets.map((s) => (
+                  <input
+                    key={s.key}
+                    data-testid={`channels-secret-${s.key}`}
+                    type={s.password ? "password" : "text"}
+                    placeholder={s.label}
+                    value={String(editing.secrets[s.key] ?? "")}
+                    onChange={(e) => patchEditing({ secrets: { ...editing.secrets, [s.key]: e.target.value } })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           {editing.kind === "telegram" && (
             <div className="set-row col">
               <div className="set-row-title">Telegram 选项</div>
@@ -210,7 +391,7 @@ export function Channels() {
                 <input
                   data-testid="channels-telegram-base-url"
                   placeholder="baseUrl（默认 https://api.telegram.org）"
-                  value={String(editing.options.baseUrl ?? "")}
+                  value={optionText(editing.options, "baseUrl")}
                   onChange={(e) => patchEditing({ options: { ...editing.options, baseUrl: e.target.value } })}
                 />
                 <input
@@ -223,6 +404,39 @@ export function Channels() {
                     patchEditing({ options: { ...editing.options, pollTimeout: Number.isFinite(n) ? n : undefined } });
                   }}
                 />
+              </div>
+            </div>
+          )}
+          {editing.kind === "feishu" && showFeishuAdvanced && (
+            <div className="set-row col">
+              <div className="set-row-title">Feishu / Lark 选项</div>
+              <div className="set-row-desc">长连接为默认模式；webhook 仅用于已有公网回调服务的高级场景。</div>
+              <div className="channels-secret-grid">
+                <select
+                  data-testid="channels-feishu-transport"
+                  value={optionText(editing.options, "transport") || "websocket"}
+                  onChange={(e) => patchEditing({ options: { ...editing.options, transport: e.target.value } })}
+                >
+                  <option value="websocket">websocket</option>
+                  <option value="webhook">webhook</option>
+                </select>
+                <input
+                  data-testid="channels-feishu-base-url"
+                  placeholder="baseUrl（默认 https://open.feishu.cn）"
+                  value={optionText(editing.options, "baseUrl")}
+                  onChange={(e) => patchEditing({ options: { ...editing.options, baseUrl: e.target.value } })}
+                />
+                <select
+                  data-testid="channels-feishu-receive-id-type"
+                  value={optionText(editing.options, "receiveIdType") || "chat_id"}
+                  onChange={(e) => patchEditing({ options: { ...editing.options, receiveIdType: e.target.value } })}
+                >
+                  <option value="chat_id">chat_id</option>
+                  <option value="open_id">open_id</option>
+                  <option value="user_id">user_id</option>
+                  <option value="union_id">union_id</option>
+                  <option value="email">email</option>
+                </select>
               </div>
             </div>
           )}
@@ -264,12 +478,21 @@ export function Channels() {
           </div>
           <div className="set-row">
             <div className="set-row-control">
-              <button className="set-btn ghost soft" onClick={() => setEditing(null)}>
+              <button className="set-btn ghost soft" onClick={() => {
+                setEditing(null);
+                setFeishuSetup(null);
+              }}>
                 取消
               </button>
-              <button className="set-btn primary" onClick={() => void save()} disabled={busy === editing.id}>
-                {editing.enabled ? "保存并启动" : "保存"}
-              </button>
+              {editing.kind === "feishu" && !showFeishuAdvanced ? (
+                <button className="set-btn primary" onClick={() => void startFeishuRegistration()} disabled={busy === editing.id}>
+                  扫码连接
+                </button>
+              ) : (
+                <button className="set-btn primary" onClick={() => void save()} disabled={busy === editing.id}>
+                  {editing.enabled ? "保存并启动" : "保存"}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -289,6 +512,9 @@ export function Channels() {
             const s = statusById.get(c.id);
             const meta = adapters.find((a) => a.kind === c.kind);
             const running = s?.running ?? false;
+            const transportLabel = c.kind === "feishu"
+              ? (optionText(c.options, "transport") || "websocket")
+              : meta?.supportsWebhook ? "webhook" : "long-poll";
             return (
               <div className="mcp-card" key={c.id} data-testid={`channels-card-${c.id}`}>
                 <div className={`mcp-dot ${running ? "ok" : ""}`} />
@@ -297,7 +523,7 @@ export function Channels() {
                   <span>{c.displayName || c.id}</span>
                   <span className="set-pill">{kindLabel(c.kind, adapters)}</span>
                   {running ? <span className="set-pill">运行中</span> : <span className="set-pill ghost">已停止</span>}
-                  {meta?.supportsWebhook ? <span className="set-pill">Webhook</span> : <span className="set-pill ghost">Long-poll</span>}
+                  <span className={transportLabel === "webhook" ? "set-pill" : "set-pill ghost"}>{transportLabel}</span>
                 </div>
                   <div className="mcp-card-detail">
                     {meta?.label ?? c.kind}
@@ -308,7 +534,16 @@ export function Channels() {
                 <button className="mcp-icon-btn" title={running ? "停止" : "启动"} onClick={() => void toggle(c, s)} disabled={busy === c.id}>
                   {running ? <StopIcon size={16} /> : <PlayIcon size={16} />}
                 </button>
-                <button className="mcp-icon-btn" title="编辑" onClick={() => setEditing(c)} disabled={busy === c.id}>
+                <button
+                  className="mcp-icon-btn"
+                  title="编辑"
+                  onClick={() => {
+                    setEditing(c);
+                    setFeishuSetup(null);
+                    setShowFeishuAdvanced(c.kind === "feishu");
+                  }}
+                  disabled={busy === c.id}
+                >
                   <GearIcon size={16} />
                 </button>
                 <button className="mcp-icon-btn danger" title="删除" onClick={() => void remove(c)} disabled={busy === c.id}>

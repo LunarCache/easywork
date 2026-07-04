@@ -1,4 +1,5 @@
 import type { ChannelAdapterEntry } from "./adapter.js";
+import { feishuAdapterEntry } from "./feishu.js";
 import { telegramAdapterEntry } from "./telegram.js";
 
 export class ChannelAdapterRegistry {
@@ -21,5 +22,6 @@ export const channelAdapterRegistry = new ChannelAdapterRegistry();
 
 export function registerBuiltInChannelAdapters(registry: ChannelAdapterRegistry = channelAdapterRegistry): ChannelAdapterRegistry {
   registry.register(telegramAdapterEntry);
+  registry.register(feishuAdapterEntry);
   return registry;
 }

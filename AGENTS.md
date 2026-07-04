@@ -19,7 +19,7 @@
 - `packages/core/src/server/app.ts` — Fastify 全部路由（`/agent/run`、`/v1`、`/models`、`/workspace/*`、`/threads/*`、`/providers`、`/local/runtime` …）。
 - `packages/core/src/engine/{router-server-manager,resolve-llama,net,local-backend}.ts` — `RouterServerManager`（起 1 个 `llama serve --models-dir` router，按 model 路由 + 按需加载 + `--models-max` LRU，实现 `LocalBackend`）+ 运行时解析（优先统一 `llama`，router 只认 kind=llama）。模型 id = 子目录名（routerId）。嵌入模型不走 router（独立 `LlamaServerEngine -m --embedding`）。
 - `packages/core/src/openai-compat/router.ts` + `pi-adapt.ts` — `/v1` 网关与 pi↔OpenAI/Anthropic 边界翻译。
-- `packages/im-connectors/src/{adapter,registry,gateway,host,telegram}.ts` — Channel Gateway：adapter seam + 内置 adapter registry + 连接器配置/状态/allowlist/webhook/target 透传；`ConnectorHost` 把外部消息接到同一个 `SessionHost.run`；Telegram long-poll 支持 abort 停止。
+- `packages/im-connectors/src/{adapter,registry,gateway,host,telegram,feishu}.ts` — Channel Gateway：adapter seam + 内置 adapter registry + 连接器配置/状态/allowlist/webhook/target 透传；`ConnectorHost` 把外部消息接到同一个 `SessionHost.run`；Telegram long-poll 支持 abort 停止；Feishu/Lark 默认走官方 SDK WebSocket 长连接（无需公网 webhook），高级模式保留 webhook token/signature、加密回调解密与文本收发。
 - `apps/daemon/src/cli.ts` + `cli/*` — `easywork` CLI（既是 `serve` daemon 入口，也是终端瘦客户端 `repl`/`run`/`models`/`thread`/`mem`/`kb`/`status`/`stop`）。`cli/daemon.ts` 自启/发现本机 daemon；`cli/agent.ts` 渲染 SSE 事件流（助手文本→stdout、装饰→stderr）。复用 `@ew/sdk` 打 HTTP，**后端零改动**（唯一例外：`models rm` 的 `POST /models/local/delete` + `ModelManager.deleteLocal`，含受管目录硬校验）。
 - `packages/shared/src/*` — 核心契约（见下）。
 
@@ -30,7 +30,7 @@
 - `Tool` / `ToolProvider`：内置工具、MCP 工具统一成 `Tool`，再经 `toPiTool` 桥成 pi customTool（含 `ApprovalGate`）。**自研 `ToolRegistry`/agent loop 已删除**，agent 内核 = pi `AgentSession`。
 - `MemoryProvider`：`recall/write/edit/list/delete/deleteBySession/deleteByScope/observe`（均带 `scope`）。本地 = 作用域化分层记忆（全局 markdown 为真相源、可手工编辑回灌；工作区 DB-only）+ sqlite-vec 语义 ⊕ 词法混合召回。
 - `AgentEvent`（SSE 对外）：`text/reasoning/tool-start/tool-end/tool-progress/approval-request/memory-recall/usage/final/error`。`mapSessionEvent` 把 pi 事件映射到它。
-- `ChannelAdapter` / `ChannelGateway`：平台 adapter 实现 `start/stop/send/handleWebhook?`，gateway 负责配置/状态/allowlist/webhook/出站 target；`ConnectorHost` 经 `resolveThreadForChannel(kind, channelUserId)` 映射渠道身份到 thread。管理 API 走 daemon Bearer；外部 webhook 入口不要求内部 Bearer，需由平台 adapter 校验平台签名/secret。旧 `ChannelConnector` 仍保留兼容测试和 Telegram long-poll 基础实现。
+- `ChannelAdapter` / `ChannelGateway`：平台 adapter 实现 `start/stop/send/handleWebhook?`，gateway 负责配置/状态/allowlist/webhook/出站 target；`ConnectorHost` 经 `resolveThreadForChannel(kind, channelUserId)` 映射渠道身份到 thread。管理 API 走 daemon Bearer；外部 webhook 入口不要求内部 Bearer，需由平台 adapter 校验平台签名/secret；core 只为 webhook 捕获 raw body 供签名计算。Feishu/Lark 另有 `/im/feishu/register` 管理面扫码注册 helper，成功后自动保存 websocket connector。旧 `ChannelConnector` 仍保留兼容测试和 Telegram long-poll 基础实现。
 
 ## 关键正确性约束（务必遵守）
 
@@ -48,7 +48,7 @@
 ## 约定
 
 - **统一 npm**（环境无 pnpm）。
-- **测试 219 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 14 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir）。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
+- **测试 226 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 14 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir）。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
 - **已移除 node-llama-cpp + 经典 `llama-server`**：本地推理走外部统一 `llama`（llama.app）的 router 模式（`resolveLlamaBin` 只解析 `llama`；嵌入子进程也跑 `llama serve`）。**勿重新引入** node-llama-cpp，也**勿回退每模型一进程的经典 `llama-server`**（含 brew llama.cpp，已完全移除）。
 - **打包**：daemon → Node SEA **单文件二进制**（`scripts/build-daemon-sea.mjs`，运行免 Node）；llama 运行时缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime` + `install.sh`）；`v*` tag → GitHub Actions 出 macOS dmg。
 - **改 Tauri Rust（`apps/desktop/src-tauri`）**：本环境有 `cargo`，可 `cargo check` 验证。
@@ -58,7 +58,7 @@
 ```bash
 npm install            # 装依赖
 npm run build          # turbo 构建全部包（含 ui/daemon dist）
-npm test               # vitest（219 通过；另 1 个真机 e2e 默认 skip）
+npm test               # vitest（226 通过；另 1 个真机 e2e 默认 skip）
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
 npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 14 条）

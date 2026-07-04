@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import type { ChatStreamEvent } from "@ew/shared";
 import { OpenAICompatibleEngine, toOpenAIMessages } from "../src/index.js";
 
+type TextDeltaEvent = Extract<ChatStreamEvent, { type: "text-delta" }>;
+type ToolCallStartEvent = Extract<ChatStreamEvent, { type: "tool-call-start" }>;
+type DoneEvent = Extract<ChatStreamEvent, { type: "done" }>;
+
 describe("toOpenAIMessages — reasoning 不发给模型", () => {
   it("reasoning part 被剔除，answer text 保留（不变成 [reasoning] 占位）", () => {
     const out = toOpenAIMessages([
@@ -63,13 +67,17 @@ describe("OpenAICompatibleEngine.chatStream", () => {
       events.push(ev);
     }
 
-    const text = events.filter((e) => e.type === "text-delta").map((e) => (e as any).text).join("");
+    const text = events
+      .filter((e): e is TextDeltaEvent => e.type === "text-delta")
+      .map((e) => e.text)
+      .join("");
     expect(text).toBe("Hello world");
 
-    const start = events.find((e) => e.type === "tool-call-start") as any;
-    expect(start.name).toBe("get_weather");
+    const start = events.find((e): e is ToolCallStartEvent => e.type === "tool-call-start");
+    expect(start).toBeDefined();
+    expect(start?.name).toBe("get_weather");
 
-    const done = events.at(-1) as any;
+    const done = events.at(-1) as DoneEvent;
     expect(done.type).toBe("done");
     expect(done.finishReason).toBe("tool_calls");
     expect(done.message.toolCalls[0].name).toBe("get_weather");
@@ -77,9 +85,9 @@ describe("OpenAICompatibleEngine.chatStream", () => {
   });
 
   it("采样参数透传到请求体（含 llama.cpp 扩展 top_k/min_p/repeat_penalty）", async () => {
-    let captured: any;
+    let captured: Record<string, unknown> | undefined;
     const fakeFetch = (async (_url: string, init: RequestInit) => {
-      captured = JSON.parse(init.body as string);
+      captured = JSON.parse(init.body as string) as Record<string, unknown>;
       return new Response(
         JSON.stringify({ choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }] }),
         { status: 200, headers: { "content-type": "application/json" } },
@@ -99,14 +107,14 @@ describe("OpenAICompatibleEngine.chatStream", () => {
       presencePenalty: 0.3,
       reasoningEffort: "high",
     });
-    expect(captured.temperature).toBe(0.7);
-    expect(captured.top_p).toBe(0.9);
-    expect(captured.top_k).toBe(40);
-    expect(captured.min_p).toBe(0.05);
-    expect(captured.repeat_penalty).toBe(1.1);
-    expect(captured.frequency_penalty).toBe(0.2);
-    expect(captured.presence_penalty).toBe(0.3);
-    expect(captured.reasoning_effort).toBe("high");
+    expect(captured?.temperature).toBe(0.7);
+    expect(captured?.top_p).toBe(0.9);
+    expect(captured?.top_k).toBe(40);
+    expect(captured?.min_p).toBe(0.05);
+    expect(captured?.repeat_penalty).toBe(1.1);
+    expect(captured?.frequency_penalty).toBe(0.2);
+    expect(captured?.presence_penalty).toBe(0.3);
+    expect(captured?.reasoning_effort).toBe("high");
   });
 
   it("非流式 chat() 解析 message + usage", async () => {

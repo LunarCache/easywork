@@ -20,7 +20,8 @@
     "clean": "rimraf dist .turbo"
   },
   "dependencies": {
-    "@ew/shared": "*"
+    "@ew/shared": "*",
+    "@larksuiteoapi/node-sdk": "^1.68.0"
   },
   "devDependencies": {
     "tsup": "^8.3.5",

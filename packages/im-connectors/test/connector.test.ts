@@ -1,22 +1,41 @@
 import { describe, it, expect } from "vitest";
-import type {
-  AgentEvent,
-  AgentRunInput,
-  ChannelOutbound,
-  ChannelConnector,
-  ConversationRepo,
-  InboundMessage,
-  MessageSearchHit,
-  OutboundChunk,
-  Project,
-  StoredMessage,
-  Thread,
+import { createCipheriv, createHash } from "node:crypto";
+import {
+  messageText,
+  type AgentEvent,
+  type AgentRunInput,
+  type ChannelKind,
+  type ChannelOutbound,
+  type ChannelConnector,
+  type ConversationRepo,
+  type InboundMessage,
+  type MessageSearchHit,
+  type OutboundChunk,
+  type Project,
+  type StoredMessage,
+  type Thread,
 } from "@ew/shared";
 import { ConnectorHost } from "../src/host.js";
 import { ChannelGateway } from "../src/gateway.js";
 import { ChannelAdapterRegistry } from "../src/registry.js";
 import type { ChannelAdapter, ChannelAdapterContext, SendResult } from "../src/adapter.js";
+import { FeishuChannelAdapter, calculateFeishuSignature, type FeishuSdkChannel, type FeishuSdkMessage } from "../src/feishu.js";
 import { TelegramConnector } from "../src/telegram.js";
+
+function encryptFeishuPayload(payload: unknown, encryptKey: string): string {
+  const key = createHash("sha256").update(encryptKey, "utf8").digest();
+  const iv = Buffer.from("1234567890abcdef");
+  const cipher = createCipheriv("aes-256-cbc", key, iv);
+  return Buffer.concat([
+    iv,
+    cipher.update(JSON.stringify(payload), "utf8"),
+    cipher.final(),
+  ]).toString("base64");
+}
+
+function textFromPart(part: InboundMessage["parts"][number] | undefined): string | undefined {
+  return part?.type === "text" ? part.text : undefined;
+}
 
 /** 内存版会话仓库（测试用）。 */
 class FakeRepo implements ConversationRepo {
@@ -72,7 +91,7 @@ class FakeRepo implements ConversationRepo {
   history(threadId: string): StoredMessage[] {
     return this.msgs.get(threadId) ?? [];
   }
-  resolveThreadForChannel(kind: any, userId: string): Thread {
+  resolveThreadForChannel(kind: ChannelKind, userId: string): Thread {
     const key = `${kind}:${userId}`;
     const existing = this.channelMap.get(key);
     if (existing) return this.threads.get(existing)!;
@@ -107,7 +126,7 @@ describe("ConnectorHost", () => {
     const repo = new FakeRepo();
     const run = async function* (input: AgentRunInput): AsyncIterable<AgentEvent> {
       const last = input.history[input.history.length - 1];
-      const text = `echo: ${(last?.content as any)[0].text}`;
+      const text = `echo: ${last ? messageText(last.content) : ""}`;
       yield { type: "text", text };
       yield { type: "final", message: { role: "assistant", content: text } };
     };
@@ -132,10 +151,10 @@ describe("ConnectorHost", () => {
 
 describe("TelegramConnector", () => {
   it("pollOnce 解析 getUpdates → 触发 inbound，并推进 offset", async () => {
-    const calls: { method: string; body: any }[] = [];
+    const calls: { method: string; body: Record<string, unknown> }[] = [];
     const fakeFetch = (async (url: string, init?: RequestInit) => {
       const method = url.split("/").pop()!;
-      const body = JSON.parse(String(init?.body ?? "{}"));
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       calls.push({ method, body });
       if (method === "getUpdates") {
         return new Response(
@@ -157,14 +176,14 @@ describe("TelegramConnector", () => {
     expect(n).toBe(1);
     expect(inbound[0]!.channelUserId).toBe("7");
     expect(inbound[0]!.channelChatId).toBe("77");
-    expect((inbound[0]!.parts[0] as any).text).toBe("hello");
+    expect(textFromPart(inbound[0]!.parts[0])).toBe("hello");
     // 下一次 getUpdates offset 应为 11
     await tg.pollOnce();
     expect(calls.filter((c) => c.method === "getUpdates")[1]!.body.offset).toBe(11);
   });
 
   it("reply 累积文本后 sendMessage", async () => {
-    const sent: any[] = [];
+    const sent: Record<string, unknown>[] = [];
     const fakeFetch = (async (url: string, init?: RequestInit) => {
       const method = url.split("/").pop()!;
       if (method === "sendMessage") sent.push(JSON.parse(String(init?.body)));
@@ -200,6 +219,300 @@ describe("TelegramConnector", () => {
     await running;
 
     expect(aborted).toBe(true);
+  });
+});
+
+describe("FeishuChannelAdapter", () => {
+  it("rejects public webhooks unless webhook transport and a webhook secret are configured", async () => {
+    const websocketAdapter = new FeishuChannelAdapter({
+      appId: "cli_a",
+      appSecret: "secret",
+    });
+    const websocketWebhook = await websocketAdapter.handleWebhook({
+      method: "POST",
+      path: "/im/fs/webhook",
+      query: {},
+      headers: {},
+      body: { type: "url_verification", challenge: "challenge-1" },
+    });
+    expect(websocketWebhook).toEqual({ status: 404, body: { error: "feishu_webhook_not_enabled" } });
+
+    const unsignedWebhookAdapter = new FeishuChannelAdapter({
+      appId: "cli_a",
+      appSecret: "secret",
+      transport: "webhook",
+    });
+    const unsignedWebhook = await unsignedWebhookAdapter.handleWebhook({
+      method: "POST",
+      path: "/im/fs/webhook",
+      query: {},
+      headers: {},
+      body: { type: "url_verification", challenge: "challenge-1" },
+    });
+    expect(unsignedWebhook).toEqual({ status: 401, body: { error: "feishu_webhook_secret_required" } });
+  });
+
+  it("handles URL verification and rejects token mismatches", async () => {
+    const adapter = new FeishuChannelAdapter({
+      appId: "cli_a",
+      appSecret: "secret",
+      verificationToken: "vt",
+      transport: "webhook",
+    });
+
+    const ok = await adapter.handleWebhook({
+      method: "POST",
+      path: "/im/fs/webhook",
+      query: {},
+      headers: {},
+      body: { type: "url_verification", token: "vt", challenge: "challenge-1" },
+    });
+    expect(ok).toEqual({ body: { challenge: "challenge-1" } });
+
+    const bad = await adapter.handleWebhook({
+      method: "POST",
+      path: "/im/fs/webhook",
+      query: {},
+      headers: {},
+      body: { type: "url_verification", token: "wrong", challenge: "challenge-1" },
+    });
+    expect(bad).toEqual({ status: 401, body: { error: "feishu_verification_token_invalid" } });
+  });
+
+  it("verifies signatures and normalizes text message callbacks", async () => {
+    const inbound: InboundMessage[] = [];
+    const adapter = new FeishuChannelAdapter({
+      appId: "cli_a",
+      appSecret: "secret",
+      verificationToken: "vt",
+      encryptKey: "ek",
+      transport: "webhook",
+    });
+    await adapter.start({
+      config: {
+        id: "fs-main",
+        kind: "feishu",
+        enabled: true,
+        secrets: {},
+        options: {},
+        auth: { allowAll: true },
+      },
+      emitInbound: async (message) => {
+        inbound.push(message);
+      },
+      setStatus: () => {},
+    });
+
+    const body = {
+      schema: "2.0",
+      header: { event_type: "im.message.receive_v1", token: "vt" },
+      event: {
+        sender: {
+          sender_type: "user",
+          sender_id: { open_id: "ou_1", user_id: "u_1" },
+          sender_name: "Ada",
+        },
+        message: {
+          message_id: "om_1",
+          chat_id: "oc_1",
+          chat_type: "p2p",
+          message_type: "text",
+          content: JSON.stringify({ text: "hello feishu" }),
+        },
+      },
+    };
+    const raw = JSON.stringify(body);
+    const signature = calculateFeishuSignature("111", "nonce", "ek", raw);
+
+    const res = await adapter.handleWebhook({
+      method: "POST",
+      path: "/im/fs/webhook",
+      query: {},
+      headers: {
+        "x-lark-request-timestamp": "111",
+        "x-lark-request-nonce": "nonce",
+        "x-lark-signature": signature,
+      },
+      body,
+      rawBody: raw,
+    });
+
+    expect(res).toEqual({ body: { ok: true } });
+    expect(inbound).toEqual([
+      expect.objectContaining({
+        channel: "feishu",
+        messageId: "om_1",
+        channelUserId: "ou_1",
+        channelUserName: "Ada",
+        channelChatId: "oc_1",
+        channelChatType: "dm",
+        parts: [{ type: "text", text: "hello feishu" }],
+      }),
+    ]);
+
+    const denied = await adapter.handleWebhook({
+      method: "POST",
+      path: "/im/fs/webhook",
+      query: {},
+      headers: {
+        "x-lark-request-timestamp": "111",
+        "x-lark-request-nonce": "nonce",
+        "x-lark-signature": "bad",
+      },
+      body,
+      rawBody: raw,
+    });
+    expect(denied).toEqual({ status: 401, body: { error: "feishu_signature_invalid" } });
+  });
+
+  it("decrypts encrypted callback payloads", async () => {
+    const adapter = new FeishuChannelAdapter({
+      appId: "cli_a",
+      appSecret: "secret",
+      verificationToken: "vt",
+      encryptKey: "ek",
+      transport: "webhook",
+    });
+    const body = {
+      encrypt: encryptFeishuPayload({ type: "url_verification", token: "vt", challenge: "enc-challenge" }, "ek"),
+    };
+    const raw = JSON.stringify(body);
+    const res = await adapter.handleWebhook({
+      method: "POST",
+      path: "/im/fs/webhook",
+      query: {},
+      headers: {
+        "x-lark-request-timestamp": "111",
+        "x-lark-request-nonce": "nonce",
+        "x-lark-signature": calculateFeishuSignature("111", "nonce", "ek", raw),
+      },
+      body,
+      rawBody: raw,
+    });
+
+    expect(res).toEqual({ body: { challenge: "enc-challenge" } });
+  });
+
+  it("sends text through tenant access token and message APIs", async () => {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const fakeFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      calls.push({ url: href, body });
+      if (href.endsWith("/open-apis/auth/v3/tenant_access_token/internal")) {
+        return new Response(JSON.stringify({ code: 0, tenant_access_token: "tenant-token", expire: 7200 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ code: 0, data: { message_id: "om_out" } }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const adapter = new FeishuChannelAdapter({
+      appId: "cli_a",
+      appSecret: "secret",
+      transport: "webhook",
+      baseUrl: "https://feishu.test",
+      fetch: fakeFetch,
+    });
+
+    const res = await adapter.send({ channelChatId: "oc_1" }, { text: "hello" });
+
+    expect(res).toEqual({ ok: true, messageId: "om_out" });
+    expect(calls[0]).toMatchObject({
+      url: "https://feishu.test/open-apis/auth/v3/tenant_access_token/internal",
+      body: { app_id: "cli_a", app_secret: "secret" },
+    });
+    expect(calls[1]).toMatchObject({
+      url: "https://feishu.test/open-apis/im/v1/messages?receive_id_type=chat_id",
+      body: {
+        receive_id: "oc_1",
+        msg_type: "text",
+        content: JSON.stringify({ text: "hello" }),
+      },
+    });
+  });
+
+  it("uses WebSocket channel by default and routes normalized messages", async () => {
+    class FakeFeishuChannel implements FeishuSdkChannel {
+      connected = false;
+      disconnected = false;
+      sent: Array<{ to: string; input: { text: string }; opts?: { replyTo?: string } }> = [];
+      private messageHandler?: (msg: FeishuSdkMessage) => void | Promise<void>;
+      async connect(): Promise<void> {
+        this.connected = true;
+      }
+      async disconnect(): Promise<void> {
+        this.disconnected = true;
+      }
+      on(name: "message" | "error" | "reconnecting" | "reconnected" | "reject", handler: (event: unknown) => void | Promise<void>): () => void {
+        if (name === "message") this.messageHandler = handler as (msg: FeishuSdkMessage) => void | Promise<void>;
+        return () => {
+          if (name === "message") this.messageHandler = undefined;
+        };
+      }
+      async send(to: string, input: { text: string }, opts?: { replyTo?: string }): Promise<{ messageId?: string }> {
+        this.sent.push({ to, input, ...(opts ? { opts } : {}) });
+        return { messageId: "om_ws" };
+      }
+      emit(message: FeishuSdkMessage): Promise<void> {
+        return Promise.resolve(this.messageHandler?.(message));
+      }
+    }
+
+    const fakeChannel = new FakeFeishuChannel();
+    const inbound: InboundMessage[] = [];
+    const status: Record<string, unknown>[] = [];
+    const adapter = new FeishuChannelAdapter({
+      appId: "cli_a",
+      appSecret: "secret",
+      sdkChannelFactory: () => fakeChannel,
+    });
+
+    await adapter.start({
+      config: {
+        id: "fs-main",
+        kind: "feishu",
+        enabled: true,
+        secrets: {},
+        options: {},
+        auth: { allowAll: true },
+      },
+      emitInbound: async (message) => {
+        inbound.push(message);
+      },
+      setStatus: (patch) => {
+        status.push(patch);
+      },
+    });
+
+    await fakeChannel.emit({
+      messageId: "om_1",
+      chatId: "oc_1",
+      chatType: "group",
+      senderId: "ou_1",
+      senderName: "Ada",
+      content: "hello websocket",
+      rawContentType: "text",
+      rootId: "om_root",
+    });
+    const sent = await adapter.send({ channelChatId: "oc_1", replyToMessageId: "om_1" }, { text: "hi" });
+    await adapter.stop();
+
+    expect(fakeChannel.connected).toBe(true);
+    expect(fakeChannel.disconnected).toBe(true);
+    expect(status).toContainEqual({ running: true, lastError: undefined });
+    expect(inbound).toEqual([
+      expect.objectContaining({
+        channel: "feishu",
+        messageId: "om_1",
+        channelUserId: "ou_1",
+        channelUserName: "Ada",
+        channelChatId: "oc_1",
+        channelChatType: "group",
+        channelThreadId: "om_root",
+        parts: [{ type: "text", text: "hello websocket" }],
+      }),
+    ]);
+    expect(sent).toEqual({ ok: true, messageId: "om_ws" });
+    expect(fakeChannel.sent).toEqual([{ to: "oc_1", input: { text: "hi" }, opts: { replyTo: "om_1" } }]);
   });
 });
 
@@ -317,7 +630,7 @@ describe("ChannelGateway", () => {
       parts: [{ type: "text", text: "allowed" }],
     });
 
-    expect(inbound.map((m) => (m.parts[0] as any).text)).toEqual(["allowed"]);
+    expect(inbound.map((m) => textFromPart(m.parts[0]))).toEqual(["allowed"]);
     expect(gateway.statuses()[0]).toMatchObject({ running: true });
   });
 });

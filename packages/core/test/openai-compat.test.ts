@@ -15,6 +15,15 @@ function sseResponse(frames: string[]): Response {
   return new Response(stream, { status: 200 });
 }
 
+interface ModelsResponseShape {
+  data: Array<{ id: string }>;
+}
+
+interface ChatCompletionResponseShape {
+  object: string;
+  choices: Array<{ message: { content?: string } }>;
+}
+
 /** 假上游：模拟一个云端 OpenAI 兼容服务。 */
 const fakeUpstream = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === "string" ? input : input.toString();
@@ -56,8 +65,8 @@ describe("/v1 OpenAI 兼容端点（经云端 provider）", () => {
 
     // /v1/models
     const modelsRes = await fetch(`${base}/v1/models`, { headers: { authorization: "Bearer t" } });
-    const modelsJson = (await modelsRes.json()) as any;
-    expect(modelsJson.data.map((m: any) => m.id)).toContain("cloud-model");
+    const modelsJson = (await modelsRes.json()) as ModelsResponseShape;
+    expect(modelsJson.data.map((m) => m.id)).toContain("cloud-model");
 
     // 非流式（云端非流式仍走引擎 → fake 上游）
     const jsonRes = await fetch(`${base}/v1/chat/completions`, {
@@ -65,7 +74,7 @@ describe("/v1 OpenAI 兼容端点（经云端 provider）", () => {
       headers: auth,
       body: JSON.stringify({ model: "cloud-model", messages: [{ role: "user", content: "hi" }] }),
     });
-    const j = (await jsonRes.json()) as any;
+    const j = (await jsonRes.json()) as ChatCompletionResponseShape;
     expect(j.choices[0].message.content).toBe("cloud says hi");
     expect(j.object).toBe("chat.completion");
   });
