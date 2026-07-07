@@ -6,7 +6,7 @@
 
 **Architecture:** 纯前端改动（2 个文件）。后端零改动——现有 `kbDocs()` 返回的 `{ id, kbId, source, chunks, createdAt }` 已足够。`KnowledgeBaseOverlay.tsx` 的 JSX 从手风琴结构重排为双栏（左集合导航 + 右响应式卡片网格），新增前端搜索状态；`styles.css` 删除 `.kb-acc-*` 手风琴样式、新增集合栏/网格/搜索框样式。滑出预览、上传、新建集合、轮询、删除逻辑全部保留。
 
-**Tech Stack:** React 19 + TypeScript + CSS（Agent Tasks 设计 token）。无新依赖。无后端改动。
+**Tech Stack:** React 18 + TypeScript + CSS（Agent Tasks 设计 token）。无新依赖。无后端改动。
 
 **Spec:** `docs/superpowers/specs/2026-06-24-knowledge-base-redesign-design.md`
 

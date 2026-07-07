@@ -18,7 +18,7 @@
     spawn sidecar ▲       ▲ HTTP+SSE        ▲ HTTP+SSE    ▲ HTTP /v1
   ┌───────────────┘       │                 │            │
   │ Tauri 主进程(Rust)    │ Channel Gateway │ React UI   │ Claude Code /
-  │  └ webview(React)     │ (TG/Discord/…)  │ (@ew/sdk)  │ 任意 /v1 客户端
+  │  └ webview(React)     │ (TG/Feishu/…)   │ (@ew/sdk)  │ 任意 /v1 客户端
   └───────────────────────┴─────────────────┴────────────┘
 ```
 
@@ -41,7 +41,7 @@ packages/
   sdk/            @ew/sdk           daemon HTTP API 的类型化客户端
 apps/
   desktop/        @ew/desktop       Tauri 2 外壳（Rust src-tauri）+ sidecar 启动 daemon
-  ui/             @ew/ui            React 19 + Vite 前端
+  ui/             @ew/ui            React 18 + Vite 前端
   daemon/         @ew/daemon        CLI 入口 easywork serve
 ```
 
@@ -56,7 +56,7 @@ apps/
 - `ChannelGateway`：托管配置、状态、生命周期、allowlist 鉴权、webhook 分发和出站 `ChannelTarget` 透传。
 - `ConnectorHost`：唯一把入站消息接到同一个大脑的宿主层，负责 `resolveThreadForChannel`、载历史、调用 `SessionHost.run`、把 `AgentEvent` 聚合为 IM 回复并落库。
 
-`@ew/core` 暴露管理面：`GET /im/adapters`、`GET/POST/DELETE /im/connectors`、`POST /im/connectors/:id/start|stop`，这些都走 daemon Bearer 鉴权。Feishu/Lark 另有 `POST/GET/DELETE /im/feishu/register` 扫码注册 helper：core 启动 SDK registerApp 短会话，二维码确认成功后自动保存 `transport:websocket` 连接器并按需启动。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。Core 只针对 webhook 捕获 raw body 供签名校验，Feishu/Lark adapter 的高级 webhook 模式负责 URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化和文本回复。渠道配置先落 SQLite settings；平台 secret 目前随配置存储，后续可在不改 adapter seam 的情况下迁到 keychain/secret ref。
+`@ew/core` 暴露管理面：`GET /im/adapters`、`GET/POST/DELETE /im/connectors`、`POST /im/connectors/:id/start|stop`，这些都走 daemon Bearer 鉴权。Feishu/Lark 另有 `POST/GET/DELETE /im/feishu/register` 扫码注册 helper：core 启动 SDK registerApp 短会话，二维码确认成功后自动保存 `transport:websocket` 连接器并按需启动；取消或 core stop 会 abort 未完成扫码会话，避免取消后落库。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。Core 只针对 webhook 捕获 raw body 供签名校验，并在读取前/读取中执行 32MiB 上限。Feishu/Lark adapter 的高级 webhook 模式负责 URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化和文本回复；非 `transport:webhook` 或未配置 `verificationToken`/`encryptKey` 时拒绝 public webhook。渠道配置先落 SQLite settings；平台 secret 目前随配置存储，后续可在不改 adapter seam 的情况下迁到 keychain/secret ref。
 
 ## 技术栈
 
@@ -68,7 +68,7 @@ apps/
 | 契约 / 校验 | zod + zod-to-json-schema |
 | 本地 DB | `node:sqlite`（内置 DatabaseSync，零原生编译） |
 | 记忆 / RAG | 本地 CPU embedding（nomic-embed-text 768 维）+ **sqlite-vec** 语义 ⊕ 词法混合召回（RRF）；记忆作用域化 + 渐进式披露 |
-| UI | React 19 + Vite + react-markdown |
+| UI | React 18 + Vite + react-markdown |
 | 桌面 | Tauri 2（Rust 外壳 + TS 前端，sidecar 启动 daemon） |
 | 打包 | daemon Node SEA 单文件二进制；Tauri dmg；GitHub Actions（`v*` tag → Releases） |
 | 库构建 / 测试 | tsup（esbuild）/ Vitest |
@@ -81,7 +81,6 @@ apps/
 | `EW_LLAMA_BIN` | 指定 llama.app 统一 `llama` 可执行文件路径（缺省自动解析 PATH + `~/.local/bin` 等；经典 llama-server 已不支持） |
 | `EW_MAX_LOADED_MODELS` | router `--models-max`：同时常驻模型数上限（默认 4） |
 | `EW_SQLITE_VEC` | 指定 sqlite-vec 可加载扩展路径（打包二进制用；缺省同目录 / node_modules 解析） |
-| `EW_MAX_LOADED_MODELS` | 最大常驻模型数（默认 3，超出按 LRU 淘汰） |
 | `EW_ALLOW_STDIO_MCP=1` | 允许 stdio MCP（默认禁用，会在本机执行任意命令） |
 | `EW_DATA_DIR` | 数据目录（默认 `~/.easywork`） |
 

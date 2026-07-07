@@ -23,7 +23,7 @@
 
 ## 外部渠道连接器
 
-`@ew/im-connectors` 已从单个 Telegram 连接器升级为 **Channel Gateway**：平台 adapter registry + 连接器配置/状态 + allowlist + webhook 分发 + 统一回复 target。当前内置 Telegram（Bot API long-poll，回复按 IM 能力聚合发送，停止可取消正在进行的轮询）与 Feishu / Lark（默认走官方 SDK WebSocket 长连接，无需公网 webhook；设置页支持扫码创建应用并自动保存连接器；高级模式仍支持自建应用 webhook、URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化与文本回复）；Discord / 企业微信（WeCom）按同一 adapter seam 补齐。入站消息统一归一为 `InboundMessage`，经 `ConnectorHost` 映射到稳定 thread 后复用同一个 `SessionHost.run`，因此外部渠道、桌面聊天、`/v1` 客户端共享同一大脑。渠道管理 API 走 EasyWork Bearer；平台 webhook 入口不要求内部 Bearer，由 adapter 做平台签名/secret 校验。设置页只显示 registry 已注册 adapter，并按 adapter metadata 渲染必需 / 可选密钥。个人微信无官方机器人 API，仅保留实验性占位，不作为可靠连接器路线。
+`@ew/im-connectors` 已从单个 Telegram 连接器升级为 **Channel Gateway**：平台 adapter registry + 连接器配置/状态 + allowlist + webhook 分发 + 统一回复 target。当前内置 Telegram（Bot API long-poll，回复按 IM 能力聚合发送，停止可取消正在进行的轮询）与 Feishu / Lark（默认走官方 SDK WebSocket 长连接，无需公网 webhook；设置页支持扫码创建应用并自动保存连接器；高级模式仍支持自建应用 webhook、URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化与文本回复）；Discord / 企业微信（WeCom）按同一 adapter seam 补齐。入站消息统一归一为 `InboundMessage`，经 `ConnectorHost` 映射到稳定 thread 后复用同一个 `SessionHost.run`，因此外部渠道、桌面聊天、`/v1` 客户端共享同一大脑。渠道管理 API 走 EasyWork Bearer；平台 webhook 入口不要求内部 Bearer，由 adapter 做平台签名/secret 校验，core 只为签名校验捕获 32MiB 内的 raw body。Feishu / Lark 的 public webhook 仅在 `transport:webhook` 且配置了 `verificationToken` 或 `encryptKey` 时启用；默认 WebSocket 连接器不会接受 webhook。设置页只显示 registry 已注册 adapter，并按 adapter metadata 渲染必需 / 可选密钥。个人微信无官方机器人 API，仅保留实验性占位，不作为可靠连接器路线。
 
 ## 文档知识库 RAG
 
