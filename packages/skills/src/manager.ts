@@ -21,7 +21,7 @@ function slug(name: string): string {
 export class SkillManager {
   private skills = new Map<string, Skill>();
 
-  constructor(private readonly dirs: string[]) {}
+  constructor(private readonly dirs: string[], private readonly maxDepth = 6) {}
 
   /** 重新扫描所有目录。 */
   async discover(): Promise<Skill[]> {
@@ -30,7 +30,13 @@ export class SkillManager {
     return [...this.skills.values()];
   }
 
-  private async scanDir(dir: string): Promise<void> {
+  private async scanDir(dir: string, depth = 0): Promise<void> {
+    const skillFile = path.join(dir, "SKILL.md");
+    if (fs.existsSync(skillFile)) {
+      await this.addSkill(dir, skillFile);
+      return;
+    }
+    if (depth >= this.maxDepth) return;
     let entries: fs.Dirent[];
     try {
       entries = await fs.promises.readdir(dir, { withFileTypes: true });
@@ -39,33 +45,36 @@ export class SkillManager {
     }
     for (const e of entries) {
       if (!e.isDirectory()) continue;
-      const skillDir = path.join(dir, e.name);
-      const skillFile = path.join(skillDir, "SKILL.md");
-      if (!fs.existsSync(skillFile)) continue;
-      try {
-        const raw = await fs.promises.readFile(skillFile, "utf8");
-        const { data } = parseFrontmatter(raw);
-        const name = asString(data.name) || e.name;
-        const id = slug(name);
-        const resources = (await fs.promises.readdir(skillDir)).filter((f) => f !== "SKILL.md");
-        const scripts = resources.filter((f) => /\.(sh|py|js|mjs|ts)$/.test(f));
-        this.skills.set(id, {
-          id,
-          dir: skillDir,
-          frontmatter: {
-            name,
-            description: asString(data.description),
-            whenToUse: asString(data.whenToUse ?? data["when-to-use"]),
-            ...(data.version ? { version: asString(data.version) } : {}),
-            ...(Array.isArray(data.allowedTools) ? { allowedTools: data.allowedTools } : {}),
-          },
-          bodyPath: skillFile,
-          scripts,
-          resources,
-        });
-      } catch {
-        /* 跳过坏 SKILL.md */
-      }
+      if (e.name === "node_modules" || e.name === ".git") continue;
+      await this.scanDir(path.join(dir, e.name), depth + 1);
+    }
+  }
+
+  private async addSkill(skillDir: string, skillFile: string): Promise<void> {
+    try {
+      const raw = await fs.promises.readFile(skillFile, "utf8");
+      const { data } = parseFrontmatter(raw);
+      const name = asString(data.name) || path.basename(skillDir);
+      const id = slug(name);
+      if (this.skills.has(id)) return;
+      const resources = (await fs.promises.readdir(skillDir)).filter((f) => f !== "SKILL.md");
+      const scripts = resources.filter((f) => /\.(sh|py|js|mjs|ts)$/.test(f));
+      this.skills.set(id, {
+        id,
+        dir: skillDir,
+        frontmatter: {
+          name,
+          description: asString(data.description),
+          whenToUse: asString(data.whenToUse ?? data["when-to-use"]),
+          ...(data.version ? { version: asString(data.version) } : {}),
+          ...(Array.isArray(data.allowedTools) ? { allowedTools: data.allowedTools } : {}),
+        },
+        bodyPath: skillFile,
+        scripts,
+        resources,
+      });
+    } catch {
+      /* 跳过坏 SKILL.md */
     }
   }
 

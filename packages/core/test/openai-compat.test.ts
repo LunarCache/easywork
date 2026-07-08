@@ -19,11 +19,6 @@ interface ModelsResponseShape {
   data: Array<{ id: string }>;
 }
 
-interface ChatCompletionResponseShape {
-  object: string;
-  choices: Array<{ message: { content?: string } }>;
-}
-
 /** 假上游：模拟一个云端 OpenAI 兼容服务。 */
 const fakeUpstream = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === "string" ? input : input.toString();
@@ -54,29 +49,20 @@ describe("/v1 OpenAI 兼容端点（经云端 provider）", () => {
     core = undefined;
   });
 
-  // 注：云端「流式」现走 pi-ai（统一 ModelRegistry/AuthStorage），用 fake fetch 无法拦截 pi 的 HTTP，
-  // 其流式覆盖见 openai-local-proxy.test（fake cloudStream）。这里验证 /v1/models + 非流式（仍经引擎）。
-  it("addProvider 后 /v1/models 列出模型，/v1/chat/completions 非流式经引擎可用", async () => {
+  // 云端推理路径走 pi-ai，fake fetch 无法拦截其内部 HTTP；推理覆盖见 openai-local-proxy.test。
+  it("addProvider 后 /v1/models 列出模型", async () => {
     core = createCore({ token: "t", fetch: fakeUpstream });
-    core.providers.add({ id: "cloud", baseUrl: "http://upstream.test/v1", models: ["cloud-model"] });
+    core.providers.add({
+      id: "cloud",
+      baseUrl: "http://upstream.test/v1",
+      modelConfigs: [{ id: "cloud-model", contextWindow: 32768, inputModalities: ["text"] }],
+    });
     const { port, host } = await core.start({ port: 0, host: "127.0.0.1" });
     const base = `http://${host}:${port}`;
-    const auth = { authorization: "Bearer t", "content-type": "application/json" };
 
-    // /v1/models
     const modelsRes = await fetch(`${base}/v1/models`, { headers: { authorization: "Bearer t" } });
     const modelsJson = (await modelsRes.json()) as ModelsResponseShape;
     expect(modelsJson.data.map((m) => m.id)).toContain("cloud-model");
-
-    // 非流式（云端非流式仍走引擎 → fake 上游）
-    const jsonRes = await fetch(`${base}/v1/chat/completions`, {
-      method: "POST",
-      headers: auth,
-      body: JSON.stringify({ model: "cloud-model", messages: [{ role: "user", content: "hi" }] }),
-    });
-    const j = (await jsonRes.json()) as ChatCompletionResponseShape;
-    expect(j.choices[0].message.content).toBe("cloud says hi");
-    expect(j.object).toBe("chat.completion");
   });
 
   it("/v1/chat/completions 未知模型返回 404", async () => {
@@ -88,5 +74,25 @@ describe("/v1 OpenAI 兼容端点（经云端 provider）", () => {
       body: JSON.stringify({ model: "ghost", messages: [] }),
     });
     expect(res.status).toBe(404);
+  });
+
+  it("pi-native provider models are exposed without registering an OpenAI-compatible engine", async () => {
+    core = createCore({ token: "t", fetch: fakeUpstream });
+    core.providers.add({
+      id: "anthropic",
+      kind: "pi-native",
+      api: "anthropic-messages",
+      apiKey: "sk-ant-test",
+      modelConfigs: [{ id: "claude-haiku-4-5", contextWindow: 200000, inputModalities: ["text"] }],
+    });
+    const { port, host } = await core.start({ port: 0, host: "127.0.0.1" });
+    const base = `http://${host}:${port}`;
+
+    const models = await fetch(`${base}/models`, { headers: { authorization: "Bearer t" } }).then((r) => r.json() as Promise<{ routed: string[]; context: Record<string, number> }>);
+    expect(models.routed).toContain("claude-haiku-4-5");
+    expect(models.context["claude-haiku-4-5"]).toBe(200000);
+
+    const v1 = await fetch(`${base}/v1/models`, { headers: { authorization: "Bearer t" } }).then((r) => r.json() as Promise<ModelsResponseShape>);
+    expect(v1.data.map((m) => m.id)).toContain("claude-haiku-4-5");
   });
 });

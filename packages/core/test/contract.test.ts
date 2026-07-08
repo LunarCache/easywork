@@ -120,4 +120,39 @@ describe("daemon end-to-end (SDK → core → engine)", () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it("exposes the pi-ai provider catalog through the SDK", async () => {
+    core = createCore({ token: "t" });
+    const { port, host } = await core.start({ port: 0, host: "127.0.0.1" });
+    const client = new EasyWorkClient({ baseUrl: `http://${host}:${port}`, token: "t" });
+
+    const catalog = await client.providerCatalog();
+    expect(catalog.find((p) => p.id === "openai")?.apiFamilies).toContain("openai-responses");
+    expect(catalog.find((p) => p.id === "anthropic")?.apiFamilies).toContain("anthropic-messages");
+    expect(catalog.find((p) => p.id === "google")?.modelCount).toBeGreaterThan(0);
+    const anthropic = catalog.find((p) => p.id === "anthropic");
+    expect(anthropic?.models.length).toBe(anthropic?.modelCount);
+    expect(anthropic?.models[0]).toMatchObject({
+      id: expect.any(String),
+      contextWindow: expect.any(Number),
+      inputModalities: expect.arrayContaining(["text"]),
+    });
+  });
+
+  it("probes OpenAI-compatible provider model lists through the SDK", async () => {
+    const upstream: typeof fetch = async (input, init) => {
+      expect(String(input)).toBe("https://models.example.test/v1/models");
+      expect((init?.headers as Record<string, string>).authorization).toBe("Bearer sk-test");
+      return new Response(JSON.stringify({ data: [{ id: "model-a" }, { id: "model-b" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    core = createCore({ token: "t", fetch: upstream });
+    const { port, host } = await core.start({ port: 0, host: "127.0.0.1" });
+    const client = new EasyWorkClient({ baseUrl: `http://${host}:${port}`, token: "t" });
+
+    await expect(client.probeProviderModels({ baseUrl: "https://models.example.test/v1", apiKey: "sk-test" }))
+      .resolves.toEqual(["model-a", "model-b"]);
+  });
 });

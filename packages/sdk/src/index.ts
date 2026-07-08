@@ -107,12 +107,39 @@ export interface LocalNetInfo {
   endpoints: LocalEndpoint[];
 }
 
+export type ProviderModelModality = "text" | "image";
+
+export interface ProviderModelConfig {
+  id: string;
+  contextWindow: number;
+  inputModalities: ProviderModelModality[];
+}
+
 export interface ProviderInfo {
   id: string;
-  baseUrl: string;
+  kind?: "openai-compatible" | "pi-native";
+  baseUrl?: string;
+  api?: string;
+  /** Read-only projection derived from modelConfigs. */
   models: string[];
-  /** 手动配置的上下文窗口（token）。 */
-  contextWindow?: number;
+  modelConfigs: ProviderModelConfig[];
+}
+
+export interface ProviderCatalogModel {
+  id: string;
+  name: string;
+  api: string;
+  contextWindow: number;
+  inputModalities: ProviderModelModality[];
+}
+
+export interface ProviderCatalogItem {
+  id: string;
+  label: string;
+  apiFamilies: string[];
+  modelCount: number;
+  sampleModels: string[];
+  models: ProviderCatalogModel[];
 }
 
 export interface ChannelAdaptersInfo {
@@ -183,12 +210,18 @@ export interface StartWechatRegistrationInput {
 
 export interface AddProviderConfig {
   id: string;
+  kind?: "openai-compatible" | "pi-native";
+  baseUrl?: string;
+  api?: string;
+  apiKey?: string;
+  headers?: Record<string, string>;
+  modelConfigs: ProviderModelConfig[];
+}
+
+export interface ProbeProviderModelsInput {
   baseUrl: string;
   apiKey?: string;
   headers?: Record<string, string>;
-  models: string[];
-  /** 手动配置的上下文窗口（token）：云端模型无法自动探测，用于 compaction + UI 进度环。 */
-  contextWindow?: number;
 }
 
 export class EasyWorkClient {
@@ -358,6 +391,16 @@ export class EasyWorkClient {
   async listProviders(): Promise<ProviderInfo[]> {
     const { providers } = await this.getJSON<{ providers: ProviderInfo[] }>("/providers");
     return providers;
+  }
+
+  async providerCatalog(): Promise<ProviderCatalogItem[]> {
+    const { providers } = await this.getJSON<{ providers: ProviderCatalogItem[] }>("/providers/catalog");
+    return providers;
+  }
+
+  async probeProviderModels(input: ProbeProviderModelsInput): Promise<string[]> {
+    const { models } = await this.postJSON<{ models: string[] }>("/providers/probe-models", input);
+    return models;
   }
 
   async addProvider(cfg: AddProviderConfig): Promise<void> {

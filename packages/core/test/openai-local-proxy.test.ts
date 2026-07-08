@@ -211,6 +211,26 @@ describe("/v1 云端经 pi-ai", () => {
     await app.close();
   });
 
+  it("云端非流式出错：OpenAI 返回上游错误而不是回退成 404", async () => {
+    const app = Fastify();
+    registerOpenAICompat(app, stubRegistry, {
+      localBaseUrl: () => undefined,
+      cloudModelIds: () => ["cloud-z"],
+      completeCloud: async () => {
+        throw new Error("bad api key");
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: { model: "cloud-z", messages: [{ role: "user", content: "hi" }] },
+    });
+    const j = res.json() as { error: { message: string } };
+    expect(res.statusCode).toBe(502);
+    expect(j.error.message).toContain("bad api key");
+    await app.close();
+  });
+
   it("云端非流式：经 completeCloud → Anthropic 非流式 JSON", async () => {
     const msg = {
       role: "assistant",
@@ -231,6 +251,28 @@ describe("/v1 云端经 pi-ai", () => {
     const j = res.json() as { type: string; content: { type: string; text: string }[] };
     expect(j.type).toBe("message");
     expect(j.content[0]?.text).toBe("from pi");
+    await app.close();
+  });
+
+  it("云端非流式出错：Anthropic 返回上游错误而不是回退成 404", async () => {
+    const app = Fastify();
+    registerOpenAICompat(app, stubRegistry, {
+      localBaseUrl: () => undefined,
+      cloudModelIds: () => ["cloud-z"],
+      completeCloud: async () => {
+        throw new Error("quota exceeded");
+      },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/messages",
+      payload: { model: "cloud-z", messages: [{ role: "user", content: "hi" }] },
+    });
+    const j = res.json() as { type: string; error: { type: string; message: string } };
+    expect(res.statusCode).toBe(502);
+    expect(j.type).toBe("error");
+    expect(j.error.type).toBe("api_error");
+    expect(j.error.message).toContain("quota exceeded");
     await app.close();
   });
 

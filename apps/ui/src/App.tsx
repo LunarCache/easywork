@@ -272,10 +272,25 @@ export function App() {
   const delThread = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const t = threads.find((x) => x.id === id);
+    let artifactCount = 0;
+    if (!t?.projectId) {
+      try {
+        const entries = await getClient().chatFiles(id);
+        artifactCount = entries.filter((entry) => entry.type === "file").length;
+      } catch {
+        /* 工件检查失败不阻断删除确认。 */
+      }
+    }
+    const body = [
+      "此操作不可撤销，会同时删除会话记录以及由该对话抽取出的记忆事实。",
+      artifactCount > 0
+        ? `检测到该对话产出了 ${artifactCount} 个文件；删除后这些对话工件也会从本机移除。`
+        : "",
+    ].filter(Boolean).join("\n\n");
     if (
       !(await askConfirm({
         title: `删除对话「${t?.title || "新会话"}」？`,
-        body: "此操作不可撤销，会同时删除会话记录以及由该对话抽取出的记忆事实。",
+        body,
         danger: true,
       }))
     )

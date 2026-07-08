@@ -1,11 +1,21 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GGUFVariant, HFModelSummary, LocalModel } from "@ew/shared";
-import type { ProviderInfo, LocalNetInfo } from "@ew/sdk";
+import type {
+  ProviderCatalogItem,
+  ProviderCatalogModel,
+  ProviderInfo,
+  ProviderModelConfig,
+  ProviderModelModality,
+  LocalNetInfo,
+} from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "../components/ConfirmDialog.js";
+import { BrandIcon, brandKeyForModel, brandKeyForProvider } from "../components/BrandIcon.js";
 import {
   AlertIcon,
   BoxIcon,
+  CheckIcon,
+  ChevronDownIcon,
   ChevronIcon,
   DownloadIcon,
   GlobeIcon,
@@ -18,12 +28,103 @@ import {
 type ModelsTab = "local" | "cloud";
 type View = "list" | "search" | "add-provider";
 
-const PROVIDER_PRESETS: { id: string; label: string; baseUrl: string }[] = [
-  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
-  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
-  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1" },
-  { id: "siliconflow", label: "硅基流动", baseUrl: "https://api.siliconflow.cn/v1" },
+const PROVIDER_CATALOG_FEATURED = new Set([
+  "openai",
+  "anthropic",
+  "google",
+  "mistral",
+  "openrouter",
+  "deepseek",
+  "xai",
+  "groq",
+  "amazon-bedrock",
+  "azure-openai-responses",
+  "github-copilot",
+  "vercel-ai-gateway",
+]);
+
+const API_PROTOCOLS = [
+  { id: "openai-completions", label: "OpenAI Chat Completions" },
+  { id: "openai-responses", label: "OpenAI Responses" },
+  { id: "anthropic-messages", label: "Anthropic Messages" },
+  { id: "google-generative-ai", label: "Google Generative AI" },
+  { id: "mistral-conversations", label: "Mistral Conversations" },
+  { id: "azure-openai-responses", label: "Azure OpenAI Responses" },
+  { id: "bedrock-converse-stream", label: "Bedrock Converse" },
+  { id: "google-vertex", label: "Google Vertex" },
 ];
+
+const API_PROTOCOL_LABELS = new Map(API_PROTOCOLS.map((item) => [item.id, item.label]));
+
+interface ProviderFormModel {
+  rowId: string;
+  id: string;
+  context: string;
+  inputModalities: ProviderModelModality[];
+}
+
+function splitProviderModels(value: string): string[] {
+  const ids = value
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [...new Set(ids)];
+}
+
+function resetScrollContainers(node: HTMLElement | null) {
+  if (!node) return;
+  let el: HTMLElement | null = node;
+  while (el) {
+    const overflowY = window.getComputedStyle(el).overflowY;
+    if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") {
+      el.scrollTo({ top: 0 });
+    }
+    el = el.parentElement;
+  }
+}
+
+function modalLabel(modalities?: ProviderModelModality[]): string {
+  return modalities?.includes("image") ? "文本 + 视觉" : "文本";
+}
+
+function modelConfigLabel(model: ProviderModelConfig): string {
+  const parts = [model.id];
+  if (model.contextWindow) parts.push(`ctx ${fmtCtx(model.contextWindow)}`);
+  parts.push(modalLabel(model.inputModalities));
+  return parts.join(" · ");
+}
+
+function newProviderModelRow(input: Omit<ProviderFormModel, "rowId"> = {
+  id: "",
+  context: "32768",
+  inputModalities: ["text"],
+}): ProviderFormModel {
+  return { ...input, rowId: crypto.randomUUID() };
+}
+
+function catalogModelsToForm(models: ProviderCatalogModel[]): ProviderFormModel[] {
+  return models.map((m) => newProviderModelRow({
+    id: m.id,
+    context: String(m.contextWindow),
+    inputModalities: m.inputModalities.includes("image") ? ["text", "image"] : ["text"],
+  }));
+}
+
+function formModelsToConfig(models: ProviderFormModel[]): ProviderModelConfig[] {
+  const out = new Map<string, ProviderModelConfig>();
+  for (const model of models) {
+    const id = model.id.trim();
+    if (!id) continue;
+    const ctx = Number(model.context.trim());
+    const inputModalities = model.inputModalities.includes("image") ? ["text", "image"] as ProviderModelModality[] : ["text"] as ProviderModelModality[];
+    out.set(id, {
+      id,
+      inputModalities,
+      contextWindow: Number.isFinite(ctx) && ctx > 0 ? Math.floor(ctx) : 32768,
+    });
+  }
+  return [...out.values()];
+}
 
 function fmtSize(bytes: number): string {
   const mb = bytes / 1e6;
@@ -61,6 +162,7 @@ function displayName(m: LocalModel, quant: string | null): string {
 export function Models({ onChange }: { onChange: () => void }) {
   const [tab, setTabRaw] = useState<ModelsTab>("local");
   const [view, setView] = useState<View>("list");
+  const addProviderPageRef = useRef<HTMLDivElement>(null);
   const { confirm: askConfirm, dialog: confirmDialog } = useConfirm();
   const setTab = (t: ModelsTab) => {
     setTabRaw(t);
@@ -95,9 +197,33 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [apiKeyInput, setApiKeyInput] = useState("");
 
   // 云端 provider
-  const [prov, setProv] = useState({ id: "", baseUrl: "", apiKey: "", models: "", context: "" });
+  const [prov, setProv] = useState({
+    kind: "pi-native" as "openai-compatible" | "pi-native",
+    id: "",
+    api: "",
+    baseUrl: "",
+    apiKey: "",
+    models: "",
+    context: "",
+  });
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogItem[]>([]);
+  const [providerCatalogLoading, setProviderCatalogLoading] = useState(false);
+  const [providerConfigOpen, setProviderConfigOpen] = useState(false);
+  const [apiMenuOpen, setApiMenuOpen] = useState(false);
+  const [providerModels, setProviderModels] = useState<ProviderFormModel[]>([]);
+  const [modelProbeBusy, setModelProbeBusy] = useState(false);
   const [provNote, setProvNote] = useState("");
+
+  useEffect(() => {
+    if (!providerConfigOpen) setApiMenuOpen(false);
+  }, [providerConfigOpen]);
+
+  const openAddProvider = () => {
+    setProviderConfigOpen(false);
+    setProvNote("");
+    setView("add-provider");
+  };
 
   const refreshLocal = useCallback(async () => {
     try {
@@ -156,6 +282,16 @@ export function Models({ onChange }: { onChange: () => void }) {
       /* ignore */
     }
   }, []);
+  const refreshProviderCatalog = useCallback(async () => {
+    setProviderCatalogLoading(true);
+    try {
+      setProviderCatalog(await getClient().providerCatalog());
+    } catch {
+      /* ignore */
+    } finally {
+      setProviderCatalogLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     void refreshLocal();
@@ -163,8 +299,16 @@ export function Models({ onChange }: { onChange: () => void }) {
     void refreshNet();
   }, [refreshLocal, refreshRuntime, refreshNet]);
   useEffect(() => {
-    if (tab === "cloud") void refreshProviders();
-  }, [tab, refreshProviders]);
+    if (tab === "cloud") {
+      void refreshProviders();
+      void refreshProviderCatalog();
+    }
+  }, [tab, refreshProviders, refreshProviderCatalog]);
+
+  useEffect(() => {
+    if (tab !== "cloud" || view !== "add-provider") return;
+    requestAnimationFrame(() => resetScrollContainers(addProviderPageRef.current));
+  }, [providerConfigOpen, tab, view]);
 
   const installRuntime = async () => {
     setRtInstalling(true);
@@ -290,17 +434,22 @@ export function Models({ onChange }: { onChange: () => void }) {
   };
 
   const addProvider = async () => {
-    if (!prov.id.trim() || !prov.baseUrl.trim()) return setProvNote("请填写 id 与 baseUrl");
+    if (!prov.id.trim()) return setProvNote("请填写 Provider ID");
+    if (prov.kind === "openai-compatible" && !prov.baseUrl.trim()) return setProvNote("OpenAI-compatible provider 需要 baseUrl");
+    const modelConfigs = formModelsToConfig(providerModels);
+    if (modelConfigs.length === 0) return setProvNote("请至少添加一个模型");
     try {
-      const ctx = Number(prov.context.trim());
       await getClient().addProvider({
         id: prov.id.trim(),
-        baseUrl: prov.baseUrl.trim(),
+        kind: prov.kind,
+        ...(prov.api.trim() ? { api: prov.api.trim() } : {}),
+        ...(prov.baseUrl.trim() ? { baseUrl: prov.baseUrl.trim() } : {}),
         ...(prov.apiKey ? { apiKey: prov.apiKey } : {}),
-        models: prov.models.split(",").map((s) => s.trim()).filter(Boolean),
-        ...(Number.isFinite(ctx) && ctx > 0 ? { contextWindow: Math.floor(ctx) } : {}),
+        modelConfigs,
       });
-      setProv({ id: "", baseUrl: "", apiKey: "", models: "", context: "" });
+      setProv({ kind: "pi-native", id: "", api: "", baseUrl: "", apiKey: "", models: "", context: "" });
+      setProviderModels([newProviderModelRow()]);
+      setProviderConfigOpen(false);
       setView("list");
       await refreshProviders();
       onChange();
@@ -316,6 +465,93 @@ export function Models({ onChange }: { onChange: () => void }) {
       onChange();
     } catch (e) {
       setProvNote(`删除失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const applyCustomProvider = () => {
+    setProv({
+      kind: "openai-compatible",
+      id: "",
+      api: "openai-completions",
+      baseUrl: "",
+      apiKey: prov.apiKey,
+      models: "",
+      context: "",
+    });
+    setProviderModels([newProviderModelRow()]);
+    setProviderConfigOpen(true);
+    setProvNote("");
+  };
+
+  const featuredCatalog = providerCatalog.filter((p) => PROVIDER_CATALOG_FEATURED.has(p.id));
+  const restCatalog = providerCatalog.filter((p) => !PROVIDER_CATALOG_FEATURED.has(p.id));
+  const selectedCatalog = providerCatalog.find((p) => p.id === prov.id);
+  const applyCatalogProvider = (p: ProviderCatalogItem) => {
+    setProv({
+      kind: "pi-native",
+      id: p.id,
+      api: p.apiFamilies[0] ?? "",
+      baseUrl: "",
+      apiKey: prov.apiKey,
+      models: p.models.map((m) => m.id).join(", "),
+      context: "",
+    });
+    setProviderModels(catalogModelsToForm(p.models));
+    setProviderConfigOpen(true);
+    setProvNote("");
+  };
+
+  const providerModelIds = providerModels.map((m) => m.id).filter(Boolean);
+  const setProviderModelIds = (models: string[]) => {
+    setProviderModels((cur) => {
+      const existing = new Map(cur.map((m) => [m.id, m]));
+      return splitProviderModels(models.join("\n")).map((id) => existing.get(id) ?? {
+        rowId: crypto.randomUUID(),
+        id,
+        context: "32768",
+        inputModalities: ["text"],
+      });
+    });
+  };
+  const addProviderModelRow = () => {
+    setProviderModels((cur) => [...cur, newProviderModelRow()]);
+  };
+  const removeProviderModel = (rowId: string) => {
+    setProviderModels((cur) => {
+      const next = cur.filter((m) => m.rowId !== rowId);
+      return next.length > 0 ? next : [newProviderModelRow()];
+    });
+  };
+  const updateProviderModel = (rowId: string, patch: Partial<Omit<ProviderFormModel, "rowId">>) => {
+    setProviderModels((cur) => cur.map((m) => (m.rowId === rowId ? { ...m, ...patch } : m)));
+  };
+  const apiProtocolIds = [
+    ...new Set([
+      prov.api,
+      ...(selectedCatalog?.apiFamilies ?? []),
+      ...(prov.kind === "openai-compatible" ? API_PROTOCOLS.map((item) => item.id) : []),
+    ].filter(Boolean)),
+  ];
+  const fetchProviderModels = async () => {
+    if (prov.kind !== "openai-compatible") return;
+    if (!prov.baseUrl.trim()) return setProvNote("请先填写 Base URL");
+    setModelProbeBusy(true);
+    setProvNote("");
+    try {
+      const models = await getClient().probeProviderModels({
+        baseUrl: prov.baseUrl.trim(),
+        ...(prov.apiKey.trim() ? { apiKey: prov.apiKey.trim() } : {}),
+      });
+      if (models.length === 0) {
+        setProvNote("未获取到模型列表，请手动填入模型 ID。");
+      } else {
+        setProviderModelIds(models);
+        setProvNote(`已获取 ${models.length} 个模型。`);
+      }
+    } catch (e) {
+      setProvNote(`获取模型列表失败：${e instanceof Error ? e.message : String(e)}。请手动填入模型 ID。`);
+    } finally {
+      setModelProbeBusy(false);
     }
   };
 
@@ -399,37 +635,218 @@ export function Models({ onChange }: { onChange: () => void }) {
   // ===== 子视图：添加云端 Provider =====
   if (tab === "cloud" && view === "add-provider") {
     return (
-      <div className="page mdl-page">
+      <div className="page mdl-page" ref={addProviderPageRef}>
         <div className="skill-detail-head">
           <button className="files-back" onClick={() => setView("list")}>
             <ArrowLeftIcon size={15} /> 返回
           </button>
-          <span className="skill-detail-name">添加云端 Provider</span>
+          <div>
+            <span className="skill-detail-name">添加云端 Provider</span>
+            <p className="provider-subtitle">选择模型服务商后填写连接信息；自定义服务商支持兼容端点。</p>
+          </div>
         </div>
         {provNote && <div className="note">{provNote}</div>}
-        <p className="hint" style={{ marginBottom: 10 }}>任意 OpenAI 兼容端点（/v1）。Key 持久化在本机 daemon。</p>
-        <div className="prov-presets">
-          {PROVIDER_PRESETS.map((p) => (
-            <button key={p.id} className="set-btn ghost soft small" title={p.baseUrl} onClick={() => setProv({ ...prov, id: prov.id || p.id, baseUrl: p.baseUrl })}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <div className="form">
-          <input placeholder="id（如 openrouter）" value={prov.id} onChange={(e) => setProv({ ...prov, id: e.target.value })} />
-          <input placeholder="baseUrl（.../v1）" value={prov.baseUrl} onChange={(e) => setProv({ ...prov, baseUrl: e.target.value })} />
-          <input placeholder="API Key" type="password" value={prov.apiKey} onChange={(e) => setProv({ ...prov, apiKey: e.target.value })} />
-          <input placeholder="模型（逗号分隔）" value={prov.models} onChange={(e) => setProv({ ...prov, models: e.target.value })} />
-          <input
-            type="number"
-            min={1}
-            placeholder="上下文大小（token，如 131072）"
-            title="云端模型无法自动探测上下文窗口，手动填写用于压缩阈值与进度环；留空默认 32768"
-            value={prov.context}
-            onChange={(e) => setProv({ ...prov, context: e.target.value })}
-          />
-          <button className="set-btn primary" onClick={() => void addProvider()}>添加</button>
-        </div>
+        {providerConfigOpen ? (
+          <div className="provider-config-view">
+            <div className="provider-form-panel provider-form-panel-open">
+              <div className="provider-panel-head">
+                <div>
+                  <div className="provider-panel-title">连接配置</div>
+                  <div className="provider-panel-desc">API Key 仅持久化在本机 daemon。</div>
+                </div>
+                <div className="provider-panel-actions">
+                  {selectedCatalog ? <span className="set-pill ghost">{selectedCatalog.modelCount} models</span> : null}
+                  <button className="set-btn ghost soft small" onClick={() => setProviderConfigOpen(false)}>
+                    更换服务商
+                  </button>
+                </div>
+              </div>
+              <div className="provider-form-grid">
+                <label className="provider-field">
+                  <span>Provider ID</span>
+                  <input
+                    placeholder="openrouter"
+                    value={prov.id}
+                    onChange={(e) => {
+                      setProv({ ...prov, id: e.target.value });
+                    }}
+                  />
+                </label>
+                <div className="provider-field">
+                  <span>API 协议</span>
+                  <div className="set-select-wrap provider-api-select">
+                    <button
+                      type="button"
+                      className={`set-select-btn ${apiMenuOpen ? "open" : ""}`}
+                      onClick={() => setApiMenuOpen((open) => !open)}
+                    >
+                      <span>{(API_PROTOCOL_LABELS.get(prov.api) ?? prov.api) || "选择 API 协议"}</span>
+                      <ChevronDownIcon size={13} className="set-select-chev" />
+                    </button>
+                    {apiMenuOpen && (
+                      <>
+                        <div className="menu-backdrop" onClick={() => setApiMenuOpen(false)} />
+                        <div className="set-select-menu">
+                          {apiProtocolIds.map((api) => (
+                            <button
+                              key={api}
+                              type="button"
+                              className={`set-select-opt ${api === prov.api ? "on" : ""}`}
+                              onClick={() => {
+                                setProv({ ...prov, api });
+                                setApiMenuOpen(false);
+                              }}
+                            >
+                              <span>{API_PROTOCOL_LABELS.get(api) ?? api}</span>
+                              {api === prov.api && <CheckIcon size={14} className="set-select-check" />}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <label className="provider-field wide">
+                  <span>{prov.kind === "pi-native" ? "Base URL Override" : "Base URL"}</span>
+                  <div className="provider-inline-control">
+                    <input
+                      placeholder={prov.kind === "pi-native" ? "留空使用内置端点" : "https://.../v1"}
+                      value={prov.baseUrl}
+                      onChange={(e) => setProv({ ...prov, baseUrl: e.target.value })}
+                    />
+                    {prov.kind === "openai-compatible" && (
+                      <button className="set-btn secondary" type="button" disabled={modelProbeBusy} onClick={() => void fetchProviderModels()}>
+                        {modelProbeBusy ? "获取中…" : "获取模型列表"}
+                      </button>
+                    )}
+                  </div>
+                </label>
+                <label className="provider-field wide">
+                  <span>API Key</span>
+                  <input placeholder="sk-..." type="password" value={prov.apiKey} onChange={(e) => setProv({ ...prov, apiKey: e.target.value })} />
+                </label>
+                <div className="provider-field wide">
+                  <div className="provider-field-head">
+                    <span>模型配置</span>
+                    <span className="set-pill ghost">{providerModelIds.length} models</span>
+                  </div>
+                  <div className="provider-model-table">
+                    <div className="provider-model-table-head">
+                      <span>Model ID</span>
+                      <span>Context</span>
+                      <span>模态</span>
+                      <button type="button" className="mcp-icon-btn" title="添加模型行" onClick={addProviderModelRow}>
+                        <PlusIcon size={14} />
+                      </button>
+                    </div>
+                    {providerModels.map((model) => (
+                      <div className="provider-model-row" key={model.rowId}>
+                        <input
+                          className="mono"
+                          value={model.id}
+                          placeholder="model-id"
+                          title={model.id}
+                          onChange={(e) => updateProviderModel(model.rowId, { id: e.target.value })}
+                        />
+                        <input
+                          type="number"
+                          min={1}
+                          value={model.context}
+                          placeholder="32768"
+                          onChange={(e) => updateProviderModel(model.rowId, { context: e.target.value })}
+                        />
+                        <label className="provider-model-check">
+                          <input
+                            type="checkbox"
+                            checked={model.inputModalities.includes("image")}
+                            onChange={(e) => updateProviderModel(model.rowId, { inputModalities: e.target.checked ? ["text", "image"] : ["text"] })}
+                          />
+                          视觉
+                        </label>
+                        <button type="button" className="mcp-icon-btn danger" title="移除" onClick={() => removeProviderModel(model.rowId)}>
+                          <TrashIcon size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {selectedCatalog ? (
+                <div className="provider-native-note">
+                  <BrandIcon brand={brandKeyForProvider(selectedCatalog.id)} size="sm" />
+                  <span>内置信息：{selectedCatalog.apiFamilies.join(" / ")}</span>
+                  <span>已载入 {selectedCatalog.models.length} 个模型</span>
+                </div>
+              ) : prov.kind === "openai-compatible" ? (
+                <div className="provider-native-note muted">自定义模型服务商将按兼容端点接入。</div>
+              ) : (
+                <div className="provider-native-note muted">选择内置服务商后可查看对应的连接信息。</div>
+              )}
+              <div className="provider-form-actions">
+                <button
+                  className="set-btn ghost soft"
+                  onClick={() => {
+                    setProv({ kind: "pi-native", id: "", api: "", baseUrl: "", apiKey: "", models: "", context: "" });
+                    setProviderModels([newProviderModelRow()]);
+                  }}
+                >
+                  清空
+                </button>
+                <button className="set-btn primary" onClick={() => void addProvider()}>
+                  添加 Provider
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="provider-template-panel provider-picker-panel">
+              <div className="provider-panel-head">
+                <div>
+                  <div className="provider-panel-title">自定义模型服务商</div>
+                  <div className="provider-panel-desc">接入兼容端点，手动维护模型 ID、上下文窗口和模态。</div>
+                </div>
+                <span className="set-pill ghost">手动配置</span>
+              </div>
+              <button
+                className="provider-template provider-template-custom"
+                title="自定义兼容端点"
+                onClick={applyCustomProvider}
+              >
+                <BrandIcon brand="generic" size="lg" />
+                <span className="provider-template-main">
+                  <span className="provider-template-name">自定义模型服务商</span>
+                  <span className="provider-template-url">自定义兼容端点</span>
+                  <span className="provider-template-hint">填写任意兼容端点、模型 ID 与上下文窗口。</span>
+                </span>
+              </button>
+            </div>
+
+            <div className="provider-catalog">
+              <div className="provider-catalog-head">
+                <div>
+                  <div className="provider-panel-title">内置支持</div>
+                  <div className="provider-panel-desc">来自当前安装的模型服务商与模型目录。</div>
+                </div>
+                <span className="set-pill ghost">{providerCatalogLoading ? "扫描中" : `${providerCatalog.length} providers`}</span>
+              </div>
+              <div className="provider-catalog-grid">
+                {[...featuredCatalog, ...restCatalog].map((p) => (
+                  <button key={p.id} className="provider-catalog-card" onClick={() => applyCatalogProvider(p)}>
+                    <BrandIcon brand={brandKeyForProvider(p.id)} size="md" />
+                    <div className="provider-catalog-body">
+                      <div className="provider-catalog-name">
+                        <span>{p.label}</span>
+                        <span className="set-pill ghost">内置</span>
+                      </div>
+                      <div className="provider-catalog-meta">{p.modelCount} models · {p.apiFamilies.join(" / ")}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     );
   }
@@ -458,12 +875,12 @@ export function Models({ onChange }: { onChange: () => void }) {
         </div>
         <span className="bar-spacer" />
         {tab === "local" ? (
-          <button className="set-btn secondary icon" title="下载模型" onClick={() => setView("search")}>
-            <SearchIcon size={16} />
+          <button className="set-btn primary" title="搜索并下载 HuggingFace GGUF 模型" onClick={() => setView("search")}>
+            <DownloadIcon size={16} /> 下载模型
           </button>
         ) : (
-          <button className="set-btn secondary icon" title="添加 Provider" onClick={() => setView("add-provider")}>
-            <PlusIcon size={16} />
+          <button className="set-btn primary" title="添加云端模型 Provider" onClick={openAddProvider}>
+            <PlusIcon size={16} /> 添加 Provider
           </button>
         )}
       </div>
@@ -542,7 +959,10 @@ export function Models({ onChange }: { onChange: () => void }) {
             <div className="empty-models">
               <BoxIcon size={26} />
               <p>还没有本地模型</p>
-              <span>点右上「下载模型」搜索并下载一个 GGUF 模型即可开始。</span>
+              <span>搜索 GGUF 模型并下载到本机。</span>
+              <button className="set-btn primary empty-action" onClick={() => setView("search")}>
+                <DownloadIcon size={15} /> 下载模型
+              </button>
             </div>
           ) : (
             <div className="mdl-list">
@@ -555,9 +975,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                 const quant = quantOf(m);
                 return (
                   <div key={m.id} className="mdl-card">
-                    <span className={`mdl-glyph k-${kind}`}>
-                      <BoxIcon size={18} />
-                    </span>
+                    <BrandIcon brand={brandKeyForModel(m.repoId, m.fileName, m.arch)} size="lg" />
                     <div className="mdl-body">
                       <div className="mdl-name-row">
                         <span className="mdl-name mono" title={m.fileName}>
@@ -617,24 +1035,31 @@ export function Models({ onChange }: { onChange: () => void }) {
             <div className="empty-models">
               <GlobeIcon size={26} />
               <p>还没有云端 Provider</p>
-              <span>点右上「添加 Provider」接入一个 OpenAI 兼容端点即可在聊天中选用。</span>
+              <span>接入 OpenAI 兼容端点。</span>
             </div>
           ) : (
             <div className="mdl-list">
               {providers.map((p) => (
                 <div key={p.id} className="mdl-card">
-                  <span className="mdl-glyph k-text">
-                    <GlobeIcon size={18} />
-                  </span>
+                  <BrandIcon brand={brandKeyForProvider(p.id, p.baseUrl)} size="lg" />
                   <div className="mdl-body">
                     <div className="mdl-name-row">
                       <span className="mdl-name mono">{p.id}</span>
-                      {p.contextWindow ? <span className="set-pill ghost">ctx {fmtCtx(p.contextWindow)}</span> : null}
+                      <span className="set-pill ghost">{p.kind === "pi-native" ? "内置" : "OpenAI /v1"}</span>
                     </div>
                     <div className="mdl-specs">
-                      <span>{p.baseUrl}</span>
+                      <span>{p.kind === "pi-native" ? p.api ?? "内置端点" : p.baseUrl}</span>
+                      {p.kind === "pi-native" && p.baseUrl ? <span>override {p.baseUrl}</span> : null}
                     </div>
-                    {p.models.length > 0 && <div className="mdl-specs">{p.models.join("、")}</div>}
+                    {p.models.length > 0 && (
+                      <div className="provider-info-models">
+                        {p.modelConfigs.map((model) => (
+                          <span key={model.id} title={modelConfigLabel(model)}>
+                            {modelConfigLabel(model)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <button className="mcp-icon-btn danger" title="删除" onClick={() => void removeProvider(p.id)}>
                     <TrashIcon size={14} />

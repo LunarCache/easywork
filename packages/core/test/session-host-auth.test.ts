@@ -13,7 +13,7 @@ function makeDeps(configs: CloudProviderConfig[]) {
   let dump = configs;
   const providers = {
     dump: () => dump,
-    findByModel: (id: string) => dump.find((c) => c.models.includes(id)),
+    findByModel: (id: string) => dump.find((c) => c.modelConfigs.some((m) => m.id === id)),
     setDump: (next: CloudProviderConfig[]) => {
       dump = next;
     },
@@ -28,7 +28,7 @@ describe("SessionHost.syncCloudProviders", () => {
       id: "openrouter",
       baseUrl: "https://openrouter.ai/api/v1",
       apiKey: "sk-test-123",
-      models: ["some/model"],
+      modelConfigs: [{ id: "some/model", contextWindow: 32768, inputModalities: ["text"] }],
     };
     const deps = makeDeps([cfg]);
     const host = new SessionHost({ ...deps, agentDir });
@@ -45,6 +45,75 @@ describe("SessionHost.syncCloudProviders", () => {
     store = reopened();
     expect(store.get("openrouter")).toBeUndefined();
     expect(store.get("local")).toEqual({ type: "api_key", key: "local" });
+
+    host.disposeAll();
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  it("keeps pi-native providers on their built-in pi-ai API family", () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-native-")));
+    const cfg: CloudProviderConfig = {
+      id: "anthropic",
+      kind: "pi-native",
+      api: "anthropic-messages",
+      apiKey: "sk-ant-test",
+      modelConfigs: [{ id: "claude-haiku-4-5", contextWindow: 200000, inputModalities: ["text"] }],
+    };
+    const host = new SessionHost({ ...makeDeps([cfg]), agentDir });
+
+    const resolved = (host as unknown as { resolveModel(modelId: string): { provider: string; api: string; contextWindow?: number } })
+      .resolveModel("claude-haiku-4-5");
+    expect(resolved.provider).toBe("anthropic");
+    expect(resolved.api).toBe("anthropic-messages");
+    expect(resolved.contextWindow).toBe(200000);
+
+    host.disposeAll();
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  it("does not remove pre-existing pi-native credentials when EasyWork did not write a key", () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-native-auth-")));
+    const authPath = path.join(agentDir, "auth.json");
+    AuthStorage.create(authPath).set("anthropic", { type: "api_key", key: "existing-key" });
+    const cfg: CloudProviderConfig = {
+      id: "anthropic",
+      kind: "pi-native",
+      api: "anthropic-messages",
+      modelConfigs: [{ id: "claude-haiku-4-5", contextWindow: 200000, inputModalities: ["text"] }],
+    };
+    const deps = makeDeps([cfg]);
+    const host = new SessionHost({ ...deps, agentDir });
+
+    (deps.providers as unknown as { setDump: (n: CloudProviderConfig[]) => void }).setDump([]);
+    host.syncCloudProviders();
+
+    const store = AuthStorage.create(authPath);
+    expect(store.get("anthropic")).toEqual({ type: "api_key", key: "existing-key" });
+
+    host.disposeAll();
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  it("uses per-model context and modality metadata for custom providers", () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-custom-models-")));
+    const cfg: CloudProviderConfig = {
+      id: "custom",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://example.test/v1",
+      apiKey: "sk-test",
+      modelConfigs: [
+        { id: "text-only", contextWindow: 32768, inputModalities: ["text"] },
+        { id: "vision-model", contextWindow: 131072, inputModalities: ["text", "image"] },
+      ],
+    };
+    const host = new SessionHost({ ...makeDeps([cfg]), agentDir });
+
+    const resolve = (host as unknown as {
+      resolveModel(modelId: string): { contextWindow?: number; input?: string[] };
+    }).resolveModel.bind(host);
+    expect(resolve("text-only")).toMatchObject({ contextWindow: 32768, input: ["text"] });
+    expect(resolve("vision-model")).toMatchObject({ contextWindow: 131072, input: ["text", "image"] });
 
     host.disposeAll();
     fs.rmSync(agentDir, { recursive: true, force: true });

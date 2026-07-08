@@ -7,6 +7,7 @@ import { SkillManager } from "../src/index.js";
 import { parseFrontmatter } from "../src/frontmatter.js";
 
 let tmp: string | undefined;
+let tmpRoots: string[] = [];
 function makeSkillDir(): string {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ew-skills-"));
   const dir = path.join(tmp, "pdf-fill");
@@ -26,9 +27,29 @@ version: 1.0.0
   return tmp;
 }
 
+function makeSkillRoot(name: string, body: string): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "ew-skills-"));
+  tmpRoots.push(root);
+  const dir = path.join(root, name.toLowerCase().replace(/[^a-z0-9]+/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "SKILL.md"),
+    `---
+name: ${name}
+description: ${body}
+whenToUse: tests
+---
+# ${name}
+${body}`,
+  );
+  return root;
+}
+
 afterEach(() => {
   if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+  for (const root of tmpRoots) fs.rmSync(root, { recursive: true, force: true });
   tmp = undefined;
+  tmpRoots = [];
 });
 
 const ctx: ToolExecContext = {
@@ -60,6 +81,34 @@ describe("SkillManager", () => {
     expect(skills[0]!.frontmatter.name).toBe("PDF Filler");
     expect(skills[0]!.id).toBe("pdf-filler");
     expect(skills[0]!.scripts).toContain("fill.py");
+  });
+
+  it("同名技能保留先扫描目录的版本", async () => {
+    const first = makeSkillRoot("Same Skill", "first");
+    const second = makeSkillRoot("Same Skill", "second");
+    const sm = new SkillManager([first, second]);
+    const skills = await sm.discover();
+    expect(skills).toHaveLength(1);
+    expect(skills[0]!.dir.startsWith(first)).toBe(true);
+  });
+
+  it("递归发现较深目录里的 SKILL.md", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ew-skills-"));
+    tmpRoots.push(root);
+    const dir = path.join(root, "plugin", "version", "skills", "nested-skill");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "SKILL.md"),
+      `---
+name: Nested Skill
+description: nested
+whenToUse: tests
+---
+# Nested Skill`,
+    );
+    const sm = new SkillManager([root]);
+    const skills = await sm.discover();
+    expect(skills.map((s) => s.id)).toContain("nested-skill");
   });
 
   it("systemPromptCatalog 含 name/description/whenToUse", async () => {

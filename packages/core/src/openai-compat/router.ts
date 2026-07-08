@@ -21,6 +21,10 @@ function genId(): string {
   return `chatcmpl-${Date.now().toString(36)}${counter.toString(36)}`;
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /** 网关依赖：本地已加载模型的 router baseUrl 解析器（用于本地透传）。 */
 export interface OpenAICompatDeps {
   /** 返回已加载本地模型的 OpenAI/Anthropic 兼容 baseUrl（http://host:port/v1）；非本地返回 undefined。 */
@@ -41,18 +45,27 @@ export interface OpenAICompatDeps {
     context: PiContext,
     opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number },
   ) => Promise<AssistantMessage | null>;
+  /** 额外暴露的云端模型 id（例如 pi-native provider 不注册 EngineRegistry）。 */
+  cloudModelIds?: () => string[];
 }
 
+type CloudCompleteResult =
+  | { type: "miss" }
+  | { type: "ok"; message: AssistantMessage }
+  | { type: "error"; error: unknown };
+
 /** 云端非流式 → pi-ai completeSimple；非云端返回 null（由调用方回退引擎）。 */
-async function tryCompleteCloud(deps: OpenAICompatDeps, chatReq: ChatRequest): Promise<AssistantMessage | null> {
-  if (!deps.completeCloud) return null;
+async function tryCompleteCloud(deps: OpenAICompatDeps, chatReq: ChatRequest): Promise<CloudCompleteResult> {
+  if (!deps.completeCloud) return { type: "miss" };
+  const knownCloudModel = deps.cloudModelIds?.().includes(chatReq.model) ?? false;
   try {
-    return await deps.completeCloud(chatReq.model, chatRequestToPiContext(chatReq), {
+    const message = await deps.completeCloud(chatReq.model, chatRequestToPiContext(chatReq), {
       ...(chatReq.temperature != null ? { temperature: chatReq.temperature } : {}),
       ...(chatReq.maxTokens != null ? { maxTokens: chatReq.maxTokens } : {}),
     });
-  } catch {
-    return null; // 出错 → 回退引擎
+    return message ? { type: "ok", message } : { type: "miss" };
+  } catch (error) {
+    return knownCloudModel ? { type: "error", error } : { type: "miss" };
   }
 }
 
@@ -126,7 +139,7 @@ export function registerOpenAICompat(
 ): void {
   app.get("/v1/models", async () => ({
     object: "list",
-    data: registry.routedModels().map((id) => ({
+    data: [...new Set([...registry.routedModels(), ...(deps.cloudModelIds?.() ?? [])])].map((id) => ({
       id,
       object: "model",
       created: 0,
@@ -199,8 +212,9 @@ export function registerOpenAICompat(
 
     // 云端非流式 → pi-ai completeSimple（与流式同源统一鉴权/OAuth）。非云端 → null → 回退引擎。
     if (body.stream !== true) {
-      const msg = await tryCompleteCloud(deps, chatReq);
-      if (msg) return chatResponseToOpenAI(piAssistantToChatResponse(msg, chatReq.model), genId(), Math.floor(Date.now() / 1000));
+      const cloud = await tryCompleteCloud(deps, chatReq);
+      if (cloud.type === "ok") return chatResponseToOpenAI(piAssistantToChatResponse(cloud.message, chatReq.model), genId(), Math.floor(Date.now() / 1000));
+      if (cloud.type === "error") return reply.code(502).send({ error: { message: errorMessage(cloud.error) } });
     }
 
     let engine;
@@ -307,11 +321,12 @@ export function registerOpenAICompat(
 
     // 云端非流式 → pi-ai completeSimple。非云端 → null → 回退引擎。
     if (body.stream !== true) {
-      const msg = await tryCompleteCloud(deps, chatReq);
-      if (msg) {
+      const cloud = await tryCompleteCloud(deps, chatReq);
+      if (cloud.type === "ok") {
         const id = `msg_${Date.now().toString(36)}${(counter += 1).toString(36)}`;
-        return chatResponseToAnthropic(piAssistantToChatResponse(msg, chatReq.model), id, chatReq.model);
+        return chatResponseToAnthropic(piAssistantToChatResponse(cloud.message, chatReq.model), id, chatReq.model);
       }
+      if (cloud.type === "error") return reply.code(502).send({ type: "error", error: { type: "api_error", message: errorMessage(cloud.error) } });
     }
 
     let engine;

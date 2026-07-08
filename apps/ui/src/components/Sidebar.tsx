@@ -24,6 +24,8 @@ interface ThreadItem {
   channel?: { kind: ChannelKind; channelId: string };
 }
 
+const THREAD_COLLAPSE_LIMIT = 5;
+
 /** updatedAt → 紧凑相对时间（mono）。 */
 function relTime(iso: string): string {
   const t = Date.parse(iso);
@@ -33,6 +35,14 @@ function relTime(iso: string): string {
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
   return `${Math.floor(s / 86400)}d`;
+}
+
+function visibleThreadItems(items: ThreadItem[], activeId: string | undefined, expanded: boolean): ThreadItem[] {
+  if (expanded || items.length <= THREAD_COLLAPSE_LIMIT) return items;
+  const head = items.slice(0, THREAD_COLLAPSE_LIMIT);
+  if (!activeId || head.some((t) => t.id === activeId)) return head;
+  const active = items.find((t) => t.id === activeId);
+  return active ? [...items.slice(0, THREAD_COLLAPSE_LIMIT - 1), active] : head;
 }
 
 /**
@@ -84,6 +94,8 @@ export function Sidebar({
   onOpenSearch?: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [expandedChats, setExpandedChats] = useState(false);
   const isOpen = (pid: string) => (pid in collapsed ? !collapsed[pid] : pid === projectId);
   // 折叠全部 / 展开全部：任一展开 → 全折叠；否则全展开。
   const anyOpen = projects.some((p) => isOpen(p.id));
@@ -135,6 +147,10 @@ export function Sidebar({
           projects.map((p) => {
             const open = isOpen(p.id);
             const pThreads = threads.filter((t) => t.projectId === p.id && !t.channel);
+            const projectThreadsExpanded = !!expandedProjects[p.id];
+            const activeWorkId = mode === "work" && p.id === projectId ? workThreadId : undefined;
+            const visibleProjectThreads = visibleThreadItems(pThreads, activeWorkId, projectThreadsExpanded);
+            const hiddenProjectCount = pThreads.length - visibleProjectThreads.length;
             return (
               <div key={p.id} className="ad-side-group">
                 <button
@@ -178,7 +194,7 @@ export function Sidebar({
                 {open && (
                   <div className="ad-side-sub">
                     {pThreads.length === 0 && <div className="ad-side-hint sub">暂无对话</div>}
-                    {pThreads.map((t) => {
+                    {visibleProjectThreads.map((t) => {
                       const on = mode === "work" && p.id === projectId && t.id === workThreadId;
                       return (
                         <button
@@ -196,6 +212,14 @@ export function Sidebar({
                         </button>
                       );
                     })}
+                    {pThreads.length > THREAD_COLLAPSE_LIMIT && (
+                      <button
+                        className="ad-list-more sub"
+                        onClick={() => setExpandedProjects((cur) => ({ ...cur, [p.id]: !projectThreadsExpanded }))}
+                      >
+                        {projectThreadsExpanded ? "收起" : `展开 ${hiddenProjectCount} 条`}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -208,24 +232,33 @@ export function Sidebar({
         {chatThreads.length === 0 ? (
           <div className="ad-side-hint">暂无聊天</div>
         ) : (
-          chatThreads.map((t) => {
-            const on = mode === "chat" && t.id === threadId;
-            return (
-              <button
-                key={t.id}
-                className={`ad-task ${on ? "on" : ""}`}
-                onClick={() => onSelectThread(t.id)}
-                title={t.title}
-              >
-                <span className={`ad-task-dot ${on ? "run" : ""}`} />
-                <span className="ad-task-name">{t.title || "新会话"}</span>
-                <span className="ad-task-time">{relTime(t.updatedAt)}</span>
-                <span className="ad-task-del" title="删除" onClick={(e) => onDelThread(t.id, e)}>
-                  <TrashIcon size={13} />
-                </span>
+          <>
+            {visibleThreadItems(chatThreads, mode === "chat" ? threadId : undefined, expandedChats).map((t) => {
+              const on = mode === "chat" && t.id === threadId;
+              return (
+                <button
+                  key={t.id}
+                  className={`ad-task ${on ? "on" : ""}`}
+                  onClick={() => onSelectThread(t.id)}
+                  title={t.title}
+                >
+                  <span className={`ad-task-dot ${on ? "run" : ""}`} />
+                  <span className="ad-task-name">{t.title || "新会话"}</span>
+                  <span className="ad-task-time">{relTime(t.updatedAt)}</span>
+                  <span className="ad-task-del" title="删除" onClick={(e) => onDelThread(t.id, e)}>
+                    <TrashIcon size={13} />
+                  </span>
+                </button>
+              );
+            })}
+            {chatThreads.length > THREAD_COLLAPSE_LIMIT && (
+              <button className="ad-list-more" onClick={() => setExpandedChats((v) => !v)}>
+                {expandedChats
+                  ? "收起"
+                  : `展开 ${chatThreads.length - visibleThreadItems(chatThreads, mode === "chat" ? threadId : undefined, false).length} 条`}
               </button>
-            );
-          })
+            )}
+          </>
         )}
       </div>
 

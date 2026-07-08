@@ -4,8 +4,25 @@ import { getClient } from "../lib/client.js";
 import { loadDisabledSkills, saveDisabledSkills } from "../lib/prefs.js";
 import { SparkIcon, FolderIcon, PlusIcon, ArrowLeftIcon, CheckIcon, XIcon } from "../icons.js";
 
+function skillSourceLabel(dir: string): string {
+  const normalized = dir.replace(/\\/g, "/");
+  if (normalized.includes("/.codex/plugins/cache/")) return "Codex 插件";
+  if (normalized.includes("/.codex/skills/.system/")) return "Codex 系统";
+  if (normalized.includes("/.codex/skills/")) return "Codex";
+  if (normalized.includes("/.agents/skills/")) return "Agents";
+  return "应用目录";
+}
+
+function shortPath(p: string): string {
+  const normalized = p.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length <= 2) return normalized;
+  return `…/${parts.slice(-2).join("/")}`;
+}
+
 export function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [skillsDir, setSkillsDir] = useState("");
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState("");
   const [disabled, setDisabled] = useState<string[]>(() => loadDisabledSkills());
@@ -18,6 +35,7 @@ export function Skills() {
     try {
       const info = await getClient().skillsInfo();
       setSkills(info.skills);
+      setSkillsDir(info.dir);
     } catch {
       /* ignore */
     } finally {
@@ -106,7 +124,8 @@ export function Skills() {
   return (
     <div className="page skills-page">
       <div className="skills-head">
-        <p className="skills-lead">任务中 Agent 可调用的能力（来自技能目录的 SKILL.md，点卡片查看详情）。</p>
+        <p className="skills-lead">{loading ? "正在扫描技能…" : `已发现 ${skills.length} 个技能`}</p>
+        {skillsDir && <span className="set-pill ghost" title={skillsDir}>主目录 {shortPath(skillsDir)}</span>}
         <span className="bar-spacer" />
         <button className="set-btn ghost soft icon" title="打开技能目录" onClick={() => void openDir()}>
           <FolderIcon size={16} />
@@ -139,7 +158,13 @@ export function Skills() {
       )}
       {note && <div className="note">{note}</div>}
 
-      {!loading && skills.length === 0 ? null : (
+      {!loading && skills.length === 0 ? (
+        <div className="empty-models">
+          <SparkIcon size={24} />
+          <p>还没有发现技能</p>
+          <span>可以新建模板，或把带 SKILL.md 的目录放入技能目录。</span>
+        </div>
+      ) : (
       <div className="skill-list">
         {skills.map((s) => {
           const name = s.frontmatter.name;
@@ -154,6 +179,7 @@ export function Skills() {
                   {name}
                   {s.frontmatter.version && <span className="set-pill">v{s.frontmatter.version}</span>}
                   {s.scripts.length > 0 && <span className="set-pill">{s.scripts.length} 脚本</span>}
+                  <span className="set-pill ghost">{skillSourceLabel(s.dir)}</span>
                 </div>
                 <div className="skill-desc">
                   {s.frontmatter.description || s.frontmatter.whenToUse || "（无描述）"}

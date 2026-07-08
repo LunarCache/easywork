@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import hljs from "highlight.js";
+import hljs from "highlight.js/lib/common";
 import { getClient } from "../lib/client.js";
 import { resolvePreviewKind, mimeForName, extOf, langForExt, useBlobUrl, type PreviewKind, type PreviewMeta } from "../lib/preview.js";
 import { fileType } from "../lib/filetype.js";

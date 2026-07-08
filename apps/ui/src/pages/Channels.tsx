@@ -4,6 +4,7 @@ import type { FeishuRegistrationSession, WechatRegistrationSession } from "@ew/s
 import * as QRCode from "qrcode";
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "../components/ConfirmDialog.js";
+import { BrandIcon, brandKeyForChannel } from "../components/BrandIcon.js";
 import { PlusIcon, PlayIcon, StopIcon, TrashIcon, GearIcon } from "../icons.js";
 
 function kindLabel(kind: string, adapters: ChannelAdapterMeta[]): string {
@@ -344,7 +345,7 @@ export function Channels() {
                   className={editing.kind === k.kind ? "on" : ""}
                   onClick={() => switchKind(k.kind)}
                 >
-                  {k.label}
+                  <BrandIcon brand={brandKeyForChannel(k.kind)} size="sm" /> {k.label}
                 </button>
               ))}
             </div>
@@ -690,7 +691,7 @@ export function Channels() {
               : meta?.supportsWebhook ? "webhook" : "long-poll";
             return (
               <div className="mcp-card" key={c.id} data-testid={`channels-card-${c.id}`}>
-                <div className={`mcp-dot ${running ? "ok" : ""}`} />
+                <BrandIcon brand={brandKeyForChannel(c.kind)} size="lg" />
               <div className="mcp-card-body">
                 <div className="mcp-card-name">
                   <span>{c.displayName || c.id}</span>

@@ -20,7 +20,11 @@ import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, Approv
 import type { McpClientManager } from "@ew/mcp";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { LocalBackend } from "../engine/local-backend.js";
-import type { ProviderManager } from "../providers/manager.js";
+import {
+  contextWindowForModel,
+  inputModalitiesForModel,
+  type ProviderManager,
+} from "../providers/manager.js";
 import type { KnowledgeBaseStore } from "../rag/store.js";
 import {
   buildEwCustomTools,
@@ -106,6 +110,7 @@ export class SessionHost {
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
   private readonly registeredProviders = new Set<string>();
+  private readonly managedAuthProviders = new Set<string>();
   // H1：按 threadId 串行化 run（pi 会话 + 全局 subscribe 不可并发复用）。
   private readonly runChain = new Map<string, Promise<void>>();
   // 被动记忆抽取调度（宿主拥有：关闭时能在停模型前 flush、删会话时丢弃不抽、压缩不触发并发）。
@@ -154,32 +159,46 @@ export class SessionHost {
     const present = new Set<string>();
     for (const cfg of this.deps.providers.dump()) {
       present.add(cfg.id);
-      if (cfg.apiKey) this.authStorage.set(cfg.id, { type: "api_key", key: cfg.apiKey });
-      this.modelRegistry.registerProvider(cfg.id, {
-        baseUrl: cfg.baseUrl,
-        ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
-        ...(cfg.headers ? { headers: cfg.headers } : {}),
-        api: "openai-completions",
-        authHeader: true,
-        models: cfg.models.map((id) => ({
-          id,
-          name: id,
-          reasoning: false,
-          // 允许图片输入：pi 仅在用户实际附带图片时才下发；文本对话不受影响。
-          // 非视觉模型若收到图片由后端引擎报错（属用户误操作），不影响纯文本路径。
-          input: ["text", "image"] as ("text" | "image")[],
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: cfg.contextWindow ?? 32768,
-          maxTokens: 4096,
+      if (cfg.apiKey) {
+        this.authStorage.set(cfg.id, { type: "api_key", key: cfg.apiKey });
+        this.managedAuthProviders.add(cfg.id);
+      }
+      if ((cfg.kind ?? "openai-compatible") === "pi-native") {
+        if (cfg.baseUrl || cfg.headers) {
+          this.modelRegistry.registerProvider(cfg.id, {
+            ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
+            ...(cfg.headers ? { headers: cfg.headers } : {}),
+            authHeader: true,
+          });
+        }
+      } else {
+        this.modelRegistry.registerProvider(cfg.id, {
+          baseUrl: cfg.baseUrl,
+          ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
           ...(cfg.headers ? { headers: cfg.headers } : {}),
-        })),
-      });
+          api: cfg.api ?? "openai-completions",
+          authHeader: true,
+          models: cfg.modelConfigs.map((model) => ({
+            id: model.id,
+            name: model.id,
+            reasoning: false,
+            input: inputModalitiesForModel(cfg, model.id),
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: contextWindowForModel(cfg, model.id) ?? 32768,
+            maxTokens: 4096,
+            ...(cfg.headers ? { headers: cfg.headers } : {}),
+          })),
+        });
+      }
       this.registeredProviders.add(cfg.id);
     }
     for (const id of [...this.registeredProviders]) {
       if (present.has(id)) continue;
       this.modelRegistry.unregisterProvider(id);
-      this.authStorage.remove(id);
+      if (this.managedAuthProviders.has(id)) {
+        this.authStorage.remove(id);
+        this.managedAuthProviders.delete(id);
+      }
       this.registeredProviders.delete(id);
     }
   }
@@ -209,18 +228,29 @@ export class SessionHost {
     if (cfg) {
       if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
       const m = this.modelRegistry.find(cfg.id, modelId);
-      if (m) return m;
+      if (m) {
+        const ctx = contextWindowForModel(cfg, modelId);
+        return {
+          ...m,
+          ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
+          ...(ctx ? { contextWindow: ctx } : {}),
+          ...(cfg.headers ? { headers: cfg.headers } : {}),
+        };
+      }
+      if ((cfg.kind ?? "openai-compatible") === "pi-native") {
+        throw new Error(`pi_native_model_not_found: ${cfg.id}/${modelId}`);
+      }
       // registry 未命中（理论不应发生）→ 手搓兜底，带上 headers，鉴权由共享 AuthStorage 提供。
       return {
         id: modelId,
         name: modelId,
-        api: "openai-completions",
+        api: cfg.api ?? "openai-completions",
         provider: cfg.id,
-        baseUrl: cfg.baseUrl,
+        baseUrl: cfg.baseUrl ?? "",
         reasoning: false,
-        input: ["text", "image"],
+        input: inputModalitiesForModel(cfg, modelId),
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: cfg.contextWindow ?? 32768,
+        contextWindow: contextWindowForModel(cfg, modelId) ?? 32768,
         maxTokens: 4096,
         ...(cfg.headers ? { headers: cfg.headers } : {}),
       };
