@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createCipheriv, createHash } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   messageText,
   type AgentEvent,
@@ -21,6 +24,29 @@ import { ChannelAdapterRegistry } from "../src/registry.js";
 import type { ChannelAdapter, ChannelAdapterContext, SendResult } from "../src/adapter.js";
 import { FeishuChannelAdapter, calculateFeishuSignature, type FeishuSdkChannel, type FeishuSdkMessage } from "../src/feishu.js";
 import { TelegramConnector } from "../src/telegram.js";
+import { registerWechatAccount, WechatChannelAdapter } from "../src/wechat.js";
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+async function waitFor(assertion: () => void | boolean): Promise<void> {
+  let lastErr: unknown;
+  for (let i = 0; i < 40; i++) {
+    try {
+      const result = assertion();
+      if (result !== false) return;
+    } catch (err) {
+      lastErr = err;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  if (lastErr) throw lastErr;
+  throw new Error("condition not met");
+}
 
 function encryptFeishuPayload(payload: unknown, encryptKey: string): string {
   const key = createHash("sha256").update(encryptKey, "utf8").digest();
@@ -124,13 +150,19 @@ class FakeConnector implements ChannelConnector {
 describe("ConnectorHost", () => {
   it("inbound → 路由到同一大脑 → 回复 → 持久化", async () => {
     const repo = new FakeRepo();
+    const persisted: { threadId: string; role: "user" | "assistant" }[] = [];
     const run = async function* (input: AgentRunInput): AsyncIterable<AgentEvent> {
       const last = input.history[input.history.length - 1];
       const text = `echo: ${last ? messageText(last.content) : ""}`;
       yield { type: "text", text };
       yield { type: "final", message: { role: "assistant", content: text } };
     };
-    const host = new ConnectorHost({ repo, run, defaultModel: "m" });
+    const host = new ConnectorHost({
+      repo,
+      run,
+      defaultModel: "m",
+      onMessagePersisted: (info) => persisted.push({ threadId: info.threadId, role: info.role }),
+    });
     const conn = new FakeConnector();
     host.attach(conn);
 
@@ -146,6 +178,10 @@ describe("ConnectorHost", () => {
     const threads = repo.listThreads();
     expect(threads).toHaveLength(1);
     expect(repo.history(threads[0]!.id).map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(persisted).toEqual([
+      { threadId: threads[0]!.id, role: "user" },
+      { threadId: threads[0]!.id, role: "assistant" },
+    ]);
   });
 });
 
@@ -513,6 +549,187 @@ describe("FeishuChannelAdapter", () => {
     ]);
     expect(sent).toEqual({ ok: true, messageId: "om_ws" });
     expect(fakeChannel.sent).toEqual([{ to: "oc_1", input: { text: "hi" }, opts: { replyTo: "om_1" } }]);
+  });
+});
+
+describe("WechatChannelAdapter", () => {
+  it("QR registration polls iLink and returns connector credentials", async () => {
+    const seenStatuses: string[] = [];
+    let qrUrl = "";
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("get_bot_qrcode")) {
+        return jsonResponse({ qrcode: "qr-token", qrcode_img_content: "https://weixin.example/qr" });
+      }
+      if (url.includes("get_qrcode_status")) {
+        return jsonResponse({
+          status: "confirmed",
+          ilink_bot_id: "bot-1",
+          bot_token: "token-1",
+          baseurl: "https://ilink.example",
+          ilink_user_id: "wxid_me",
+        });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    };
+
+    const result = await registerWechatAccount({
+      fetch: fetchImpl,
+      timeoutMs: 2_000,
+      onQRCodeReady: (info) => {
+        qrUrl = info.url;
+      },
+      onStatusChange: (info) => {
+        seenStatuses.push(info.status);
+      },
+    });
+
+    expect(qrUrl).toBe("https://weixin.example/qr");
+    expect(seenStatuses).toEqual(["confirmed"]);
+    expect(result).toEqual({
+      accountId: "bot-1",
+      token: "token-1",
+      baseUrl: "https://ilink.example",
+      userId: "wxid_me",
+    });
+  });
+
+  it("long-polls inbound text and sends replies with stored context_token", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ew-wechat-"));
+    const inbound: InboundMessage[] = [];
+    const sendBodies: Record<string, unknown>[] = [];
+    let updates = 0;
+    let adapter: WechatChannelAdapter | undefined;
+    try {
+      const fetchImpl: typeof fetch = async (input, init) => {
+        const url = String(input);
+        if (url.includes("getupdates")) {
+          updates += 1;
+          if (updates === 1) {
+            return jsonResponse({
+              ret: 0,
+              get_updates_buf: "sync-1",
+              msgs: [{
+                message_id: "m-1",
+                from_user_id: "wxid_1",
+                to_user_id: "bot-1",
+                item_list: [{ type: 1, text_item: { text: "hello" } }],
+                context_token: "ctx-1",
+              }],
+            });
+          }
+          await new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          });
+          return jsonResponse({ ret: 0, msgs: [] });
+        }
+        if (url.includes("sendmessage")) {
+          sendBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return jsonResponse({ ret: 0 });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      };
+
+      adapter = new WechatChannelAdapter({
+        accountId: "bot-1",
+        token: "token-1",
+        stateDir,
+        fetch: fetchImpl,
+      });
+      await adapter.start({
+        config: { id: "wechat-main", kind: "wechat", enabled: true, secrets: {}, options: {}, auth: { allowAll: true } },
+        emitInbound: async (message) => {
+          inbound.push(message);
+        },
+        setStatus: () => {},
+      });
+      await waitFor(() => expect(inbound).toHaveLength(1));
+      expect(inbound[0]).toMatchObject({
+        channel: "wechat",
+        channelUserId: "wxid_1",
+        channelChatId: "wxid_1",
+        parts: [{ type: "text", text: "hello" }],
+      });
+
+      const sent = await adapter.send({ channelChatId: "wxid_1" }, { text: "hi back" });
+      expect(sent).toMatchObject({ ok: true });
+      expect(sendBodies).toHaveLength(1);
+      const msg = sendBodies[0]!.msg as Record<string, unknown>;
+      expect(msg.context_token).toBe("ctx-1");
+      expect(msg.to_user_id).toBe("wxid_1");
+    } finally {
+      await adapter?.stop();
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps repeated inbound text when WeChat provides distinct message ids", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "ew-wechat-"));
+    const inbound: InboundMessage[] = [];
+    let updates = 0;
+    let adapter: WechatChannelAdapter | undefined;
+    try {
+      const fetchImpl: typeof fetch = async (input, init) => {
+        const url = String(input);
+        if (url.includes("getupdates")) {
+          updates += 1;
+          if (updates === 1) {
+            return jsonResponse({
+              ret: 0,
+              get_updates_buf: "sync-1",
+              msgs: [
+                {
+                  message_id: "m-repeat-1",
+                  from_user_id: "wxid_1",
+                  to_user_id: "bot-1",
+                  item_list: [{ type: 1, text_item: { text: "ping" } }],
+                },
+                {
+                  message_id: "m-repeat-2",
+                  from_user_id: "wxid_1",
+                  to_user_id: "bot-1",
+                  item_list: [{ type: 1, text_item: { text: "ping" } }],
+                },
+                {
+                  message_id: "m-repeat-2",
+                  from_user_id: "wxid_1",
+                  to_user_id: "bot-1",
+                  item_list: [{ type: 1, text_item: { text: "ping" } }],
+                },
+              ],
+            });
+          }
+          await new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+          });
+          return jsonResponse({ ret: 0, msgs: [] });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      };
+
+      adapter = new WechatChannelAdapter({
+        accountId: "bot-1",
+        token: "token-1",
+        stateDir,
+        fetch: fetchImpl,
+      });
+      await adapter.start({
+        config: { id: "wechat-main", kind: "wechat", enabled: true, secrets: {}, options: {}, auth: { allowAll: true } },
+        emitInbound: async (message) => {
+          inbound.push(message);
+        },
+        setStatus: () => {},
+      });
+      await waitFor(() => expect(inbound).toHaveLength(2));
+      expect(inbound.map((message) => message.messageId)).toEqual(["m-repeat-1", "m-repeat-2"]);
+      expect(inbound.map((message) => message.parts[0])).toEqual([
+        { type: "text", text: "ping" },
+        { type: "text", text: "ping" },
+      ]);
+    } finally {
+      await adapter?.stop();
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 });
 

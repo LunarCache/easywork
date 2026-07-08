@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Project } from "@ew/shared";
+import type { ChannelKind, Project } from "@ew/shared";
 import { currentConfig, getClient, initRuntimeConfig } from "./lib/client.js";
 import { applyTheme, loadThemePrefs, saveThemePrefs, type ThemePrefs } from "./lib/prefs.js";
 import { pickWorkspaceDir, isDesktop } from "./lib/desktop.js";
@@ -11,7 +11,8 @@ import { Sidebar, type Mode } from "./components/Sidebar.js";
 import { SearchPalette } from "./components/SearchPalette.js";
 import { useConfirm } from "./components/ConfirmDialog.js";
 import { Settings } from "./pages/Settings.js";
-import { FolderTreeIcon, InboxIcon } from "./icons.js";
+import { Inbox } from "./pages/Inbox.js";
+import { FolderTreeIcon } from "./icons.js";
 import type { SettingsSection } from "./pages/Settings.js";
 
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
@@ -21,6 +22,7 @@ interface ThreadItem {
   title: string;
   updatedAt: string;
   projectId?: string;
+  channel?: { kind: ChannelKind; channelId: string };
 }
 
 const SESSION_W_KEY = "ew.sessionWidth";
@@ -258,6 +260,10 @@ export function App() {
     setFilesProjectId(pid);
     setMode("work");
   };
+  const openChannelSettings = () => {
+    setSettingsSection("channels");
+    setOverlay("settings");
+  };
   // 切换顶部模式（对话/工作区/收件箱）时退出文件浏览页。
   const changeMode = (m: Mode) => {
     setFilesProjectId(null);
@@ -409,13 +415,7 @@ export function App() {
               </div>
             ))}
           {mode === "inbox" && (
-            <div className="empty">
-              <div className="ring">
-                <InboxIcon size={28} />
-              </div>
-              <h2>收件箱</h2>
-              <p>连接 Telegram / 企业微信 / 飞书等 IM 渠道后，外部对话会汇入这里，由同一个大脑处理。</p>
-            </div>
+            <Inbox onThreadsChanged={refreshThreads} onOpenChannelSettings={openChannelSettings} />
           )}
         </main>
       </div>

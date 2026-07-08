@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChannelAdapterMeta, ChannelConfig, ChannelStatus } from "@ew/shared";
-import type { FeishuRegistrationSession } from "@ew/sdk";
+import type { FeishuRegistrationSession, WechatRegistrationSession } from "@ew/sdk";
 import * as QRCode from "qrcode";
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "../components/ConfirmDialog.js";
@@ -49,6 +49,9 @@ export function Channels() {
   const [feishuSetup, setFeishuSetup] = useState<FeishuRegistrationSession | null>(null);
   const [feishuQr, setFeishuQr] = useState("");
   const [showFeishuAdvanced, setShowFeishuAdvanced] = useState(false);
+  const [wechatSetup, setWechatSetup] = useState<WechatRegistrationSession | null>(null);
+  const [wechatQr, setWechatQr] = useState("");
+  const [showWechatAdvanced, setShowWechatAdvanced] = useState(false);
   const [note, setNote] = useState("");
   const { confirm: askConfirm, dialog: confirmDialog } = useConfirm();
 
@@ -58,6 +61,7 @@ export function Channels() {
     return map;
   }, [statuses]);
   const editingMeta = useMemo(() => (editing ? adapters.find((a) => a.kind === editing.kind) : undefined), [adapters, editing]);
+  const showPlatformSecrets = !editing || (editing.kind === "feishu" ? showFeishuAdvanced : editing.kind === "wechat" ? showWechatAdvanced : true);
 
   const refresh = useCallback(async () => {
     try {
@@ -95,6 +99,22 @@ export function Channels() {
   }, [feishuSetup?.qrUrl]);
 
   useEffect(() => {
+    let alive = true;
+    setWechatQr("");
+    if (!wechatSetup?.qrUrl) return;
+    void QRCode.toDataURL(wechatSetup.qrUrl, {
+      width: 190,
+      margin: 1,
+      color: { dark: "#0f172a", light: "#ffffff" },
+    }).then((url) => {
+      if (alive) setWechatQr(url);
+    }).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [wechatSetup?.qrUrl]);
+
+  useEffect(() => {
     if (!feishuSetup || feishuSetup.status === "completed" || feishuSetup.status === "error" || feishuSetup.status === "aborted") return;
     let stopped = false;
     const tick = async () => {
@@ -123,6 +143,35 @@ export function Channels() {
     };
   }, [feishuSetup, refresh]);
 
+  useEffect(() => {
+    if (!wechatSetup || wechatSetup.status === "completed" || wechatSetup.status === "error" || wechatSetup.status === "aborted") return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const next = await getClient().getWechatRegistration(wechatSetup.id);
+        if (stopped) return;
+        setWechatSetup(next);
+        if (next.status === "completed") {
+          setNote("WeChat 已连接");
+          setEditing(null);
+          await refresh();
+        } else if (next.status === "error") {
+          setNote(next.error || "WeChat 连接失败");
+        } else if (next.status === "aborted") {
+          setNote("已取消 WeChat 连接");
+        }
+      } catch (e) {
+        if (!stopped) setNote(e instanceof Error ? e.message : String(e));
+      }
+    };
+    const timer = window.setInterval(() => void tick(), 1500);
+    void tick();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [wechatSetup, refresh]);
+
   const startAdd = () => {
     const next = blankConfig(adapters);
     if (!next) {
@@ -131,7 +180,9 @@ export function Channels() {
     }
     setEditing(next);
     setFeishuSetup(null);
+    setWechatSetup(null);
     setShowFeishuAdvanced(false);
+    setShowWechatAdvanced(false);
     setNote("");
   };
 
@@ -189,7 +240,9 @@ export function Channels() {
       return { ...cur, id, kind, secrets: {}, options: {}, auth: cur.auth };
     });
     setFeishuSetup(null);
+    setWechatSetup(null);
     setShowFeishuAdvanced(false);
+    setShowWechatAdvanced(false);
   };
 
   const startFeishuRegistration = async () => {
@@ -220,6 +273,34 @@ export function Channels() {
     await getClient().cancelFeishuRegistration(feishuSetup.id).catch(() => {});
     setFeishuSetup(null);
     setFeishuQr("");
+  };
+
+  const startWechatRegistration = async () => {
+    if (!editing || editing.kind !== "wechat") return;
+    setBusy(editing.id);
+    setNote("");
+    setWechatSetup(null);
+    try {
+      const session = await getClient().startWechatRegistration({
+        id: editing.id,
+        displayName: editing.displayName || "WeChat",
+        enabled: editing.enabled,
+        auth: editing.auth,
+      });
+      setWechatSetup(session);
+      setNote("请用微信扫码并在手机端确认");
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const cancelWechatRegistration = async () => {
+    if (!wechatSetup) return;
+    await getClient().cancelWechatRegistration(wechatSetup.id).catch(() => {});
+    setWechatSetup(null);
+    setWechatQr("");
   };
 
   return (
@@ -347,7 +428,57 @@ export function Channels() {
               </div>
             </div>
           )}
-          {(!editing.kind || editing.kind !== "feishu" || showFeishuAdvanced) && (
+          {editing.kind === "wechat" && (
+            <div className="set-row col">
+              <div className="set-row-title">扫码连接</div>
+              <div className="set-row-desc">使用腾讯 iLink Bot API 登录个人微信 bot 身份；默认长轮询，不需要公网 webhook。</div>
+              <div className="channels-connect-panel">
+                <div className="channels-connect-main">
+                  <button
+                    className="set-btn primary"
+                    data-testid="channels-wechat-register"
+                    onClick={() => void startWechatRegistration()}
+                    disabled={busy === editing.id}
+                  >
+                    {wechatSetup ? "重新生成二维码" : "扫码连接"}
+                  </button>
+                  <button className="set-btn ghost soft" onClick={() => setShowWechatAdvanced((v) => !v)}>
+                    {showWechatAdvanced ? "收起高级配置" : "已有 iLink token / 高级配置"}
+                  </button>
+                </div>
+                {wechatSetup && (
+                  <div className="channels-qr-box" data-testid="channels-wechat-qr">
+                    {wechatQr ? <img src={wechatQr} alt="WeChat setup QR code" /> : <div className="channels-qr-placeholder" />}
+                    <div className="channels-qr-copy">
+                      <div className="set-row-title">
+                        {wechatSetup.status === "completed"
+                          ? "已连接"
+                          : wechatSetup.status === "error"
+                            ? "连接失败"
+                            : wechatSetup.status === "aborted"
+                              ? "已取消"
+                              : "等待扫码确认"}
+                      </div>
+                      <div className="set-row-desc">
+                        {wechatSetup.error || wechatSetup.statusDetail || "使用微信手机端扫描二维码；iLink bot 身份通常以私聊为主，群聊取决于腾讯侧是否投递事件。"}
+                      </div>
+                      <div className="set-row-control">
+                        {wechatSetup.qrUrl && (
+                          <a className="set-btn secondary small" href={wechatSetup.qrUrl} target="_blank" rel="noreferrer">
+                            打开链接
+                          </a>
+                        )}
+                        <button className="set-btn ghost soft small" onClick={() => void cancelWechatRegistration()}>
+                          取消
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {showPlatformSecrets && (
             <div className="set-row col">
               <div className="set-row-title">必需密钥</div>
               <div className="set-row-desc">{editingMeta?.description ?? "按平台要求填写连接器密钥。"}</div>
@@ -365,7 +496,7 @@ export function Channels() {
               </div>
             </div>
           )}
-          {!!editingMeta?.optionalSecrets?.length && (!editing.kind || editing.kind !== "feishu" || showFeishuAdvanced) && (
+          {!!editingMeta?.optionalSecrets?.length && showPlatformSecrets && (
             <div className="set-row col">
               <div className="set-row-title">可选密钥</div>
               <div className="set-row-desc">用于平台回调校验、签名或加密事件解密。</div>
@@ -440,6 +571,41 @@ export function Channels() {
               </div>
             </div>
           )}
+          {editing.kind === "wechat" && showWechatAdvanced && (
+            <div className="set-row col">
+              <div className="set-row-title">WeChat iLink 选项</div>
+              <div className="set-row-desc">扫码会自动填充 accountId / token；手动配置时需同时填写 accountId 和 iLink token。</div>
+              <div className="channels-secret-grid">
+                <input
+                  data-testid="channels-wechat-account-id"
+                  placeholder="accountId（扫码后自动保存）"
+                  value={optionText(editing.options, "accountId")}
+                  onChange={(e) => patchEditing({ options: { ...editing.options, accountId: e.target.value } })}
+                />
+                <input
+                  data-testid="channels-wechat-base-url"
+                  placeholder="baseUrl（默认 https://ilinkai.weixin.qq.com）"
+                  value={optionText(editing.options, "baseUrl")}
+                  onChange={(e) => patchEditing({ options: { ...editing.options, baseUrl: e.target.value } })}
+                />
+                <select
+                  data-testid="channels-wechat-group-policy"
+                  value={optionText(editing.options, "groupPolicy") || "disabled"}
+                  onChange={(e) => patchEditing({ options: { ...editing.options, groupPolicy: e.target.value } })}
+                >
+                  <option value="disabled">群聊关闭（推荐）</option>
+                  <option value="open">允许群聊</option>
+                  <option value="allowlist">限定群聊</option>
+                </select>
+                <input
+                  data-testid="channels-wechat-group-allowlist"
+                  placeholder="groupAllowlist（逗号分隔群聊 ID）"
+                  value={joinList(Array.isArray(editing.options.groupAllowlist) ? editing.options.groupAllowlist.map(String) : splitList(optionText(editing.options, "groupAllowlist")))}
+                  onChange={(e) => patchEditing({ options: { ...editing.options, groupAllowlist: splitList(e.target.value) } })}
+                />
+              </div>
+            </div>
+          )}
           <div className="set-row col">
             <div className="set-row-title">授权范围</div>
             <div className="set-row-control">
@@ -481,11 +647,16 @@ export function Channels() {
               <button className="set-btn ghost soft" onClick={() => {
                 setEditing(null);
                 setFeishuSetup(null);
+                setWechatSetup(null);
               }}>
                 取消
               </button>
               {editing.kind === "feishu" && !showFeishuAdvanced ? (
                 <button className="set-btn primary" onClick={() => void startFeishuRegistration()} disabled={busy === editing.id}>
+                  扫码连接
+                </button>
+              ) : editing.kind === "wechat" && !showWechatAdvanced ? (
+                <button className="set-btn primary" onClick={() => void startWechatRegistration()} disabled={busy === editing.id}>
                   扫码连接
                 </button>
               ) : (
@@ -514,6 +685,8 @@ export function Channels() {
             const running = s?.running ?? false;
             const transportLabel = c.kind === "feishu"
               ? (optionText(c.options, "transport") || "websocket")
+              : c.kind === "wechat"
+                ? "iLink"
               : meta?.supportsWebhook ? "webhook" : "long-poll";
             return (
               <div className="mcp-card" key={c.id} data-testid={`channels-card-${c.id}`}>
@@ -540,7 +713,9 @@ export function Channels() {
                   onClick={() => {
                     setEditing(c);
                     setFeishuSetup(null);
+                    setWechatSetup(null);
                     setShowFeishuAdvanced(c.kind === "feishu");
+                    setShowWechatAdvanced(c.kind === "wechat");
                   }}
                   disabled={busy === c.id}
                 >

@@ -7,7 +7,7 @@ export async function threadList(): Promise<void> {
   if (!threads.length) return out(c.dim("没有会话"));
   for (const t of threads) {
     const when = t.updatedAt.replace("T", " ").slice(0, 16);
-    const tag = t.projectId ? c.magenta(" [ws]") : "";
+    const tag = t.projectId ? c.magenta(" [ws]") : t.channel ? c.yellow(" [im]") : "";
     out(`${c.cyan(t.id.slice(0, 8))}  ${c.dim(when)}  ${t.title || c.dim("（无标题）")}${tag}`);
   }
 }
@@ -19,7 +19,7 @@ export async function threadShow(id: string | undefined): Promise<void> {
   if (!msgs.length) return out(c.dim("（空会话或 id 不存在）"));
   for (const m of msgs) {
     const text = m.parts
-      .filter((p) => p.type === "text" && p.text)
+      .filter((p): p is Extract<(typeof m.parts)[number], { type: "text" }> => p.type === "text" && !!p.text)
       .map((p) => p.text)
       .join("");
     const role =

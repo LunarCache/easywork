@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Project } from "@ew/shared";
+import type { ChannelKind, Project } from "@ew/shared";
 import { SearchIcon, NewChatIcon, FolderClosedIcon } from "../icons.js";
 
 interface ThreadItem {
@@ -7,6 +7,7 @@ interface ThreadItem {
   title: string;
   updatedAt: string;
   projectId?: string;
+  channel?: { kind: ChannelKind; channelId: string };
 }
 
 type Result =
@@ -48,6 +49,7 @@ export function SearchPalette({
       if (hit(p.name)) out.push({ kind: "project", id: p.id, title: p.name, sub: "工作区" });
     }
     for (const t of threads) {
+      if (t.channel) continue;
       const title = t.title || "新会话";
       if (t.projectId) {
         const pn = projName.get(t.projectId) ?? "工作区";

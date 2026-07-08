@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Project } from "@ew/shared";
+import type { ChannelKind, Project } from "@ew/shared";
 import {
   PlusIcon,
   NewChatIcon,
@@ -21,6 +21,7 @@ interface ThreadItem {
   title: string;
   updatedAt: string;
   projectId?: string;
+  channel?: { kind: ChannelKind; channelId: string };
 }
 
 /** updatedAt → 紧凑相对时间（mono）。 */
@@ -87,7 +88,7 @@ export function Sidebar({
   // 折叠全部 / 展开全部：任一展开 → 全折叠；否则全展开。
   const anyOpen = projects.some((p) => isOpen(p.id));
   const toggleAll = () => setCollapsed(Object.fromEntries(projects.map((p) => [p.id, anyOpen])));
-  const chatThreads = threads.filter((t) => !t.projectId);
+  const chatThreads = threads.filter((t) => !t.projectId && !t.channel);
 
   return (
     <div className="ad-side">
@@ -133,7 +134,7 @@ export function Sidebar({
         ) : (
           projects.map((p) => {
             const open = isOpen(p.id);
-            const pThreads = threads.filter((t) => t.projectId === p.id);
+            const pThreads = threads.filter((t) => t.projectId === p.id && !t.channel);
             return (
               <div key={p.id} className="ad-side-group">
                 <button

@@ -37,7 +37,7 @@ packages/
   tools/          @ew/tools         内置工具 + SSRF 防护
   skills/         @ew/skills        Skills 发现 / 渐进披露 / 执行
   mcp/            @ew/mcp           MCP client（stdio + HTTP）
-  im-connectors/  @ew/im-connectors Channel Gateway + adapter registry（Telegram long-poll；Feishu/Lark WebSocket 默认 + webhook 高级模式；Discord / WeCom 规划中）
+  im-connectors/  @ew/im-connectors Channel Gateway + adapter registry（Telegram long-poll；Feishu/Lark WebSocket 默认 + webhook 高级模式；WeChat iLink QR + long-poll；Discord / WeCom 规划中）
   sdk/            @ew/sdk           daemon HTTP API 的类型化客户端
 apps/
   desktop/        @ew/desktop       Tauri 2 外壳（Rust src-tauri）+ sidecar 启动 daemon
@@ -52,11 +52,11 @@ apps/
 外部 IM 不直接调用 `SessionHost`。`@ew/im-connectors` 提供小接口的 **Channel Gateway**：
 
 - `ChannelAdapter`：平台实现的 seam，负责 `start/stop/send/handleWebhook?`，并把平台消息归一成 `InboundMessage`。
-- `ChannelAdapterRegistry`：注册平台 adapter；当前内置 Telegram 与 Feishu/Lark，后续 Discord gateway、WeCom callback 都挂这里。
+- `ChannelAdapterRegistry`：注册平台 adapter；当前内置 Telegram、Feishu/Lark 与 WeChat iLink，后续 Discord gateway、WeCom callback 都挂这里。
 - `ChannelGateway`：托管配置、状态、生命周期、allowlist 鉴权、webhook 分发和出站 `ChannelTarget` 透传。
 - `ConnectorHost`：唯一把入站消息接到同一个大脑的宿主层，负责 `resolveThreadForChannel`、载历史、调用 `SessionHost.run`、把 `AgentEvent` 聚合为 IM 回复并落库。
 
-`@ew/core` 暴露管理面：`GET /im/adapters`、`GET/POST/DELETE /im/connectors`、`POST /im/connectors/:id/start|stop`，这些都走 daemon Bearer 鉴权。Feishu/Lark 另有 `POST/GET/DELETE /im/feishu/register` 扫码注册 helper：core 启动 SDK registerApp 短会话，二维码确认成功后自动保存 `transport:websocket` 连接器并按需启动；取消或 core stop 会 abort 未完成扫码会话，避免取消后落库。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。Core 只针对 webhook 捕获 raw body 供签名校验，并在读取前/读取中执行 32MiB 上限。Feishu/Lark adapter 的高级 webhook 模式负责 URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化和文本回复；非 `transport:webhook` 或未配置 `verificationToken`/`encryptKey` 时拒绝 public webhook。渠道配置先落 SQLite settings；平台 secret 目前随配置存储，后续可在不改 adapter seam 的情况下迁到 keychain/secret ref。
+`@ew/core` 暴露管理面：`GET /im/adapters`、`GET/POST/DELETE /im/connectors`、`POST /im/connectors/:id/start|stop`，这些都走 daemon Bearer 鉴权。Feishu/Lark 另有 `POST/GET/DELETE /im/feishu/register` 扫码注册 helper：core 启动 SDK registerApp 短会话，二维码确认成功后自动保存 `transport:websocket` 连接器并按需启动；取消或 core stop 会 abort 未完成扫码会话，避免取消后落库。`GET /inbox/threads` 是给桌面收件箱的只读读模型：从 `ConversationRepo` 里筛选 `thread.channel`，聚合最后一条文本消息和消息数，不引入第二套 IM 消息表；`GET /inbox/events` 是 Bearer 鉴权的 SSE 失效通知，只发 `ready/changed`，消息正文仍通过 read model 读取。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。Core 只针对 webhook 捕获 raw body 供签名校验，并在读取前/读取中执行 32MiB 上限。Feishu/Lark adapter 的高级 webhook 模式负责 URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化和文本回复；非 `transport:webhook` 或未配置 `verificationToken`/`encryptKey` 时拒绝 public webhook。渠道配置先落 SQLite settings；平台 secret 目前随配置存储，后续可在不改 adapter seam 的情况下迁到 keychain/secret ref。
 
 ## 技术栈
 

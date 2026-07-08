@@ -7,8 +7,10 @@ import type {
   EngineCapabilities,
   GGUFVariant,
   HFModelSummary,
+  InboxEvent,
   LocalLoadOptions,
   LocalModel,
+  ChannelKind,
   ChannelAdapterMeta,
   ChannelConfig,
   ChannelStatus,
@@ -19,10 +21,12 @@ import type {
   Project,
   SamplingParams,
   Skill,
+  StoredMessage,
+  Thread,
   ThinkLevel,
 } from "@ew/shared";
 
-export type { Project, ApprovalMode, ChannelAdapterMeta, ChannelConfig, ChannelStatus } from "@ew/shared";
+export type { Project, ApprovalMode, ChannelAdapterMeta, ChannelConfig, ChannelStatus, Thread, StoredMessage, InboxEvent } from "@ew/shared";
 
 /** 工作区文件树条目。 */
 export interface WsEntry {
@@ -120,6 +124,22 @@ export interface ChannelConnectorsInfo {
   status: ChannelStatus[];
 }
 
+export interface InboxThread {
+  id: string;
+  title: string;
+  channel: { kind: ChannelKind; channelId: string };
+  projectId?: string;
+  modelId: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  lastMessage?: {
+    role: string;
+    text: string;
+    createdAt: string;
+  };
+}
+
 export interface FeishuRegistrationSession {
   id: string;
   connectorId: string;
@@ -138,6 +158,26 @@ export interface StartFeishuRegistrationInput {
   displayName?: string;
   enabled?: boolean;
   region?: "feishu" | "lark";
+  auth?: ChannelConfig["auth"];
+}
+
+export interface WechatRegistrationSession {
+  id: string;
+  connectorId: string;
+  displayName?: string;
+  status: "initializing" | "waiting" | "completed" | "error" | "aborted";
+  createdAt: string;
+  qrUrl?: string;
+  expireAt?: string;
+  statusDetail?: string;
+  error?: string;
+  channelStatus?: ChannelStatus;
+}
+
+export interface StartWechatRegistrationInput {
+  id?: string;
+  displayName?: string;
+  enabled?: boolean;
   auth?: ChannelConfig["auth"];
 }
 
@@ -214,6 +254,38 @@ export class EasyWorkClient {
         if (!line.trim()) continue;
         try {
           yield JSON.parse(line) as T;
+        } catch {
+          /* 忽略坏帧 */
+        }
+      }
+    }
+  }
+
+  private async *streamSSEGet<T>(path: string, init?: { signal?: AbortSignal }): AsyncIterable<T> {
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      headers: this.headers(),
+      signal: init?.signal,
+    });
+    if (!res.ok || !res.body) {
+      throw new Error(`GET ${path} failed: ${res.status} ${await res.text().catch(() => "")}`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const line = frame.split(/\r?\n/).find((item) => item.startsWith("data:"));
+        const data = line?.replace(/^data:\s?/, "") ?? "";
+        if (data === "[DONE]") return;
+        if (!data.trim()) continue;
+        try {
+          yield JSON.parse(data) as T;
         } catch {
           /* 忽略坏帧 */
         }
@@ -366,6 +438,25 @@ export class EasyWorkClient {
 
   async cancelFeishuRegistration(id: string): Promise<void> {
     await this.fetchImpl(`${this.baseUrl}/im/feishu/register/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+  }
+
+  async startWechatRegistration(input: StartWechatRegistrationInput = {}): Promise<WechatRegistrationSession> {
+    const { session } = await this.postJSON<{ session: WechatRegistrationSession }>("/im/wechat/register", input);
+    return session;
+  }
+
+  async getWechatRegistration(id: string): Promise<WechatRegistrationSession> {
+    const { session } = await this.getJSON<{ session: WechatRegistrationSession }>(
+      `/im/wechat/register/${encodeURIComponent(id)}`,
+    );
+    return session;
+  }
+
+  async cancelWechatRegistration(id: string): Promise<void> {
+    await this.fetchImpl(`${this.baseUrl}/im/wechat/register/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers: this.headers(),
     });
@@ -541,12 +632,21 @@ export class EasyWorkClient {
 
   async listThreads(
     filter?: { projectId?: string },
-  ): Promise<{ id: string; title: string; updatedAt: string; projectId?: string }[]> {
+  ): Promise<Thread[]> {
     const qs = filter?.projectId ? `?projectId=${encodeURIComponent(filter.projectId)}` : "";
     const { threads } = await this.getJSON<{
-      threads: { id: string; title: string; updatedAt: string; projectId?: string }[];
+      threads: Thread[];
     }>(`/threads${qs}`);
     return threads;
+  }
+
+  async listInboxThreads(): Promise<InboxThread[]> {
+    const { threads } = await this.getJSON<{ threads: InboxThread[] }>("/inbox/threads");
+    return threads;
+  }
+
+  inboxEvents(init?: { signal?: AbortSignal }): AsyncIterable<InboxEvent> {
+    return this.streamSSEGet<InboxEvent>("/inbox/events", init);
   }
 
   async deleteThread(id: string): Promise<void> {
@@ -556,22 +656,8 @@ export class EasyWorkClient {
     });
   }
 
-  async threadMessages(id: string): Promise<
-    {
-      role: string;
-      parts: { type: string; text?: string; mimeType?: string; data?: string }[];
-      toolCalls?: { id: string; name: string; arguments: string }[];
-      toolResults?: { content: unknown; isError?: boolean; display?: unknown }[];
-    }[]
-  > {
-    const { messages } = await this.getJSON<{
-      messages: {
-        role: string;
-        parts: { type: string; text?: string; mimeType?: string; data?: string }[];
-        toolCalls?: { id: string; name: string; arguments: string }[];
-        toolResults?: { content: unknown; isError?: boolean; display?: unknown }[];
-      }[];
-    }>(`/threads/${encodeURIComponent(id)}/messages`);
+  async threadMessages(id: string): Promise<StoredMessage[]> {
+    const { messages } = await this.getJSON<{ messages: StoredMessage[] }>(`/threads/${encodeURIComponent(id)}/messages`);
     return messages;
   }
 

@@ -6,7 +6,7 @@
 
 纯推理（无训练 / 微调）的跨平台本地 AI 工作台
 
-**本地 GGUF / 云端 OpenAI-兼容模型** · **Agent 工具**（内置 / Skills / MCP）· **知识库 RAG** · **可插拔记忆** · 应用内聊天 + 外部 IM（Telegram / Feishu / Lark）
+**本地 GGUF / 云端 OpenAI-兼容模型** · **Agent 工具**（内置 / Skills / MCP）· **知识库 RAG** · **可插拔记忆** · 应用内聊天 + 外部 IM（Telegram / Feishu / Lark / WeChat）
 
 TypeScript 全栈 · Linux / macOS / Windows · Agent 内核 = 托管 [pi-coding-agent](https://github.com/earendil-works/pi)
 
@@ -24,7 +24,7 @@ curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh
 - **Agent 内核**：托管 [pi-coding-agent](https://github.com/earendil-works/pi)，自带编码工具 + 自动 compaction；4 档工具审批 + 工作区路径限定；内置工具 / Skills / MCP。
 - **工作区 + 聊天**：本地项目目录读写文件 / 跑命令（git 审查），或隔离的每会话工件目录；右侧常驻「工作台」面板（启动菜单：改动 / 文件 / 浏览器 / 终端）。
 - **知识库 RAG + 可插拔记忆**：sqlite-vec 语义 ⊕ 词法混合召回；记忆作用域化 + 渐进式披露 + 批量抽取。
-- **外部渠道连接器**：Channel Gateway 统一接入 Telegram long-poll 与 Feishu/Lark；Feishu/Lark 默认走官方 SDK WebSocket 长连接和扫码创建应用，高级 webhook 模式强制平台 token/signature 校验。
+- **外部渠道连接器**：Channel Gateway 统一接入 Telegram long-poll、Feishu/Lark 与个人微信 WeChat；Feishu/Lark 默认走官方 SDK WebSocket 长连接和扫码创建应用，高级 webhook 模式强制平台 token/signature 校验；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll；桌面收件箱按渠道联系人聚合外部消息。
 - **多协议网关**：`/v1`（OpenAI）+ `/v1/messages`（Anthropic），可让 Claude Code 等外部客户端直接指向。
 - **桌面 UI**：Tauri 2 + React 的 "Agent Tasks" 工作台（IDE/终端味 · 明暗双主题 · 展开式侧栏 + 整页设置〔模型/知识库/Skills/MCP/记忆 内嵌〕+ 行内工具调用）。
 
@@ -75,10 +75,10 @@ easywork status / stop         # daemon 状态 / 停止
 ```bash
 npm install            # 安装依赖
 npm run build          # turbo 构建全部包
-npm test               # vitest（229 通过；另 1 个真机 e2e 默认 skip）  ·  npm run typecheck  ·  npm run lint
+npm test               # vitest（235 通过；另 1 个真机 e2e 默认 skip）  ·  npm run typecheck  ·  npm run lint
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
-npm run test:e2e       # Playwright UI e2e：隔离 data dir + 真 daemon + 真 Vite UI（CI 跑这层，当前 14 条）
+npm run test:e2e       # Playwright UI e2e：隔离 data dir + 真 daemon + 真 Vite UI（CI 跑这层，当前 15 条）
 
 npm run dev:daemon     # 仅起 daemon（stdout 首行打印 {baseUrl, token, pid}）
 npm run dev:ui         # 起 Vite；浏览器连 daemon：http://localhost:5173/?baseUrl=<daemon>&token=<token>
@@ -88,7 +88,7 @@ node scripts/build-daemon-sea.mjs          # daemon → 单文件二进制（Nod
 npm run app:build --workspace @ew/desktop  # 出 macOS dmg + .app
 ```
 
-> 当前 Playwright UI e2e 已覆盖：设置页状态与主入口、Chat / Workspace 共享 composer（含图片上传）、全局搜索与工作区切换、文件页与记忆 CRUD、知识库管理、Skills 模板与详情。
+> 当前 Playwright UI e2e 已覆盖：设置页状态与主入口、Chat / Workspace 共享 composer（含图片上传）、全局搜索与工作区切换、标题栏 Tauri 拖拽区、文件页与记忆 CRUD、知识库管理、Skills 模板与详情。
 
 > 另保留一个依赖本地 `llama` + 真实 GGUF 的 core 真机 smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`。这层默认不进 CI，主要用于本地/发布前验证真实 runtime。
 

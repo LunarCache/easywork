@@ -41,35 +41,40 @@ export function Titlebar({
       <div
         className={`ad-tb-seg-a ${sidebarOpen ? "bordered" : ""} ${isDesktop ? "desktop" : ""}`}
         style={sidebarOpen ? { width: sidebarWidth } : undefined}
+        data-tauri-drag-region
       >
         <button className="ad-tb-nav" title="折叠/展开侧栏" onClick={onToggleSidebar}>
           <PanelIcon size={16} />
         </button>
-        <button className="ad-tb-nav muted" title="后退" disabled>
-          <ArrowLeftIcon size={16} />
-        </button>
-        <button className="ad-tb-nav muted" title="前进" disabled>
-          <ChevronIcon size={16} />
-        </button>
+        <span className="ad-tb-nav ad-tb-nav-static muted" title="后退" aria-hidden="true" data-tauri-drag-region>
+          <ArrowLeftIcon size={16} data-tauri-drag-region />
+        </span>
+        <span className="ad-tb-nav ad-tb-nav-static muted" title="前进" aria-hidden="true" data-tauri-drag-region>
+          <ChevronIcon size={16} data-tauri-drag-region />
+        </span>
       </div>
 
-      <div className="ad-tb-seg-b">
-        <span className="ad-tb-task" title={taskTitle}>
+      <div className="ad-tb-seg-b" data-tauri-drag-region>
+        <span className="ad-tb-task" title={taskTitle} data-tauri-drag-region>
           {taskTitle || "新任务"}
         </span>
         {projectName && (
-          <span className="ad-tb-pill" title={projectName}>
-            <FolderClosedIcon size={13} />
-            <span className="mono">{projectName}</span>
+          <span className="ad-tb-pill" title={projectName} data-tauri-drag-region>
+            <FolderClosedIcon size={13} data-tauri-drag-region />
+            <span className="mono" data-tauri-drag-region>
+              {projectName}
+            </span>
           </span>
         )}
         {branch && (
-          <span className="ad-tb-pill" title={branch}>
-            <GitBranchIcon size={13} />
-            <span className="mono">{branch}</span>
+          <span className="ad-tb-pill" title={branch} data-tauri-drag-region>
+            <GitBranchIcon size={13} data-tauri-drag-region />
+            <span className="mono" data-tauri-drag-region>
+              {branch}
+            </span>
           </span>
         )}
-        <span className="ad-spacer" />
+        <span className="ad-spacer" data-tauri-drag-region />
         {showDock && (
           <button
             className={`ad-tb-dock ${dockOpen ? "on" : ""}`}

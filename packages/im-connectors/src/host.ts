@@ -20,6 +20,12 @@ export interface ConnectorHostDeps {
   defaultModel: string;
   /** 是否持久化消息（默认 true）。 */
   persist?: boolean;
+  /** 消息落库后通知宿主刷新 read model（例如桌面收件箱）。 */
+  onMessagePersisted?(info: {
+    threadId: string;
+    channel: { kind: InboundMessage["channel"]; channelId: string };
+    role: "user" | "assistant";
+  }): void;
 }
 
 export interface ReplyAdapter {
@@ -75,6 +81,11 @@ export class ConnectorHost {
         createdAt: new Date().toISOString(),
       };
       this.deps.repo.appendMessage(userMsg);
+      this.deps.onMessagePersisted?.({
+        threadId: thread.id,
+        channel: thread.channel ?? { kind: msg.channel, channelId: msg.channelUserId },
+        role: "user",
+      });
     }
 
     // 运行 agent，把事件转成出站分块。
@@ -111,6 +122,11 @@ export class ConnectorHost {
         createdAt: new Date().toISOString(),
       };
       this.deps.repo.appendMessage(asstMsg);
+      this.deps.onMessagePersisted?.({
+        threadId: thread.id,
+        channel: thread.channel ?? { kind: msg.channel, channelId: msg.channelUserId },
+        role: "assistant",
+      });
     }
   }
 }

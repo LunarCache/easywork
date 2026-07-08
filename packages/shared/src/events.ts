@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ChatMessageSchema, ToolCallSchema } from "./message.js";
 import { ToolResultSchema } from "./tool.js";
 import { UsageSchema } from "./provider.js";
+import { ChannelKindSchema } from "./im.js";
 
 /**
  * Agent 运行对外发出的事件（agent loop → UI / IM 连接器 / SSE）。
@@ -47,6 +48,19 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("error"), message: z.string() }),
 ]);
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
+
+/** 收件箱轻量失效事件：只通知客户端重新读取对应 read model，不承载消息正文。 */
+export const InboxEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("ready"), at: z.string() }),
+  z.object({
+    type: z.literal("changed"),
+    reason: z.enum(["message", "status", "connector"]),
+    at: z.string(),
+    threadId: z.string().optional(),
+    channel: z.object({ kind: ChannelKindSchema, channelId: z.string() }).optional(),
+  }),
+]);
+export type InboxEvent = z.infer<typeof InboxEventSchema>;
 
 /** 思考档位（对外 4 档；映射到 pi 的 ThinkingLevel off/low/medium/high）。 */
 export const ThinkLevelSchema = z.enum(["off", "low", "medium", "high"]);

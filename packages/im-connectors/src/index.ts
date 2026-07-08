@@ -1,5 +1,5 @@
 // @ew/im-connectors — 渠道连接器抽象 + 宿主路由 + 具体连接器。
-// 已实现：Telegram（HTTP long-poll）、Feishu/Lark（WebSocket 默认 + webhook 高级模式）。
+// 已实现：Telegram（HTTP long-poll）、Feishu/Lark（WebSocket 默认 + webhook 高级模式）、WeChat（iLink QR + long-poll）。
 export type {
   ChannelAdapter,
   ChannelAdapterContext,
@@ -29,3 +29,11 @@ export {
   telegramAdapterEntry,
   type TelegramOptions,
 } from "./telegram.js";
+export {
+  WechatChannelAdapter,
+  registerWechatAccount,
+  wechatAdapterEntry,
+  type WechatOptions,
+  type WechatRegistrationOptions,
+  type WechatRegistrationResult,
+} from "./wechat.js";

@@ -1,6 +1,7 @@
 import type { ChannelAdapterEntry } from "./adapter.js";
 import { feishuAdapterEntry } from "./feishu.js";
 import { telegramAdapterEntry } from "./telegram.js";
+import { wechatAdapterEntry } from "./wechat.js";
 
 export class ChannelAdapterRegistry {
   private readonly entries = new Map<string, ChannelAdapterEntry>();
@@ -23,5 +24,6 @@ export const channelAdapterRegistry = new ChannelAdapterRegistry();
 export function registerBuiltInChannelAdapters(registry: ChannelAdapterRegistry = channelAdapterRegistry): ChannelAdapterRegistry {
   registry.register(telegramAdapterEntry);
   registry.register(feishuAdapterEntry);
+  registry.register(wechatAdapterEntry);
   return registry;
 }

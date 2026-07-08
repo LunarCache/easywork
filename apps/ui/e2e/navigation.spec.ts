@@ -1,6 +1,20 @@
 import { test, expect } from "./fixtures.js";
 
 test.describe("navigation e2e", () => {
+  test("标题栏非交互区域都声明为 Tauri 拖拽区", async ({ page, openApp }) => {
+    await openApp();
+
+    await expect(page.locator(".ad-titlebar")).toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.locator(".ad-tb-seg-a")).toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.locator(".ad-tb-seg-b")).toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.locator(".ad-tb-task")).toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.locator(".ad-spacer").first()).toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.locator("button.ad-tb-nav")).toHaveCount(1);
+    await expect(page.locator("button.ad-tb-nav")).not.toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.locator(".ad-tb-nav-static")).toHaveCount(2);
+    await expect(page.locator(".ad-tb-nav-static").first()).toHaveAttribute("data-tauri-drag-region", "true");
+  });
+
   test("全局搜索可通过快捷键打开并切换到目标工作区", async ({ page, openApp, client, workspaceDir }) => {
     const alpha = await client.createProject({ name: "Alpha Search Workspace", workspaceDir });
     const beta = await client.createProject({ name: "Beta Search Workspace", workspaceDir });

@@ -23,6 +23,7 @@ import {
   isWorkspaceScope,
   type AgentEvent,
   type ContentPart,
+  type InboxEvent,
   ChannelConfigSchema,
   type ChannelConfig,
   type ChannelStatus,
@@ -39,6 +40,7 @@ import {
   ChannelAdapterRegistry,
   registerBuiltInChannelAdapters,
   registerFeishuApp,
+  registerWechatAccount,
   type WebhookRequest,
   type WebhookResult,
 } from "@ew/im-connectors";
@@ -110,6 +112,8 @@ export interface CreateCoreOptions {
   fetch?: typeof fetch;
   /** 覆盖 Feishu/Lark 扫码注册（测试用，避免真实外网轮询）。 */
   feishuRegister?: typeof registerFeishuApp;
+  /** 覆盖 WeChat/iLink 扫码注册（测试用，避免真实外网轮询）。 */
+  wechatRegister?: typeof registerWechatAccount;
   /** 统一 `llama`（llama.app）可执行文件路径（默认走 PATH 中的 "llama"）。 */
   llamaBinPath?: string;
 }
@@ -140,6 +144,13 @@ const FeishuSetupSchema = z.object({
   auth: ChannelConfigSchema.shape.auth.optional(),
 });
 
+const WechatSetupSchema = z.object({
+  id: z.string().optional(),
+  displayName: z.string().optional(),
+  enabled: z.boolean().default(true),
+  auth: ChannelConfigSchema.shape.auth.optional(),
+});
+
 type RawBodyRequest = FastifyRequest & { rawBody?: Buffer };
 
 type FeishuSetupStatus = "initializing" | "waiting" | "completed" | "error" | "aborted";
@@ -149,6 +160,22 @@ interface FeishuSetupSession {
   connectorId: string;
   displayName?: string;
   status: FeishuSetupStatus;
+  createdAt: string;
+  qrUrl?: string;
+  expireAt?: string;
+  statusDetail?: string;
+  error?: string;
+  channelStatus?: ChannelStatus;
+  abort: AbortController;
+}
+
+type WechatSetupStatus = "initializing" | "waiting" | "completed" | "error" | "aborted";
+
+interface WechatSetupSession {
+  id: string;
+  connectorId: string;
+  displayName?: string;
+  status: WechatSetupStatus;
   createdAt: string;
   qrUrl?: string;
   expireAt?: string;
@@ -309,9 +336,22 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     if (first) return first;
     throw new Error("no_model_available");
   };
+  const inboxSubscribers = new Set<(event: InboxEvent) => void>();
+  const emitInboxChanged = (patch: Omit<Extract<InboxEvent, { type: "changed" }>, "type" | "at">): void => {
+    if (!inboxSubscribers.size) return;
+    const event: InboxEvent = { type: "changed", at: new Date().toISOString(), ...patch };
+    for (const send of [...inboxSubscribers]) send(event);
+  };
   const connectorHost = new ConnectorHost({
     repo,
     defaultModel: "",
+    onMessagePersisted: (info) => {
+      emitInboxChanged({
+        reason: "message",
+        threadId: info.threadId,
+        channel: info.channel,
+      });
+    },
     run: (input) => {
       const modelId = resolveChannelModel(input.model);
       const last = input.history[input.history.length - 1];
@@ -357,6 +397,22 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   });
   const scheduleFeishuSetupCleanup = (id: string): void => {
     setTimeout(() => feishuSetupSessions.delete(id), 10 * 60 * 1000).unref?.();
+  };
+  const wechatSetupSessions = new Map<string, WechatSetupSession>();
+  const serializeWechatSetup = (session: WechatSetupSession) => ({
+    id: session.id,
+    connectorId: session.connectorId,
+    ...(session.displayName ? { displayName: session.displayName } : {}),
+    status: session.status,
+    createdAt: session.createdAt,
+    ...(session.qrUrl ? { qrUrl: session.qrUrl } : {}),
+    ...(session.expireAt ? { expireAt: session.expireAt } : {}),
+    ...(session.statusDetail ? { statusDetail: session.statusDetail } : {}),
+    ...(session.error ? { error: session.error } : {}),
+    ...(session.channelStatus ? { channelStatus: session.channelStatus } : {}),
+  });
+  const scheduleWechatSetupCleanup = (id: string): void => {
+    setTimeout(() => wechatSetupSessions.delete(id), 10 * 60 * 1000).unref?.();
   };
 
   const DEFAULT_EMBED_REPO = "nomic-ai/nomic-embed-text-v1.5-GGUF";
@@ -716,6 +772,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       let status = await channels.upsert(config);
       persistChannels();
       if (config.enabled) status = await channels.start(config.id);
+      emitInboxChanged({ reason: "connector" });
       session.status = "completed";
       session.channelStatus = status;
       scheduleFeishuSetupCleanup(sessionId);
@@ -749,6 +806,100 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     return { ok: true };
   });
 
+  app.post("/im/wechat/register", async (req, reply) => {
+    const parsed = WechatSetupSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_wechat_setup", detail: parsed.error.format() });
+    }
+
+    const sessionId = crypto.randomUUID();
+    const connectorId = parsed.data.id?.trim() || `wechat-${sessionId.slice(0, 8)}`;
+    const abort = new AbortController();
+    const session: WechatSetupSession = {
+      id: sessionId,
+      connectorId,
+      ...(parsed.data.displayName ? { displayName: parsed.data.displayName } : {}),
+      status: "initializing",
+      createdAt: new Date().toISOString(),
+      abort,
+    };
+    wechatSetupSessions.set(sessionId, session);
+
+    let resolveQr: (() => void) | undefined;
+    let rejectQr: ((err: Error) => void) | undefined;
+    const qrReady = new Promise<void>((resolve, reject) => {
+      resolveQr = resolve;
+      rejectQr = reject;
+    });
+
+    void (opts.wechatRegister ?? registerWechatAccount)({
+      signal: abort.signal,
+      onQRCodeReady: (info) => {
+        session.status = "waiting";
+        session.qrUrl = info.url;
+        session.expireAt = new Date(Date.now() + info.expireIn * 1000).toISOString();
+        resolveQr?.();
+      },
+      onStatusChange: (info) => {
+        session.statusDetail = info.status;
+      },
+    }).then(async (result) => {
+      if (abort.signal.aborted || session.status === "aborted") {
+        session.status = "aborted";
+        scheduleWechatSetupCleanup(sessionId);
+        return;
+      }
+      const config: ChannelConfig = {
+        id: connectorId,
+        kind: "wechat",
+        enabled: parsed.data.enabled,
+        ...(parsed.data.displayName ? { displayName: parsed.data.displayName } : {}),
+        secrets: { token: result.token },
+        options: {
+          accountId: result.accountId,
+          baseUrl: result.baseUrl,
+          ...(result.userId ? { userId: result.userId } : {}),
+          groupPolicy: "disabled",
+        },
+        auth: parsed.data.auth ?? { allowAll: true },
+      };
+      let status = await channels.upsert(config);
+      persistChannels();
+      if (config.enabled) status = await channels.start(config.id);
+      emitInboxChanged({ reason: "connector" });
+      session.status = "completed";
+      session.channelStatus = status;
+      scheduleWechatSetupCleanup(sessionId);
+    }).catch((err) => {
+      session.status = abort.signal.aborted ? "aborted" : "error";
+      session.error = err instanceof Error ? err.message : String(err);
+      rejectQr?.(err instanceof Error ? err : new Error(String(err)));
+      scheduleWechatSetupCleanup(sessionId);
+    });
+
+    await Promise.race([
+      qrReady.catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, 10_000)),
+    ]);
+    return { session: serializeWechatSetup(session) };
+  });
+
+  app.get("/im/wechat/register/:id", async (req, reply) => {
+    const session = wechatSetupSessions.get((req.params as { id: string }).id);
+    if (!session) return reply.code(404).send({ error: "unknown_wechat_setup" });
+    return { session: serializeWechatSetup(session) };
+  });
+
+  app.delete("/im/wechat/register/:id", async (req) => {
+    const session = wechatSetupSessions.get((req.params as { id: string }).id);
+    if (session && (session.status === "initializing" || session.status === "waiting")) {
+      session.abort.abort();
+      session.status = "aborted";
+      scheduleWechatSetupCleanup(session.id);
+    }
+    return { ok: true };
+  });
+
   app.get("/im/adapters", async () => ({ adapters: channels.metas() }));
 
   app.get("/im/connectors", async () => ({
@@ -765,6 +916,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       let status = await channels.upsert(parsed.data);
       persistChannels();
       if (parsed.data.enabled) status = await channels.start(parsed.data.id);
+      emitInboxChanged({ reason: "connector" });
       return { ok: true, status };
     } catch (err) {
       return reply.code(400).send({ error: "channel_config_failed", message: err instanceof Error ? err.message : String(err) });
@@ -773,7 +925,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
 
   app.post("/im/connectors/:id/start", async (req, reply) => {
     try {
-      return { ok: true, status: await channels.start((req.params as { id: string }).id) };
+      const status = await channels.start((req.params as { id: string }).id);
+      emitInboxChanged({ reason: "status" });
+      return { ok: true, status };
     } catch (err) {
       return reply.code(400).send({ error: "channel_start_failed", message: err instanceof Error ? err.message : String(err) });
     }
@@ -781,7 +935,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
 
   app.post("/im/connectors/:id/stop", async (req, reply) => {
     try {
-      return { ok: true, status: await channels.stop((req.params as { id: string }).id) };
+      const status = await channels.stop((req.params as { id: string }).id);
+      emitInboxChanged({ reason: "status" });
+      return { ok: true, status };
     } catch (err) {
       return reply.code(400).send({ error: "channel_stop_failed", message: err instanceof Error ? err.message : String(err) });
     }
@@ -790,6 +946,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   app.delete("/im/connectors/:id", async (req) => {
     await channels.remove((req.params as { id: string }).id);
     persistChannels();
+    emitInboxChanged({ reason: "connector" });
     return { ok: true };
   });
 
@@ -1208,6 +1365,62 @@ version: "0.1.0"
   });
 
   // ---- 会话 ----
+  app.get("/inbox/events", async (req, reply) => {
+    reply.hijack();
+    const raw = reply.raw;
+    raw.on("error", () => {});
+    raw.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+      "access-control-allow-origin": req.headers.origin ?? "*",
+    });
+
+    const send = (event: InboxEvent) => {
+      if (!raw.writableEnded && !raw.destroyed) raw.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+    const heartbeat = setInterval(() => {
+      if (!raw.writableEnded && !raw.destroyed) raw.write(": keepalive\n\n");
+    }, 25_000);
+    heartbeat.unref?.();
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      inboxSubscribers.delete(send);
+    };
+    raw.on("close", cleanup);
+    inboxSubscribers.add(send);
+    send({ type: "ready", at: new Date().toISOString() });
+  });
+
+  app.get("/inbox/threads", async () => {
+    const threads = repo
+      .listThreads()
+      .filter((thread) => thread.channel)
+      .map((thread) => {
+        const history = repo.history(thread.id);
+        const last = [...history].reverse().find((message) => messageText(message.parts).trim());
+        return {
+          id: thread.id,
+          title: thread.title,
+          channel: thread.channel!,
+          ...(thread.projectId ? { projectId: thread.projectId } : {}),
+          modelId: thread.modelId,
+          createdAt: thread.createdAt,
+          updatedAt: thread.updatedAt,
+          messageCount: history.length,
+          ...(last
+            ? {
+                lastMessage: {
+                  role: last.role,
+                  text: messageText(last.parts).trim(),
+                  createdAt: last.createdAt,
+                },
+              }
+            : {}),
+        };
+      });
+    return { threads };
+  });
   app.get("/threads", async (req) => {
     const projectId = (req.query as { projectId?: string }).projectId;
     return { threads: repo.listThreads(projectId ? { projectId } : undefined) };
@@ -1671,6 +1884,12 @@ version: "0.1.0"
     async stop() {
       await app.close();
       for (const session of feishuSetupSessions.values()) {
+        if (session.status === "initializing" || session.status === "waiting") {
+          session.abort.abort();
+          session.status = "aborted";
+        }
+      }
+      for (const session of wechatSetupSessions.values()) {
         if (session.status === "initializing" || session.status === "waiting") {
           session.abort.abort();
           session.status = "aborted";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EasyWorkClient } from "./index.js";
+import { EasyWorkClient, type InboxEvent } from "./index.js";
 
 function makeClient() {
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -10,6 +10,42 @@ function makeClient() {
     }
     if (String(url).endsWith("/im/connectors") && (!init || init.method !== "POST")) {
       return new Response(JSON.stringify({ connectors: [], status: [] }), { status: 200 });
+    }
+    if (String(url).endsWith("/inbox/threads")) {
+      return new Response(
+        JSON.stringify({
+          threads: [
+            {
+              id: "thread-wx",
+              title: "wechat:wxid_alice",
+              channel: { kind: "wechat", channelId: "wxid_alice" },
+              modelId: "m",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:01:00.000Z",
+              messageCount: 1,
+              lastMessage: { role: "user", text: "hello", createdAt: "2026-01-01T00:01:00.000Z" },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }
+    if (String(url).endsWith("/inbox/events")) {
+      const encoder = new TextEncoder();
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode('data: {"type":"ready","at":"2026-01-01T00:00:00.000Z"}\n\n'));
+            controller.enqueue(
+              encoder.encode(
+                'data: {"type":"changed","reason":"message","at":"2026-01-01T00:00:01.000Z","threadId":"thread-wx","channel":{"kind":"wechat","channelId":"wxid_alice"}}\n\n',
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
     }
     if (String(url).includes("/start") || String(url).includes("/stop") || (String(url).endsWith("/im/connectors") && init?.method === "POST")) {
       return new Response(JSON.stringify({ ok: true, status: { id: "tg", kind: "telegram", enabled: true, running: true } }), { status: 200 });
@@ -25,6 +61,15 @@ function makeClient() {
     }
     if (String(url).includes("/im/feishu/register/")) {
       return new Response(JSON.stringify({ session: { id: "scan-1", connectorId: "fs", status: "completed", createdAt: "now" } }), { status: 200 });
+    }
+    if (String(url).endsWith("/im/wechat/register") && init?.method === "POST") {
+      return new Response(JSON.stringify({ session: { id: "wx-scan-1", connectorId: "wx", status: "waiting", createdAt: "now", qrUrl: "https://wx-qr" } }), { status: 200 });
+    }
+    if (String(url).includes("/im/wechat/register/") && init?.method === "DELETE") {
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    if (String(url).includes("/im/wechat/register/")) {
+      return new Response(JSON.stringify({ session: { id: "wx-scan-1", connectorId: "wx", status: "completed", createdAt: "now" } }), { status: 200 });
     }
     return new Response("{}", { status: 200 });
   }) as unknown as typeof fetch;
@@ -54,6 +99,12 @@ describe("EasyWorkClient IM routes", () => {
     await client.startFeishuRegistration({ id: "fs" });
     await client.getFeishuRegistration("scan-1");
     await client.cancelFeishuRegistration("scan-1");
+    await client.startWechatRegistration({ id: "wx" });
+    await client.getWechatRegistration("wx-scan-1");
+    await client.cancelWechatRegistration("wx-scan-1");
+    const inbox = await client.listInboxThreads();
+    const events: InboxEvent[] = [];
+    for await (const event of client.inboxEvents()) events.push(event);
 
     expect(calls.some((c) => String(c.url).endsWith("/im/adapters"))).toBe(true);
     expect(calls.some((c) => String(c.url).endsWith("/im/connectors"))).toBe(true);
@@ -62,5 +113,20 @@ describe("EasyWorkClient IM routes", () => {
     expect(calls.some((c) => String(c.url).includes("/im/connectors/tg") && c.init?.method === "DELETE")).toBe(true);
     expect(calls.some((c) => String(c.url).endsWith("/im/feishu/register") && c.init?.method === "POST")).toBe(true);
     expect(calls.some((c) => String(c.url).includes("/im/feishu/register/scan-1") && c.init?.method === "DELETE")).toBe(true);
+    expect(calls.some((c) => String(c.url).endsWith("/im/wechat/register") && c.init?.method === "POST")).toBe(true);
+    expect(calls.some((c) => String(c.url).includes("/im/wechat/register/wx-scan-1") && c.init?.method === "DELETE")).toBe(true);
+    expect(calls.some((c) => String(c.url).endsWith("/inbox/threads"))).toBe(true);
+    expect(calls.some((c) => String(c.url).endsWith("/inbox/events") && !c.init?.method)).toBe(true);
+    expect(inbox[0]).toMatchObject({ id: "thread-wx", channel: { kind: "wechat" }, lastMessage: { text: "hello" } });
+    expect(events).toEqual([
+      { type: "ready", at: "2026-01-01T00:00:00.000Z" },
+      {
+        type: "changed",
+        reason: "message",
+        at: "2026-01-01T00:00:01.000Z",
+        threadId: "thread-wx",
+        channel: { kind: "wechat", channelId: "wxid_alice" },
+      },
+    ]);
   });
 });

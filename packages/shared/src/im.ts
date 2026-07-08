@@ -87,7 +87,7 @@ export type ChannelAuthConfig = z.infer<typeof ChannelAuthConfigSchema>;
 
 export const ChannelConfigSchema = z.object({
   id: z.string(),
-  kind: ChannelKindSchema.exclude(["inapp", "wechat"]),
+  kind: ChannelKindSchema.exclude(["inapp"]),
   enabled: z.boolean().default(false),
   displayName: z.string().optional(),
   /** 临时持久化：后续迁 keychain 时可替换为 SecretRef。 */
@@ -130,7 +130,7 @@ export interface SessionRef {
 
 /**
  * 旧 IM 连接器兼容接口。新平台优先实现 @ew/im-connectors 的 ChannelAdapter。
- * 个人微信无官方机器人 API → wechat 仅为实验性占位，默认关闭。
+ * 个人微信走腾讯 iLink Bot API 的扫码登录长轮询；WeCom 仍用于企业微信。
  */
 export interface ChannelConnector {
   readonly kind: ChannelKind;

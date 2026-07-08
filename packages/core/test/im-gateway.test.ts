@@ -16,6 +16,25 @@ function feishuSignature(timestamp: string, nonce: string, encryptKey: string, b
   return createHash("sha256").update(timestamp + nonce + encryptKey).update(body).digest("hex");
 }
 
+function makeSseReader(reader: ReadableStreamDefaultReader<Uint8Array>): () => Promise<unknown> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  return async () => {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("sse stream ended");
+      buffer += decoder.decode(value, { stream: true });
+      const idx = buffer.indexOf("\n\n");
+      if (idx === -1) continue;
+      const frame = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const line = frame.split(/\r?\n/).find((item) => item.startsWith("data:"));
+      if (!line) continue;
+      return JSON.parse(line.replace(/^data:\s?/, "")) as unknown;
+    }
+  };
+}
+
 describe("IM ChannelGateway HTTP routes", () => {
   let core: CoreServer | undefined;
   const cleanup: string[] = [];
@@ -44,8 +63,90 @@ describe("IM ChannelGateway HTTP routes", () => {
           label: "Feishu / Lark",
           supportsWebhook: true,
         }),
+        expect.objectContaining({
+          kind: "wechat",
+          label: "WeChat",
+          supportsWebhook: false,
+        }),
       ]),
     );
+  });
+
+  it("lists channel threads as inbox conversations", async () => {
+    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+    const channelThread = core.repo.resolveThreadForChannel("wechat", "wxid_alice", { modelId: "model-a" });
+    core.repo.appendMessage({
+      id: "msg-channel-1",
+      threadId: channelThread.id,
+      role: "user",
+      seq: 0,
+      parts: [{ type: "text", text: "来自微信的消息" }],
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const plainThread = core.repo.createThread({ id: "plain-chat", title: "普通对话", modelId: "model-a" });
+    core.repo.appendMessage({
+      id: "msg-plain-1",
+      threadId: plainThread.id,
+      role: "user",
+      seq: 0,
+      parts: [{ type: "text", text: "普通聊天消息" }],
+      createdAt: "2026-01-01T00:01:00.000Z",
+    });
+
+    const res = await core.app.inject({ method: "GET", url: "/inbox/threads", headers: auth });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      threads: [
+        {
+          id: channelThread.id,
+          title: "wechat:wxid_alice",
+          channel: { kind: "wechat", channelId: "wxid_alice" },
+          modelId: "model-a",
+          messageCount: 1,
+          lastMessage: { role: "user", text: "来自微信的消息" },
+        },
+      ],
+    });
+  });
+
+  it("streams inbox invalidation events over SSE", async () => {
+    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+    const { host, port } = await core.start({ host: "127.0.0.1", port: 0 });
+    const ac = new AbortController();
+    const res = await fetch(`http://${host}:${port}/inbox/events`, {
+      headers: auth,
+      signal: ac.signal,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toBeTruthy();
+    const reader = res.body!.getReader();
+    const nextEvent = makeSseReader(reader);
+    try {
+      expect(await nextEvent()).toMatchObject({ type: "ready" });
+
+      const upsert = await fetch(`http://${host}:${port}/im/connectors`, {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "tg-main",
+          kind: "telegram",
+          enabled: false,
+          secrets: { token: "test-token" },
+          options: {},
+          auth: { allowAll: true },
+        }),
+      });
+      expect(upsert.status).toBe(200);
+
+      expect(await nextEvent()).toMatchObject({
+        type: "changed",
+        reason: "connector",
+      });
+    } finally {
+      ac.abort();
+      await reader.cancel().catch(() => {});
+    }
   });
 
   it("persists connector configs and restores them on the next core instance", async () => {
@@ -297,5 +398,68 @@ describe("IM ChannelGateway HTTP routes", () => {
     const listed = await core.app.inject({ method: "GET", url: "/im/connectors", headers: auth });
     expect(listed.statusCode).toBe(200);
     expect(listed.json()).toMatchObject({ connectors: [] });
+  });
+
+  it("creates a WeChat connector from the iLink QR registration helper", async () => {
+    core = createCore({
+      token: "t",
+      dbPath: ":memory:",
+      memoryDbPath: ":memory:",
+      kbDbPath: ":memory:",
+      wechatRegister: async (options) => {
+        options.onQRCodeReady({ url: "https://weixin.example/qr", expireIn: 300, rawCode: "qr-1" });
+        options.onStatusChange?.({ status: "scaned" });
+        return {
+          accountId: "bot-1",
+          token: "token-1",
+          baseUrl: "https://ilink.example",
+          userId: "wxid_me",
+        };
+      },
+    });
+
+    const started = await core.app.inject({
+      method: "POST",
+      url: "/im/wechat/register",
+      headers: { ...auth, "content-type": "application/json" },
+      payload: {
+        id: "wx-scan",
+        displayName: "Personal WeChat",
+        enabled: false,
+      },
+    });
+
+    expect(started.statusCode).toBe(200);
+    const session = started.json().session as { id: string; status: string; qrUrl: string; connectorId: string };
+    expect(session).toMatchObject({
+      connectorId: "wx-scan",
+      qrUrl: "https://weixin.example/qr",
+    });
+    expect(["waiting", "completed"]).toContain(session.status);
+
+    let completed: { status: string } | undefined;
+    for (let i = 0; i < 10; i++) {
+      const polled = await core.app.inject({ method: "GET", url: `/im/wechat/register/${session.id}`, headers: auth });
+      expect(polled.statusCode).toBe(200);
+      completed = polled.json().session as { status: string };
+      if (completed.status === "completed") break;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    expect(completed).toMatchObject({ status: "completed" });
+
+    const listed = await core.app.inject({ method: "GET", url: "/im/connectors", headers: auth });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toMatchObject({
+      connectors: [
+        expect.objectContaining({
+          id: "wx-scan",
+          kind: "wechat",
+          displayName: "Personal WeChat",
+          secrets: { token: "token-1" },
+          options: { accountId: "bot-1", baseUrl: "https://ilink.example", userId: "wxid_me", groupPolicy: "disabled" },
+          auth: { allowAll: true },
+        }),
+      ],
+    });
   });
 });
