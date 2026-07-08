@@ -119,7 +119,7 @@ export function Workspace({
   const [usage, setUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(
     null,
   );
-  const { images, setImages, fileRef, onPickImages } = useComposerImages();
+  const { images, setImages, fileRef, onPickImages, onPasteImages } = useComposerImages();
   const { scrollRef, showJump, onMessagesScroll, jumpToBottom } = useMessageScroll(msgs);
   const abortRef = useRef<AbortController | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -426,6 +426,7 @@ export function Workspace({
                 setInput(e.target.value);
                 autoGrowComposer(e.target);
               }}
+              onPaste={onPasteImages}
               onKeyDown={(e) => {
                 // 输入法组词中按回车只确认候选词，不发送（中文/日文等 IME）
                 if (e.nativeEvent.isComposing || e.keyCode === 229) return;

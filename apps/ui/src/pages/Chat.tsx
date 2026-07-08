@@ -106,7 +106,7 @@ export function Chat({
     null,
   );
   const [approval, setApproval] = useState<PendingApproval | null>(null);
-  const { images, setImages, fileRef, onPickImages } = useComposerImages();
+  const { images, setImages, fileRef, onPickImages, onPasteImages } = useComposerImages();
   // 右侧「工件」面板：本会话目录下产出的文件（fs 工具写入 / 命令生成的网页/构建物）。
   const [files, setFiles] = useState<WsEntry[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -520,6 +520,7 @@ export function Chat({
               setInput(e.target.value);
               autoGrowComposer(e.target);
             }}
+            onPaste={onPasteImages}
             onKeyDown={(e) => {
               // 输入法组词中按回车只确认候选词，不发送（中文/日文等 IME）
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;

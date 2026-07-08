@@ -1,4 +1,24 @@
 import { test, expect } from "./fixtures.js";
+import type { Page } from "@playwright/test";
+
+async function pasteImage(page: Page, testId: string): Promise<void> {
+  await page.getByTestId(testId).focus();
+  await page.evaluate((id) => {
+    const target = document.querySelector(`[data-testid="${id}"]`);
+    if (!target) throw new Error(`missing target: ${id}`);
+    const data = new DataTransfer();
+    data.items.add(new File(
+      ['<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#2563eb"/></svg>'],
+      "clipboard.svg",
+      { type: "image/svg+xml" },
+    ));
+    target.dispatchEvent(new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: data,
+    }));
+  }, testId);
+}
 
 test.describe("composer e2e", () => {
   test("聊天与工作区的 + 入口都能上传图片，并显示已附加图片", async ({ page, openApp, client, workspaceDir, sampleImagePath }) => {
@@ -17,6 +37,22 @@ test.describe("composer e2e", () => {
     await expect(page.getByTestId("workspace-composer-input")).toBeVisible();
     await page.getByTestId("workspace-upload-button").click();
     await page.getByTestId("workspace-upload-input").setInputFiles(sampleImagePath);
+    await expect(page.getByTestId("workspace-image-chip")).toContainText("1 张图");
+  });
+
+  test("聊天与工作区 composer 支持直接粘贴图片", async ({ page, openApp, client, workspaceDir }) => {
+    const project = await client.createProject({ name: "Paste Workspace", workspaceDir });
+
+    await openApp();
+
+    await pasteImage(page, "chat-composer-input");
+    await expect(page.getByTestId("chat-image-chip")).toContainText("1 张图");
+    await page.getByTestId("chat-image-remove-0").click();
+    await expect(page.getByTestId("chat-image-chip")).toHaveCount(0);
+
+    await page.getByTestId(`sidebar-project-${project.id}`).click();
+    await expect(page.getByTestId("workspace-composer-input")).toBeVisible();
+    await pasteImage(page, "workspace-composer-input");
     await expect(page.getByTestId("workspace-image-chip")).toContainText("1 张图");
   });
 
