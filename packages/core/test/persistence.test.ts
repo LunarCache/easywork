@@ -64,6 +64,28 @@ describe("provider / MCP 配置持久化", () => {
     await core2.stop();
   });
 
+  it("重新配置同一 provider 且未传 apiKey 时保留原 key", async () => {
+    const core = createCore({ dbPath: ":memory:", token: "t", memoryDbPath: ":memory:" });
+    core.providers.add({
+      id: "openrouter",
+      baseUrl: "https://example.com/v1",
+      apiKey: "secret-key",
+      modelConfigs: [{ id: "old-model", contextWindow: 65536, inputModalities: ["text"] }],
+    });
+    core.providers.add({
+      id: "openrouter",
+      baseUrl: "https://example.com/v1",
+      modelConfigs: [{ id: "new-model", contextWindow: 131072, inputModalities: ["text", "image"] }],
+    });
+
+    expect(core.providers.dump()[0]).toMatchObject({
+      id: "openrouter",
+      apiKey: "secret-key",
+      modelConfigs: [{ id: "new-model", contextWindow: 131072, inputModalities: ["text", "image"] }],
+    });
+    await core.stop();
+  });
+
   it("settings KV 读写/删除", () => {
     const core = createCore({ dbPath: ":memory:", token: "t", memoryDbPath: ":memory:" });
     core.repo.setSetting("k", "v1");

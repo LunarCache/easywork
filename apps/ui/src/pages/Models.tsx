@@ -18,6 +18,7 @@ import {
   ChevronDownIcon,
   ChevronIcon,
   DownloadIcon,
+  EditIcon,
   GlobeIcon,
   SearchIcon,
   TrashIcon,
@@ -83,17 +84,6 @@ function resetScrollContainers(node: HTMLElement | null) {
   }
 }
 
-function modalLabel(modalities?: ProviderModelModality[]): string {
-  return modalities?.includes("image") ? "文本 + 视觉" : "文本";
-}
-
-function modelConfigLabel(model: ProviderModelConfig): string {
-  const parts = [model.id];
-  if (model.contextWindow) parts.push(`ctx ${fmtCtx(model.contextWindow)}`);
-  parts.push(modalLabel(model.inputModalities));
-  return parts.join(" · ");
-}
-
 function newProviderModelRow(input: Omit<ProviderFormModel, "rowId"> = {
   id: "",
   context: "32768",
@@ -108,6 +98,15 @@ function catalogModelsToForm(models: ProviderCatalogModel[]): ProviderFormModel[
     context: String(m.contextWindow),
     inputModalities: m.inputModalities.includes("image") ? ["text", "image"] : ["text"],
   }));
+}
+
+function modelConfigsToForm(models: ProviderModelConfig[]): ProviderFormModel[] {
+  const rows = models.map((m) => newProviderModelRow({
+    id: m.id,
+    context: String(m.contextWindow),
+    inputModalities: m.inputModalities.includes("image") ? ["text", "image"] : ["text"],
+  }));
+  return rows.length > 0 ? rows : [newProviderModelRow()];
 }
 
 function formModelsToConfig(models: ProviderFormModel[]): ProviderModelConfig[] {
@@ -210,6 +209,7 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogItem[]>([]);
   const [providerCatalogLoading, setProviderCatalogLoading] = useState(false);
   const [providerConfigOpen, setProviderConfigOpen] = useState(false);
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [apiMenuOpen, setApiMenuOpen] = useState(false);
   const [providerModels, setProviderModels] = useState<ProviderFormModel[]>([]);
   const [modelProbeBusy, setModelProbeBusy] = useState(false);
@@ -221,6 +221,7 @@ export function Models({ onChange }: { onChange: () => void }) {
 
   const openAddProvider = () => {
     setProviderConfigOpen(false);
+    setEditingProviderId(null);
     setProvNote("");
     setView("add-provider");
   };
@@ -450,11 +451,12 @@ export function Models({ onChange }: { onChange: () => void }) {
       setProv({ kind: "pi-native", id: "", api: "", baseUrl: "", apiKey: "", models: "", context: "" });
       setProviderModels([newProviderModelRow()]);
       setProviderConfigOpen(false);
+      setEditingProviderId(null);
       setView("list");
       await refreshProviders();
       onChange();
     } catch (e) {
-      setProvNote(`添加失败：${e instanceof Error ? e.message : String(e)}`);
+      setProvNote(`${editingProviderId ? "保存" : "添加"}失败：${e instanceof Error ? e.message : String(e)}`);
     }
   };
   const removeProvider = async (id: string) => {
@@ -469,6 +471,7 @@ export function Models({ onChange }: { onChange: () => void }) {
   };
 
   const applyCustomProvider = () => {
+    setEditingProviderId(null);
     setProv({
       kind: "openai-compatible",
       id: "",
@@ -487,6 +490,7 @@ export function Models({ onChange }: { onChange: () => void }) {
   const restCatalog = providerCatalog.filter((p) => !PROVIDER_CATALOG_FEATURED.has(p.id));
   const selectedCatalog = providerCatalog.find((p) => p.id === prov.id);
   const applyCatalogProvider = (p: ProviderCatalogItem) => {
+    setEditingProviderId(null);
     setProv({
       kind: "pi-native",
       id: p.id,
@@ -499,6 +503,23 @@ export function Models({ onChange }: { onChange: () => void }) {
     setProviderModels(catalogModelsToForm(p.models));
     setProviderConfigOpen(true);
     setProvNote("");
+  };
+  const editProvider = (p: ProviderInfo) => {
+    const kind = p.kind ?? "openai-compatible";
+    setEditingProviderId(p.id);
+    setProv({
+      kind,
+      id: p.id,
+      api: p.api ?? (kind === "openai-compatible" ? "openai-completions" : ""),
+      baseUrl: p.baseUrl ?? "",
+      apiKey: "",
+      models: p.models.join(", "),
+      context: "",
+    });
+    setProviderModels(modelConfigsToForm(p.modelConfigs));
+    setProviderConfigOpen(true);
+    setProvNote("");
+    setView("add-provider");
   };
 
   const providerModelIds = providerModels.map((m) => m.id).filter(Boolean);
@@ -641,8 +662,8 @@ export function Models({ onChange }: { onChange: () => void }) {
             <ArrowLeftIcon size={15} /> 返回
           </button>
           <div>
-            <span className="skill-detail-name">添加云端 Provider</span>
-            <p className="provider-subtitle">选择模型服务商后填写连接信息；自定义服务商支持兼容端点。</p>
+            <span className="skill-detail-name">{editingProviderId ? "编辑云端 Provider" : "添加云端 Provider"}</span>
+            <p className="provider-subtitle">{editingProviderId ? "调整连接信息、模型 ID、上下文窗口和模态。" : "选择模型服务商后填写连接信息；自定义服务商支持兼容端点。"}</p>
           </div>
         </div>
         {provNote && <div className="note">{provNote}</div>}
@@ -656,8 +677,18 @@ export function Models({ onChange }: { onChange: () => void }) {
                 </div>
                 <div className="provider-panel-actions">
                   {selectedCatalog ? <span className="set-pill ghost">{selectedCatalog.modelCount} models</span> : null}
-                  <button className="set-btn ghost soft small" onClick={() => setProviderConfigOpen(false)}>
-                    更换服务商
+                  <button
+                    className="set-btn ghost soft small"
+                    onClick={() => {
+                      if (editingProviderId) {
+                        setEditingProviderId(null);
+                        setView("list");
+                      } else {
+                        setProviderConfigOpen(false);
+                      }
+                    }}
+                  >
+                    {editingProviderId ? "取消编辑" : "更换服务商"}
                   </button>
                 </div>
               </div>
@@ -667,6 +698,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                   <input
                     placeholder="openrouter"
                     value={prov.id}
+                    disabled={!!editingProviderId}
                     onChange={(e) => {
                       setProv({ ...prov, id: e.target.value });
                     }}
@@ -723,7 +755,12 @@ export function Models({ onChange }: { onChange: () => void }) {
                 </label>
                 <label className="provider-field wide">
                   <span>API Key</span>
-                  <input placeholder="sk-..." type="password" value={prov.apiKey} onChange={(e) => setProv({ ...prov, apiKey: e.target.value })} />
+                  <input
+                    placeholder={editingProviderId ? "留空保持现有 Key" : "sk-..."}
+                    type="password"
+                    value={prov.apiKey}
+                    onChange={(e) => setProv({ ...prov, apiKey: e.target.value })}
+                  />
                 </label>
                 <div className="provider-field wide">
                   <div className="provider-field-head">
@@ -786,14 +823,16 @@ export function Models({ onChange }: { onChange: () => void }) {
                 <button
                   className="set-btn ghost soft"
                   onClick={() => {
-                    setProv({ kind: "pi-native", id: "", api: "", baseUrl: "", apiKey: "", models: "", context: "" });
+                    setProv(editingProviderId
+                      ? { ...prov, baseUrl: "", apiKey: "", models: "", context: "" }
+                      : { kind: "pi-native", id: "", api: "", baseUrl: "", apiKey: "", models: "", context: "" });
                     setProviderModels([newProviderModelRow()]);
                   }}
                 >
                   清空
                 </button>
                 <button className="set-btn primary" onClick={() => void addProvider()}>
-                  添加 Provider
+                  {editingProviderId ? "保存配置" : "添加 Provider"}
                 </button>
               </div>
             </div>
@@ -1051,16 +1090,10 @@ export function Models({ onChange }: { onChange: () => void }) {
                       <span>{p.kind === "pi-native" ? p.api ?? "内置端点" : p.baseUrl}</span>
                       {p.kind === "pi-native" && p.baseUrl ? <span>override {p.baseUrl}</span> : null}
                     </div>
-                    {p.models.length > 0 && (
-                      <div className="provider-info-models">
-                        {p.modelConfigs.map((model) => (
-                          <span key={model.id} title={modelConfigLabel(model)}>
-                            {modelConfigLabel(model)}
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
+                  <button className="mcp-icon-btn" title="编辑" onClick={() => editProvider(p)}>
+                    <EditIcon size={14} />
+                  </button>
                   <button className="mcp-icon-btn danger" title="删除" onClick={() => void removeProvider(p.id)}>
                     <TrashIcon size={14} />
                   </button>

@@ -43,7 +43,12 @@ export class ProviderManager {
   }
 
   add(cfg: CloudProviderConfig): void {
-    const normalized = normalizeProviderConfig(cfg);
+    const existing = this.configs.get(cfg.id);
+    const normalized = normalizeProviderConfig({
+      ...cfg,
+      ...(cfg.apiKey === undefined && existing?.apiKey ? { apiKey: existing.apiKey } : {}),
+      ...(cfg.headers === undefined && existing?.headers ? { headers: existing.headers } : {}),
+    });
     this.remove(normalized.id);
     if (normalized.kind === "pi-native") {
       this.configs.set(normalized.id, normalized);
