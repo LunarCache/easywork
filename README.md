@@ -75,10 +75,10 @@ easywork status / stop         # daemon 状态 / 停止
 ```bash
 npm install            # 安装依赖
 npm run build          # turbo 构建全部包
-npm test               # vitest（235 通过；另 1 个真机 e2e 默认 skip）  ·  npm run typecheck  ·  npm run lint
+npm test               # vitest（252 通过；另 1 个真机 e2e 默认 skip）  ·  npm run typecheck  ·  npm run lint
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
-npm run test:e2e       # Playwright UI e2e：隔离 data dir + 真 daemon + 真 Vite UI（CI 跑这层，当前 15 条）
+npm run test:e2e       # Playwright UI e2e：隔离 data dir + 真 daemon + 真 Vite UI（CI 跑这层，当前 16 条）
 
 npm run dev:daemon     # 仅起 daemon（stdout 首行打印 {baseUrl, token, pid}）
 npm run dev:ui         # 起 Vite；浏览器连 daemon：http://localhost:5173/?baseUrl=<daemon>&token=<token>

@@ -33,6 +33,13 @@
 
 ## 里程碑日志
 
+## 2026-07-08 — Skills 全局来源分组
+
+- **目录契约对齐 pi**：`/skills` 从裸列表升级为返回 `sources`，每个 Skill 带 `source` 元数据；默认内置目录改为 EasyWork 的 pi agentDir `~/.easywork/pi-agent/skills`，并只额外展示 pi 标准全局目录 `~/.agents/skills`。Codex 兼容目录已移除，项目级 `.pi/skills` / `.agents/skills` 仅运行时按 cwd/trust 生效，不进入全局 Skills 页。
+- **运行态一致**：`SessionHost` 的 `DefaultResourceLoader` 使用同一组全局 Skill 目录，避免 UI 可见与 agent 实际加载不一致；`/skills/open` 和模板创建都指向 pi agentDir 下的内置目录。
+- **UI 分组**：Skills 页按「内置 Skills / 标准目录」展示，保留空目录分区；顶部不再展示主目录路径。标准目录会显示 `~/.agents/skills` 中每个包含 `SKILL.md` 的目录，辅助 markdown 不单独成 Skill。
+- **验证**：`npm run lint`、`npm run typecheck`、`npm test` = **252 passed / 1 skipped**，`npx playwright test apps/ui/e2e/kb-skills.spec.ts` = **2 passed**；desktop 重启后 sidecar daemon 返回 `agents: 20`，Skills 页可见标准目录技能。
+
 ## 2026-07-07 — 收件箱 SSE 失效事件
 
 - **实时性模型**：移除 `Inbox.tsx` 的 4 秒固定刷新，改为打开收件箱时通过 `GET /inbox/events` 订阅 Bearer 鉴权 SSE；事件只携带 `ready/changed` 与 reason/thread/channel，消息正文仍从 `/inbox/threads` 和 `/threads/:id/messages` 读取。
