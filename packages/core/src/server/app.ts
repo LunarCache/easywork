@@ -119,6 +119,20 @@ export interface CreateCoreOptions {
   llamaBinPath?: string;
 }
 
+export function agentModelUnavailableError(
+  modelId: string,
+  registry: EngineRegistry,
+  providers: ProviderManager,
+): Error | null {
+  if (providers.findByModel(modelId)) return null;
+  try {
+    registry.resolve(modelId);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err : new Error(String(err));
+  }
+}
+
 const ProviderModelConfigSchema = z.object({
   id: z.string().min(1),
   contextWindow: z.number().int().positive(),
@@ -1224,10 +1238,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request", detail: parsed.error.format() });
     }
-    try {
-      registry.resolve(parsed.data.model);
-    } catch (err) {
-      return reply.code(404).send({ error: "model_not_loaded", message: String(err) });
+    const unavailable = agentModelUnavailableError(parsed.data.model, registry, providers);
+    if (unavailable) {
+      return reply.code(404).send({ error: "model_not_loaded", message: String(unavailable) });
     }
 
     // pi 内核托管：会话内自持历史/技能/compaction，并自行加载项目上下文（AGENTS.md）。
