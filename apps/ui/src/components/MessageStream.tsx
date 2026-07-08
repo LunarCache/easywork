@@ -17,6 +17,7 @@ import {
   FileIcon,
   CodeIcon,
   SparkIcon,
+  LoaderIcon,
   CopyIcon,
   CheckIcon,
   RefreshIcon,
@@ -824,10 +825,14 @@ export function MessageStream({
                 </div>
               )}
               {blocks.length === 0 && live && (
-                <div className="cv-think">
-                  <span />
-                  <span />
-                  <span />
+                <div className="cv-wait" role="status" aria-live="polite">
+                  <LoaderIcon size={14} className="cv-wait-ico spin" />
+                  <span className="cv-wait-text">正在等待模型回复</span>
+                  <span className="cv-wait-dots" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
                 </div>
               )}
               {m.cancelled && <div className="cancel-note">已停止 · 本轮不计入上下文</div>}

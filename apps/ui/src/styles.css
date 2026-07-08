@@ -1020,11 +1020,14 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .cv-images img { max-width: 220px; max-height: 220px; border-radius: var(--r-lg); border: 1px solid var(--border); }
 .cv-msg.assistant:hover .msg-action { opacity: 1; }
 
-/* thinking 三点 */
-.cv-think { display: inline-flex; gap: 5px; align-items: center; background: var(--color-bg-card); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 11px 14px; }
-.cv-think span { width: 6px; height: 6px; border-radius: 50%; background: var(--text-tertiary); animation: tdot 1.2s infinite ease-in-out; }
-.cv-think span:nth-child(2) { animation-delay: 0.15s; }
-.cv-think span:nth-child(3) { animation-delay: 0.3s; }
+/* 模型首 token 前的轻量等待态：避免空白气泡。 */
+.cv-wait { display: inline-flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; min-height: 28px; padding: 2px 0; color: var(--tx-1); font-size: 12.5px; line-height: 1.4; }
+.cv-wait-ico { color: var(--accent); opacity: 0.9; flex: none; }
+.cv-wait-text { color: var(--tx-1); }
+.cv-wait-dots { display: inline-flex; align-items: center; gap: 3px; margin-left: -3px; color: var(--tx-2); }
+.cv-wait-dots span { width: 4px; height: 4px; border-radius: 50%; background: currentColor; opacity: 0.35; animation: tdot 1.2s infinite ease-in-out; }
+.cv-wait-dots span:nth-child(2) { animation-delay: 0.15s; }
+.cv-wait-dots span:nth-child(3) { animation-delay: 0.3s; }
 @keyframes tdot { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 
 /* 工具卡 */
