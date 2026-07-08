@@ -32,7 +32,7 @@ import {
 } from "@ew/shared";
 import { LlamaServeEngine } from "@ew/providers";
 import { builtinTools } from "@ew/tools";
-import { SkillManager } from "@ew/skills";
+import { SkillManager, type SkillSourceConfig } from "@ew/skills";
 import { McpClientManager } from "@ew/mcp";
 import { getModels as getPiModels, getProviders as getPiProviders } from "@earendil-works/pi-ai";
 import {
@@ -97,7 +97,7 @@ export interface CreateCoreOptions {
   /** 覆盖模型目录（测试用）。 */
   modelsDir?: string;
   extraModelDirs?: string[];
-  /** Skills 发现目录（默认 <dataDir>/skills）。 */
+  /** Skills 发现目录（测试/覆盖用；默认使用 pi 全局目录与标准全局目录）。 */
   skillsDirs?: string[];
   /** agent 工具沙箱工作目录（默认 dataDir）。 */
   workspaceDir?: string;
@@ -373,28 +373,48 @@ interface WechatSetupSession {
   abort: AbortController;
 }
 
-function uniqPaths(paths: string[]): string[] {
+function uniqSkillSources(sources: SkillSourceConfig[]): SkillSourceConfig[] {
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (const p of paths) {
-    const resolved = fsPath.resolve(p);
+  const out: SkillSourceConfig[] = [];
+  for (const source of sources) {
+    const resolved = fsPath.resolve(source.dir);
     if (seen.has(resolved)) continue;
     seen.add(resolved);
-    out.push(resolved);
+    out.push({ ...source, dir: resolved });
   }
   return out;
 }
 
-function defaultSkillsDirs(): string[] {
+function defaultSkillSources(agentDir: string): SkillSourceConfig[] {
   const home = os.homedir();
-  const codexHome = process.env.CODEX_HOME || fsPath.join(home, ".codex");
   const agentsHome = process.env.AGENTS_HOME || fsPath.join(home, ".agents");
-  return uniqPaths([
-    fsPath.join(defaultDataDir(), "skills"),
-    fsPath.join(codexHome, "skills"),
-    fsPath.join(codexHome, "plugins", "cache"),
-    fsPath.join(agentsHome, "skills"),
+  return uniqSkillSources([
+    {
+      id: "builtin",
+      label: "内置 Skills",
+      kind: "builtin",
+      dir: fsPath.join(agentDir, "skills"),
+      primary: true,
+    },
+    {
+      id: "agents",
+      label: "标准目录",
+      kind: "agents",
+      dir: fsPath.join(agentsHome, "skills"),
+    },
   ]);
+}
+
+function skillSourcesFromDirs(dirs: string[]): SkillSourceConfig[] {
+  return uniqSkillSources(
+    dirs.map((dir, index) => ({
+      id: index === 0 ? "builtin" : `custom-${index + 1}`,
+      label: index === 0 ? "内置 Skills" : `全局目录 ${index + 1}`,
+      kind: index === 0 ? "builtin" : "custom",
+      dir,
+      ...(index === 0 ? { primary: true } : {}),
+    })),
+  );
 }
 
 /** 创建核心守护进程（Fastify server + 引擎/模型/provider 管理）。 */
@@ -430,8 +450,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
 
   // Agent 运行时：内置工具（时间/计算器/HTTP/web_search）由宿主桥成 pi customTools；
   // Skills 由 pi 自身发现（resourceLoader）；MCP 由宿主桥成 customTools。
-  const skillsDirs = opts.skillsDirs ?? defaultSkillsDirs();
-  const skills = new SkillManager(skillsDirs);
+  const agentDir = fsPath.join(defaultDataDir(), "pi-agent");
+  const skillSources = opts.skillsDirs ? skillSourcesFromDirs(opts.skillsDirs) : defaultSkillSources(agentDir);
+  const skills = new SkillManager(skillSources);
   const mcp = new McpClientManager();
   const channelRegistry = registerBuiltInChannelAdapters(new ChannelAdapterRegistry());
   // 交互式审批跨请求登记表（/agent/run 挂起 ↔ /agent/approve 解析）。
@@ -479,7 +500,8 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   const sessionHost = new SessionHost({
     local,
     providers,
-    agentDir: fsPath.join(defaultDataDir(), "pi-agent"),
+    agentDir,
+    globalSkillPaths: skillSources.map((source) => source.dir),
     memory,
     repo,
     kb,
@@ -1533,10 +1555,11 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   });
 
   // ---- 技能 ----
-  const skillsDir = skillsDirs[0] ?? fsPath.join(defaultDataDir(), "skills");
+  const primarySkillSource = skillSources.find((source) => source.primary) ?? skillSources[0];
+  const skillsDir = primarySkillSource?.dir ?? fsPath.join(agentDir, "skills");
   app.get("/skills", async () => {
     await skills.discover().catch(() => {});
-    return { skills: skills.list(), dir: skillsDir };
+    return { skills: skills.list(), dir: skillsDir, sources: skills.sources() };
   });
   // 读取某技能的 SKILL.md 正文（懒加载；用于详情查看）。
   app.get("/skills/:id/body", async (req, reply) => {

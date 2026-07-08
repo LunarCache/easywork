@@ -15,7 +15,7 @@
 - **内置工具**（桥成 pi customTool）：`get_time` / `calculator` / `http_get`（带 SSRF 防护）/ `web_search`。
 - **记忆 / 知识库 / 会话检索**：记忆经 pi 扩展接入——**渐进式披露**（记忆「清单」注入系统提示词 + `recall_memory` 工具按需取全文，借鉴 Skill）+ **批量事实抽取**（空闲 / 关闭时，非每轮）；知识库 / 会话检索为 customTools。
 - **MCP**：stdio（默认禁用，需开关）+ HTTP；工具桥成 pi customTools；导入标准 `mcpServers` JSON；连接探测（带超时）+ 工具清单预览 + 编辑已有配置（保留 OAuth / env）+ 探测失败错误详情；`callTool` 透传中断信号。
-- **Skills**：pi 自带 skills（resourceLoader 发现）+ 应用内 Skills 管理。
+- **Skills**：pi 自带 skills（resourceLoader 发现）+ 应用内 Skills 管理；管理页只展示全局来源，并按内置主目录 `~/.easywork/pi-agent/skills` 与标准目录 `~/.agents/skills` 分组，项目级 skills 仅在运行时按 cwd 生效。
 
 ## 工作区模式
 

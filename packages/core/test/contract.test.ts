@@ -1,4 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type {
   ChatRequest,
   ChatStreamEvent,
@@ -154,5 +157,69 @@ describe("daemon end-to-end (SDK → core → engine)", () => {
 
     await expect(client.probeProviderModels({ baseUrl: "https://models.example.test/v1", apiKey: "sk-test" }))
       .resolves.toEqual(["model-a", "model-b"]);
+  });
+
+  it("returns global skill sources and annotates discovered skills", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ew-skill-source-"));
+    const skillDir = path.join(root, "global-skill");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      `---
+name: Global Skill
+description: test skill
+whenToUse: tests
+---
+# Global Skill`,
+    );
+    try {
+      core = createCore({
+        token: "t",
+        dbPath: ":memory:",
+        memoryDbPath: ":memory:",
+        kbDbPath: ":memory:",
+        skillsDirs: [root],
+      });
+      const res = await core.app.inject({ method: "GET", url: "/skills", headers: { authorization: "Bearer t" } });
+      expect(res.statusCode).toBe(200);
+      const body = res.json<{
+        dir: string;
+        sources: { id: string; kind: string; primary?: boolean; dir: string }[];
+        skills: { id: string; source: { id: string; kind: string; primary?: boolean } }[];
+      }>();
+      expect(body.dir).toBe(path.resolve(root));
+      expect(body.sources[0]).toMatchObject({ id: "builtin", kind: "builtin", primary: true, dir: path.resolve(root) });
+      expect(body.skills[0]).toMatchObject({ id: "global-skill", source: { id: "builtin", kind: "builtin" } });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the pi agent skills directory as the default global skills directory", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ew-skill-default-"));
+    const previousDataDir = process.env.EW_DATA_DIR;
+    process.env.EW_DATA_DIR = root;
+    try {
+      core = createCore({
+        token: "t",
+        dbPath: ":memory:",
+        memoryDbPath: ":memory:",
+        kbDbPath: ":memory:",
+      });
+      const res = await core.app.inject({ method: "GET", url: "/skills", headers: { authorization: "Bearer t" } });
+      expect(res.statusCode).toBe(200);
+      const body = res.json<{
+        dir: string;
+        sources: { id: string; kind: string; primary?: boolean; dir: string }[];
+      }>();
+      const expected = path.join(root, "pi-agent", "skills");
+      expect(body.dir).toBe(expected);
+      expect(body.sources.map((source) => source.id)).toEqual(["builtin", "agents"]);
+      expect(body.sources[0]).toMatchObject({ id: "builtin", kind: "builtin", primary: true, dir: expected });
+    } finally {
+      if (previousDataDir === undefined) delete process.env.EW_DATA_DIR;
+      else process.env.EW_DATA_DIR = previousDataDir;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -1,7 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Skill, Tool, ToolProvider } from "@ew/shared";
+import type { Skill, SkillSource, SkillSourceKind, Tool, ToolProvider } from "@ew/shared";
 import { parseFrontmatter } from "./frontmatter.js";
+
+export interface SkillSourceConfig {
+  id: string;
+  label: string;
+  kind: SkillSourceKind;
+  dir: string;
+  primary?: boolean;
+}
+
+export type SkillSourceInput = string | SkillSourceConfig;
 
 function asString(v: string | string[] | undefined, fallback = ""): string {
   if (Array.isArray(v)) return v.join(", ");
@@ -12,6 +22,37 @@ function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+function normalizeSource(input: SkillSourceInput, index: number): SkillSource {
+  if (typeof input === "string") {
+    return {
+      id: index === 0 ? "builtin" : `custom-${index + 1}`,
+      label: index === 0 ? "内置 Skills" : `全局目录 ${index + 1}`,
+      kind: index === 0 ? "builtin" : "custom",
+      dir: path.resolve(input),
+      ...(index === 0 ? { primary: true } : {}),
+    };
+  }
+  return {
+    id: input.id,
+    label: input.label,
+    kind: input.kind,
+    dir: path.resolve(input.dir),
+    ...(input.primary ? { primary: true } : {}),
+  };
+}
+
+function uniqueSources(inputs: SkillSourceInput[]): SkillSource[] {
+  const seen = new Set<string>();
+  const sources: SkillSource[] = [];
+  for (const [index, input] of inputs.entries()) {
+    const source = normalizeSource(input, index);
+    if (seen.has(source.dir)) continue;
+    seen.add(source.dir);
+    sources.push(source);
+  }
+  return sources;
+}
+
 /**
  * Anthropic 风格 Skills 运行时。
  * - discover：扫描各目录下的 SKILL.md，仅解析 frontmatter（渐进披露第一层）。
@@ -20,20 +61,23 @@ function slug(name: string): string {
  */
 export class SkillManager {
   private skills = new Map<string, Skill>();
+  private readonly sourcesConfig: SkillSource[];
 
-  constructor(private readonly dirs: string[], private readonly maxDepth = 6) {}
+  constructor(sources: SkillSourceInput[], private readonly maxDepth = 6) {
+    this.sourcesConfig = uniqueSources(sources);
+  }
 
   /** 重新扫描所有目录。 */
   async discover(): Promise<Skill[]> {
     this.skills.clear();
-    for (const dir of this.dirs) await this.scanDir(dir);
+    for (const source of this.sourcesConfig) await this.scanDir(source.dir, source);
     return [...this.skills.values()];
   }
 
-  private async scanDir(dir: string, depth = 0): Promise<void> {
+  private async scanDir(dir: string, source: SkillSource, depth = 0): Promise<void> {
     const skillFile = path.join(dir, "SKILL.md");
     if (fs.existsSync(skillFile)) {
-      await this.addSkill(dir, skillFile);
+      await this.addSkill(dir, skillFile, source);
       return;
     }
     if (depth >= this.maxDepth) return;
@@ -46,11 +90,11 @@ export class SkillManager {
     for (const e of entries) {
       if (!e.isDirectory()) continue;
       if (e.name === "node_modules" || e.name === ".git") continue;
-      await this.scanDir(path.join(dir, e.name), depth + 1);
+      await this.scanDir(path.join(dir, e.name), source, depth + 1);
     }
   }
 
-  private async addSkill(skillDir: string, skillFile: string): Promise<void> {
+  private async addSkill(skillDir: string, skillFile: string, source: SkillSource): Promise<void> {
     try {
       const raw = await fs.promises.readFile(skillFile, "utf8");
       const { data } = parseFrontmatter(raw);
@@ -62,6 +106,7 @@ export class SkillManager {
       this.skills.set(id, {
         id,
         dir: skillDir,
+        source,
         frontmatter: {
           name,
           description: asString(data.description),
@@ -80,6 +125,10 @@ export class SkillManager {
 
   list(): Skill[] {
     return [...this.skills.values()];
+  }
+
+  sources(): SkillSource[] {
+    return this.sourcesConfig.map((source) => ({ ...source }));
   }
 
   /** 完整加载某技能正文（第二层披露）。 */

@@ -1,17 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
-import type { Skill } from "@ew/shared";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Skill, SkillSource } from "@ew/shared";
 import { getClient } from "../lib/client.js";
 import { loadDisabledSkills, saveDisabledSkills } from "../lib/prefs.js";
 import { SparkIcon, FolderIcon, PlusIcon, ArrowLeftIcon, CheckIcon, XIcon } from "../icons.js";
-
-function skillSourceLabel(dir: string): string {
-  const normalized = dir.replace(/\\/g, "/");
-  if (normalized.includes("/.codex/plugins/cache/")) return "Codex 插件";
-  if (normalized.includes("/.codex/skills/.system/")) return "Codex 系统";
-  if (normalized.includes("/.codex/skills/")) return "Codex";
-  if (normalized.includes("/.agents/skills/")) return "Agents";
-  return "应用目录";
-}
 
 function shortPath(p: string): string {
   const normalized = p.replace(/\\/g, "/");
@@ -20,9 +11,22 @@ function shortPath(p: string): string {
   return `…/${parts.slice(-2).join("/")}`;
 }
 
+function sourceSubtitle(source: SkillSource): string {
+  const path = shortPath(source.dir);
+  if (!path) return "全局技能目录";
+  switch (source.kind) {
+    case "builtin":
+      return "EasyWork 内置全局技能";
+    case "agents":
+      return `pi 标准全局目录 · ${path}`;
+    default:
+      return `全局技能目录 · ${path}`;
+  }
+}
+
 export function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [skillsDir, setSkillsDir] = useState("");
+  const [sources, setSources] = useState<SkillSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState("");
   const [disabled, setDisabled] = useState<string[]>(() => loadDisabledSkills());
@@ -35,7 +39,7 @@ export function Skills() {
     try {
       const info = await getClient().skillsInfo();
       setSkills(info.skills);
-      setSkillsDir(info.dir);
+      setSources(info.sources ?? []);
     } catch {
       /* ignore */
     } finally {
@@ -100,6 +104,27 @@ export function Skills() {
     }
   };
 
+  const sourceGroups = useMemo(() => {
+    const known = new Set(sources.map((source) => source.id));
+    const groups = sources.map((source) => ({
+      source,
+      skills: skills.filter((skill) => skill.source?.id === source.id),
+    }));
+    const unknownSkills = skills.filter((skill) => !known.has(skill.source?.id ?? ""));
+    if (unknownSkills.length > 0) {
+      groups.push({
+        source: {
+          id: "unknown",
+          label: "其他全局目录",
+          kind: "custom",
+          dir: "",
+        },
+        skills: unknownSkills,
+      });
+    }
+    return groups;
+  }, [skills, sources]);
+
   // 详情：SKILL.md 正文。
   if (detail) {
     const fm = detail.skill.frontmatter;
@@ -124,8 +149,7 @@ export function Skills() {
   return (
     <div className="page skills-page">
       <div className="skills-head">
-        <p className="skills-lead">{loading ? "正在扫描技能…" : `已发现 ${skills.length} 个技能`}</p>
-        {skillsDir && <span className="set-pill ghost" title={skillsDir}>主目录 {shortPath(skillsDir)}</span>}
+        <p className="skills-lead">{loading ? "正在扫描全局技能…" : `已发现 ${skills.length} 个全局技能`}</p>
         <span className="bar-spacer" />
         <button className="set-btn ghost soft icon" title="打开技能目录" onClick={() => void openDir()}>
           <FolderIcon size={16} />
@@ -158,45 +182,61 @@ export function Skills() {
       )}
       {note && <div className="note">{note}</div>}
 
-      {!loading && skills.length === 0 ? (
+      {!loading && sourceGroups.length === 0 ? (
         <div className="empty-models">
           <SparkIcon size={24} />
           <p>还没有发现技能</p>
           <span>可以新建模板，或把带 SKILL.md 的目录放入技能目录。</span>
         </div>
       ) : (
-      <div className="skill-list">
-        {skills.map((s) => {
-          const name = s.frontmatter.name;
-          const on = !disabled.includes(name);
-          return (
-            <div key={s.id} className="skill-card" data-testid={`skill-card-${s.id}`} onClick={() => void openDetail(s)}>
-              <span className="skill-ico">
-                <SparkIcon size={18} />
-              </span>
-              <div className="skill-body">
-                <div className="skill-name">
-                  {name}
-                  {s.frontmatter.version && <span className="set-pill">v{s.frontmatter.version}</span>}
-                  {s.scripts.length > 0 && <span className="set-pill">{s.scripts.length} 脚本</span>}
-                  <span className="set-pill ghost">{skillSourceLabel(s.dir)}</span>
+        <div className="skill-sources">
+          {sourceGroups.map(({ source, skills: groupSkills }) => (
+            <section key={source.id} className="skill-source" data-testid={`skills-source-${source.id}`}>
+              <div className="skill-source-head">
+                <div className="skill-source-title">
+                  <strong>{source.label}</strong>
+                  <span>{sourceSubtitle(source)}</span>
                 </div>
-                <div className="skill-desc">
-                  {s.frontmatter.description || s.frontmatter.whenToUse || "（无描述）"}
-                </div>
+                <span className="set-pill ghost" data-testid={`skills-source-count-${source.id}`}>{groupSkills.length} 个</span>
               </div>
-              <button
-                className={`set-toggle ${on ? "on" : ""}`}
-                title={on ? "已启用（点击关闭）" : "已关闭（点击启用）"}
-                aria-pressed={on}
-                onClick={(e) => toggle(name, e)}
-              >
-                <span />
-              </button>
-            </div>
-          );
-        })}
-      </div>
+              {groupSkills.length === 0 ? (
+                <div className="skill-source-empty">此全局目录暂无技能</div>
+              ) : (
+                <div className="skill-list">
+                  {groupSkills.map((s) => {
+                    const name = s.frontmatter.name;
+                    const on = !disabled.includes(name);
+                    return (
+                      <div key={s.id} className="skill-card" data-testid={`skill-card-${s.id}`} onClick={() => void openDetail(s)}>
+                        <span className="skill-ico">
+                          <SparkIcon size={18} />
+                        </span>
+                        <div className="skill-body">
+                          <div className="skill-name">
+                            {name}
+                            {s.frontmatter.version && <span className="set-pill">v{s.frontmatter.version}</span>}
+                            {s.scripts.length > 0 && <span className="set-pill">{s.scripts.length} 脚本</span>}
+                          </div>
+                          <div className="skill-desc">
+                            {s.frontmatter.description || s.frontmatter.whenToUse || "（无描述）"}
+                          </div>
+                        </div>
+                        <button
+                          className={`set-toggle ${on ? "on" : ""}`}
+                          title={on ? "已启用（点击关闭）" : "已关闭（点击启用）"}
+                          aria-pressed={on}
+                          onClick={(e) => toggle(name, e)}
+                        >
+                          <span />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          ))}
+        </div>
       )}
     </div>
   );

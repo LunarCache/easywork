@@ -81,6 +81,17 @@ describe("SkillManager", () => {
     expect(skills[0]!.frontmatter.name).toBe("PDF Filler");
     expect(skills[0]!.id).toBe("pdf-filler");
     expect(skills[0]!.scripts).toContain("fill.py");
+    expect(skills[0]!.source).toMatchObject({ id: "builtin", kind: "builtin", primary: true });
+    expect(sm.sources()[0]).toMatchObject({ id: "builtin", kind: "builtin", primary: true });
+  });
+
+  it("保留显式来源配置，供 UI 按全局目录分组", async () => {
+    const dir = makeSkillDir();
+    const sm = new SkillManager([{ id: "agents", label: "标准目录", kind: "agents", dir }]);
+    const skills = await sm.discover();
+    expect(skills).toHaveLength(1);
+    expect(skills[0]!.source).toMatchObject({ id: "agents", label: "标准目录", kind: "agents" });
+    expect(sm.sources()).toHaveLength(1);
   });
 
   it("同名技能保留先扫描目录的版本", async () => {

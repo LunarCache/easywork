@@ -269,8 +269,8 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 关键非显然事实：**有两套 skill 机制**。
 
-1. **pi 自带 skills（agent 真正执行的）**：由 pi `DefaultResourceLoader` 扫描 agent 目录/cwd 的 `SKILL.md` 暴露给内核。EasyWork 只注入 `skillsOverride` 按名过滤禁用项（`excludeSkills`），变更即重建会话。
-2. **应用内 `@ew/skills` SkillManager（UI 管理 + 备用 open_skill）**：自己实现渐进式披露——`discover()` 扫子目录的 `SKILL.md` 只解析 frontmatter（第一层），记 `scripts`/`resources`；frontmatter `name/description/whenToUse`（必填）+ `version/allowedTools`（选填），靠零依赖 mini-YAML 解析；`open_skill` 工具按需读全文（第二层）。路由 `GET /skills`、`/skills/:id/body`、`POST /skills/open|template`。
+1. **pi 自带 skills（agent 真正执行的）**：由 pi `DefaultResourceLoader` 扫描 agent 目录/cwd 的 `SKILL.md` 暴露给内核。全局来源包括 EasyWork 的 pi agentDir `~/.easywork/pi-agent/skills` 与 pi 标准用户目录 `~/.agents/skills`；项目级来源包括 cwd/祖先里的 `.pi/skills`、`.agents/skills`（需 trusted）以及包/设置/CLI 附加路径。EasyWork 只注入 `skillsOverride` 按名过滤禁用项（`excludeSkills`），变更即重建会话。
+2. **应用内 `@ew/skills` SkillManager（UI 管理 + 备用 open_skill）**：自己实现渐进式披露——`discover()` 只扫**全局来源**并返回 `source` 元数据，Skills 管理页按“内置 Skills / 标准目录”分组；项目级 skills 仅由运行时按 cwd 发现，不显示在全局管理页。frontmatter `name/description/whenToUse`（必填）+ `version/allowedTools`（选填），靠零依赖 mini-YAML 解析；`open_skill` 工具按需读全文（第二层）。路由 `GET /skills`（返回 `skills/dir/sources`）、`/skills/:id/body`、`POST /skills/open|template`。
 
 ---
 

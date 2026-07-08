@@ -21,6 +21,7 @@ import type {
   Project,
   SamplingParams,
   Skill,
+  SkillSource,
   StoredMessage,
   Thread,
   ThinkLevel,
@@ -716,9 +717,9 @@ export class EasyWorkClient {
     return skills;
   }
 
-  /** 列出技能并返回技能目录路径。 */
-  async skillsInfo(): Promise<{ skills: Skill[]; dir: string }> {
-    return this.getJSON<{ skills: Skill[]; dir: string }>("/skills");
+  /** 列出全局技能、主目录与发现来源。 */
+  async skillsInfo(): Promise<{ skills: Skill[]; dir: string; sources: SkillSource[] }> {
+    return this.getJSON<{ skills: Skill[]; dir: string; sources: SkillSource[] }>("/skills");
   }
 
   /** 读取某技能的 SKILL.md 正文（详情查看）。 */

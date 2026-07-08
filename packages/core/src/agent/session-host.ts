@@ -40,6 +40,8 @@ export interface SessionHostDeps {
   providers: ProviderManager;
   /** pi 全局配置目录（auth/models/session 落盘）。默认 ~/.easywork/pi-agent。 */
   agentDir?: string;
+  /** 额外全局 Skill 目录；与 UI 的全局 Skills 来源保持一致。 */
+  globalSkillPaths?: string[];
   /** R3：记忆（context 召回注入 + agent_end 抽取，并暴露 manage_memory 工具）。 */
   memory?: MemoryProvider;
   /** R3：会话历史 FTS 检索工具 session_search。 */
@@ -390,6 +392,7 @@ export class SessionHost {
       cwd,
       agentDir: this.agentDir,
       extensionFactories: factories,
+      ...(this.deps.globalSkillPaths?.length ? { additionalSkillPaths: this.deps.globalSkillPaths } : {}),
       // 禁用的 Skill 按名过滤掉（默认无 → 不改变发现结果）。
       ...(excluded.size
         ? { skillsOverride: (base) => ({ ...base, skills: base.skills.filter((s) => !excluded.has(s.name)) }) }

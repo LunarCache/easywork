@@ -37,6 +37,11 @@ test.describe("knowledge base and skills e2e", () => {
     await page.getByTestId("sidebar-settings").click();
     await page.getByTestId("settings-nav-skills").click();
 
+    await expect(page.getByTestId("skills-source-builtin")).toBeVisible();
+    await expect(page.getByTestId("skills-source-agents")).toBeVisible();
+    await expect(page.getByText("EasyWork 内置全局技能")).toBeVisible();
+    await expect(page.getByText(/^主目录\s/)).toHaveCount(0);
+
     await page.getByTestId("skills-new-button").click();
     await expect(page.getByTestId("skills-new-inline")).toBeVisible();
     await page.getByTestId("skills-new-input").fill(skillName);
@@ -52,6 +57,7 @@ test.describe("knowledge base and skills e2e", () => {
     const info = await client.skillsInfo();
     const created = info.skills.find((item) => item.frontmatter.name === skillName);
     expect(created).toBeTruthy();
+    expect(created!.source.id).toBe("builtin");
 
     await page.getByTestId(`skill-card-${created!.id}`).click();
     await expect(page.getByTestId("skills-detail-name")).toHaveText(skillName);
@@ -59,6 +65,7 @@ test.describe("knowledge base and skills e2e", () => {
 
     await page.getByTestId("skills-detail-back").click();
     await expect(page.getByTestId("skills-new-button")).toBeVisible();
+    await expect(page.getByTestId("skills-source-builtin")).toContainText(skillName);
     await expect(page.getByTestId(`skill-card-${created!.id}`)).toBeVisible();
   });
 });
