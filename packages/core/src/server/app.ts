@@ -3,7 +3,7 @@ import fsPath from "node:path";
 import os from "node:os";
 import { createRequire } from "node:module";
 import { Readable } from "node:stream";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import {
   ChatMessageSchema,
   ApprovalModeSchema,
@@ -26,7 +26,6 @@ import {
   type InboxEvent,
   ChannelConfigSchema,
   type ChannelConfig,
-  type ChannelStatus,
   type DownloadEvent,
   type McpServerConfig,
 } from "@ew/shared";
@@ -34,7 +33,6 @@ import { LlamaServeEngine } from "@ew/providers";
 import { builtinTools } from "@ew/tools";
 import { SkillManager, type SkillSourceConfig } from "@ew/skills";
 import { McpClientManager } from "@ew/mcp";
-import { getModels as getPiModels, getProviders as getPiProviders } from "@earendil-works/pi-ai";
 import {
   ChannelGateway,
   ConnectorHost,
@@ -42,8 +40,6 @@ import {
   registerBuiltInChannelAdapters,
   registerFeishuApp,
   registerWechatAccount,
-  type WebhookRequest,
-  type WebhookResult,
 } from "@ew/im-connectors";
 import { LocalMemoryProvider } from "@ew/memory";
 import { z } from "zod";
@@ -60,11 +56,15 @@ import { buildFactExtractor } from "../memory/fact-extractor.js";
 import { GitService } from "../git/git.js";
 import { listDir, readFileSafe, readRawSafe, statFileSafe } from "@ew/tools";
 import { KnowledgeBaseStore } from "../rag/store.js";
-import { parseFile } from "../rag/parse.js";
 import { RouterServerManager } from "../engine/router-server-manager.js";
 import { getFreePort } from "../engine/net.js";
 import type { LocalBackend } from "../engine/local-backend.js";
 import { resolveLlamaBin, LLAMA_INSTALL } from "../engine/resolve-llama.js";
+import type { CoreHttpContext } from "./context.js";
+import type { RawBodyRequest } from "./http-utils.js";
+import { registerProviderRoutes } from "./routes/providers.js";
+import { registerChannelRoutes } from "./routes/channels.js";
+import { registerKnowledgeRoutes } from "./routes/knowledge.js";
 import {
   dataDir as defaultDataDir,
   dbPath as defaultDbPath,
@@ -133,188 +133,6 @@ export function agentModelUnavailableError(
   }
 }
 
-const ProviderModelConfigSchema = z.object({
-  id: z.string().min(1),
-  contextWindow: z.number().int().positive(),
-  inputModalities: z.array(z.enum(["text", "image"])).min(1),
-});
-
-const ProviderConfigSchema = z.object({
-  id: z.string().min(1),
-  kind: z.enum(["openai-compatible", "pi-native"]).default("openai-compatible"),
-  baseUrl: z.string().url().optional(),
-  api: z.string().min(1).optional(),
-  apiKey: z.string().optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  modelConfigs: z.array(ProviderModelConfigSchema).min(1),
-}).superRefine((cfg, ctx) => {
-  if (cfg.kind === "openai-compatible" && !cfg.baseUrl) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["baseUrl"],
-      message: "baseUrl is required for openai-compatible providers",
-    });
-  }
-});
-
-const ProviderModelProbeSchema = z.object({
-  baseUrl: z.string().url(),
-  apiKey: z.string().optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-});
-
-function modelIdsFromResponse(payload: unknown): string[] {
-  const data = (payload as { data?: unknown })?.data;
-  const rawItems = Array.isArray(data) ? data : Array.isArray(payload) ? payload : [];
-  const ids = rawItems
-    .map((item) => (typeof item === "string" ? item : (item as { id?: unknown })?.id))
-    .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
-    .map((id) => id.trim());
-  return [...new Set(ids)];
-}
-
-async function fetchProviderModelIds(fetchImpl: typeof fetch, input: z.infer<typeof ProviderModelProbeSchema>): Promise<string[]> {
-  const base = input.baseUrl.replace(/\/+$/, "");
-  const urls = [new URL(`${base}/models`).toString()];
-  if (!/\/v1$/i.test(base)) urls.push(new URL(`${base}/v1/models`).toString());
-  let lastError = "";
-  for (const url of [...new Set(urls)]) {
-    try {
-      const res = await fetchImpl(url, {
-        headers: {
-          accept: "application/json",
-          ...(input.apiKey ? { authorization: `Bearer ${input.apiKey}` } : {}),
-          ...(input.headers ?? {}),
-        },
-      });
-      if (!res.ok) {
-        lastError = `${res.status} ${res.statusText}`.trim();
-        continue;
-      }
-      const ids = modelIdsFromResponse(await res.json());
-      if (ids.length > 0) return ids;
-      lastError = "empty model list";
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-    }
-  }
-  throw new Error(lastError || "model list probe failed");
-}
-
-const PI_PROVIDER_LABELS: Record<string, string> = {
-  "amazon-bedrock": "Amazon Bedrock",
-  "ant-ling": "Ant Ling",
-  anthropic: "Anthropic",
-  "azure-openai-responses": "Azure OpenAI",
-  cerebras: "Cerebras",
-  "cloudflare-ai-gateway": "Cloudflare AI Gateway",
-  "cloudflare-workers-ai": "Cloudflare Workers AI",
-  deepseek: "DeepSeek",
-  fireworks: "Fireworks",
-  "github-copilot": "GitHub Copilot",
-  google: "Google Gemini",
-  "google-vertex": "Google Vertex AI",
-  groq: "Groq",
-  huggingface: "Hugging Face",
-  "kimi-coding": "Kimi For Coding",
-  minimax: "MiniMax",
-  "minimax-cn": "MiniMax China",
-  mistral: "Mistral",
-  moonshotai: "Moonshot AI",
-  "moonshotai-cn": "Moonshot AI China",
-  nvidia: "NVIDIA NIM",
-  opencode: "OpenCode Zen",
-  "opencode-go": "OpenCode Go",
-  openai: "OpenAI",
-  "openai-codex": "OpenAI Codex",
-  openrouter: "OpenRouter",
-  together: "Together AI",
-  "vercel-ai-gateway": "Vercel AI Gateway",
-  xai: "xAI",
-  xiaomi: "Xiaomi MiMo",
-  "xiaomi-token-plan-ams": "Xiaomi MiMo Amsterdam",
-  "xiaomi-token-plan-cn": "Xiaomi MiMo China",
-  "xiaomi-token-plan-sgp": "Xiaomi MiMo Singapore",
-  zai: "ZAI",
-  "zai-coding-cn": "ZAI Coding Plan China",
-};
-
-const PI_PROVIDER_ORDER = [
-  "openai",
-  "anthropic",
-  "google",
-  "google-vertex",
-  "mistral",
-  "openrouter",
-  "deepseek",
-  "xai",
-  "groq",
-  "vercel-ai-gateway",
-  "amazon-bedrock",
-  "azure-openai-responses",
-  "openai-codex",
-  "github-copilot",
-  "moonshotai",
-  "zai",
-  "minimax",
-  "huggingface",
-  "together",
-  "fireworks",
-  "cloudflare-ai-gateway",
-  "cloudflare-workers-ai",
-  "nvidia",
-  "cerebras",
-];
-
-function titleFromId(id: string): string {
-  return id
-    .split("-")
-    .filter(Boolean)
-    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function piProviderCatalog(): {
-  id: string;
-  label: string;
-  apiFamilies: string[];
-  modelCount: number;
-  sampleModels: string[];
-  models: {
-    id: string;
-    name: string;
-    api: string;
-    contextWindow: number;
-    inputModalities: ("text" | "image")[];
-  }[];
-}[] {
-  const order = new Map(PI_PROVIDER_ORDER.map((id, index) => [id, index]));
-  return getPiProviders()
-    .map((id) => {
-      const models = getPiModels(id);
-      return {
-        id,
-        label: PI_PROVIDER_LABELS[id] ?? titleFromId(id),
-        apiFamilies: [...new Set(models.map((m) => m.api))],
-        modelCount: models.length,
-        sampleModels: models.slice(0, 3).map((m) => m.id),
-        models: models.map((m) => ({
-          id: m.id,
-          name: m.name,
-          api: m.api,
-          contextWindow: m.contextWindow,
-          inputModalities: m.input,
-        })),
-      };
-    })
-    .sort((a, b) => {
-      const ap = order.get(a.id) ?? Number.MAX_SAFE_INTEGER;
-      const bp = order.get(b.id) ?? Number.MAX_SAFE_INTEGER;
-      if (ap !== bp) return ap - bp;
-      return a.label.localeCompare(b.label);
-    });
-}
-
 const BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 
 function requestBodyTooLargeError(): Error & { statusCode?: number; code?: string } {
@@ -322,55 +140,6 @@ function requestBodyTooLargeError(): Error & { statusCode?: number; code?: strin
   err.statusCode = 413;
   err.code = "FST_ERR_CTP_BODY_TOO_LARGE";
   return err;
-}
-
-const FeishuSetupSchema = z.object({
-  id: z.string().optional(),
-  displayName: z.string().optional(),
-  enabled: z.boolean().default(true),
-  region: z.enum(["feishu", "lark"]).default("feishu"),
-  auth: ChannelConfigSchema.shape.auth.optional(),
-});
-
-const WechatSetupSchema = z.object({
-  id: z.string().optional(),
-  displayName: z.string().optional(),
-  enabled: z.boolean().default(true),
-  auth: ChannelConfigSchema.shape.auth.optional(),
-});
-
-type RawBodyRequest = FastifyRequest & { rawBody?: Buffer };
-
-type FeishuSetupStatus = "initializing" | "waiting" | "completed" | "error" | "aborted";
-
-interface FeishuSetupSession {
-  id: string;
-  connectorId: string;
-  displayName?: string;
-  status: FeishuSetupStatus;
-  createdAt: string;
-  qrUrl?: string;
-  expireAt?: string;
-  statusDetail?: string;
-  error?: string;
-  channelStatus?: ChannelStatus;
-  abort: AbortController;
-}
-
-type WechatSetupStatus = "initializing" | "waiting" | "completed" | "error" | "aborted";
-
-interface WechatSetupSession {
-  id: string;
-  connectorId: string;
-  displayName?: string;
-  status: WechatSetupStatus;
-  createdAt: string;
-  qrUrl?: string;
-  expireAt?: string;
-  statusDetail?: string;
-  error?: string;
-  channelStatus?: ChannelStatus;
-  abort: AbortController;
 }
 
 function uniqSkillSources(sources: SkillSourceConfig[]): SkillSourceConfig[] {
@@ -609,47 +378,15 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       await connectorHost.handleInbound(adapter, message);
     },
   });
-  const persistChannels = (): void => {
-    try {
-      repo.setSetting(CHANNELS_KEY, JSON.stringify(channels.configs()));
-    } catch {
-      /* 持久化失败不影响运行 */
-    }
-  };
-  const feishuSetupSessions = new Map<string, FeishuSetupSession>();
-  const serializeFeishuSetup = (session: FeishuSetupSession) => ({
-    id: session.id,
-    connectorId: session.connectorId,
-    ...(session.displayName ? { displayName: session.displayName } : {}),
-    status: session.status,
-    createdAt: session.createdAt,
-    ...(session.qrUrl ? { qrUrl: session.qrUrl } : {}),
-    ...(session.expireAt ? { expireAt: session.expireAt } : {}),
-    ...(session.statusDetail ? { statusDetail: session.statusDetail } : {}),
-    ...(session.error ? { error: session.error } : {}),
-    ...(session.channelStatus ? { channelStatus: session.channelStatus } : {}),
-  });
-  const scheduleFeishuSetupCleanup = (id: string): void => {
-    setTimeout(() => feishuSetupSessions.delete(id), 10 * 60 * 1000).unref?.();
-  };
-  const wechatSetupSessions = new Map<string, WechatSetupSession>();
-  const serializeWechatSetup = (session: WechatSetupSession) => ({
-    id: session.id,
-    connectorId: session.connectorId,
-    ...(session.displayName ? { displayName: session.displayName } : {}),
-    status: session.status,
-    createdAt: session.createdAt,
-    ...(session.qrUrl ? { qrUrl: session.qrUrl } : {}),
-    ...(session.expireAt ? { expireAt: session.expireAt } : {}),
-    ...(session.statusDetail ? { statusDetail: session.statusDetail } : {}),
-    ...(session.error ? { error: session.error } : {}),
-    ...(session.channelStatus ? { channelStatus: session.channelStatus } : {}),
-  });
-  const scheduleWechatSetupCleanup = (id: string): void => {
-    setTimeout(() => wechatSetupSessions.delete(id), 10 * 60 * 1000).unref?.();
-  };
+	  const persistChannels = (): void => {
+	    try {
+	      repo.setSetting(CHANNELS_KEY, JSON.stringify(channels.configs()));
+	    } catch {
+	      /* 持久化失败不影响运行 */
+	    }
+	  };
 
-  const DEFAULT_EMBED_REPO = "nomic-ai/nomic-embed-text-v1.5-GGUF";
+	  const DEFAULT_EMBED_REPO = "nomic-ai/nomic-embed-text-v1.5-GGUF";
   const DEFAULT_EMBED_FILE = "nomic-embed-text-v1.5.Q4_K_M.gguf";
   async function downloadEmbeddingModel(repoId: string, fileName: string): Promise<string> {
     let p = "";
@@ -925,311 +662,37 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     }
   });
 
+  const primarySkillSource = skillSources.find((source) => source.primary) ?? skillSources[0];
+  const routeContext: CoreHttpContext = {
+    app,
+    registry,
+    local,
+    models,
+    providers,
+    sessionHost,
+    skills,
+    skillsDir: primarySkillSource?.dir ?? fsPath.join(agentDir, "skills"),
+    mcp,
+    channels,
+    memory,
+    embeddings,
+    kb,
+    repo,
+    fetchImpl: opts.fetch ?? fetch,
+    persistProviders,
+    persistChannels,
+    emitInboxChanged,
+    inboxSubscribers,
+  };
+
   // ---- 云端 provider 配置 ----
-  app.get("/providers", async () => ({ providers: providers.list() }));
+  registerProviderRoutes(routeContext);
 
-  app.get("/providers/catalog", async () => ({ providers: piProviderCatalog() }));
-
-  app.post("/providers/probe-models", async (req, reply) => {
-    const parsed = ProviderModelProbeSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_provider_probe", detail: parsed.error.format() });
-    }
-    try {
-      const models = await fetchProviderModelIds(opts.fetch ?? fetch, parsed.data);
-      return { models };
-    } catch (e) {
-      return reply.code(502).send({
-        error: "provider_probe_failed",
-        message: e instanceof Error ? e.message : String(e),
-      });
-    }
-  });
-
-  app.post("/providers", async (req, reply) => {
-    const parsed = ProviderConfigSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_provider", detail: parsed.error.format() });
-    }
-    providers.add(parsed.data);
-    persistProviders();
-    sessionHost.syncCloudProviders();
-    return { ok: true };
-  });
-
-  app.delete("/providers/:id", async (req) => {
-    providers.remove((req.params as { id: string }).id);
-    persistProviders();
-    sessionHost.syncCloudProviders();
-    return { ok: true };
-  });
-
-  // ---- 外部 IM 渠道 Gateway ----
-  app.post("/im/feishu/register", async (req, reply) => {
-    const parsed = FeishuSetupSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_feishu_setup", detail: parsed.error.format() });
-    }
-
-    const sessionId = crypto.randomUUID();
-    const connectorId = parsed.data.id?.trim() || `feishu-${sessionId.slice(0, 8)}`;
-    const abort = new AbortController();
-    const session: FeishuSetupSession = {
-      id: sessionId,
-      connectorId,
-      ...(parsed.data.displayName ? { displayName: parsed.data.displayName } : {}),
-      status: "initializing",
-      createdAt: new Date().toISOString(),
-      abort,
-    };
-    feishuSetupSessions.set(sessionId, session);
-
-    let resolveQr: (() => void) | undefined;
-    let rejectQr: ((err: Error) => void) | undefined;
-    const qrReady = new Promise<void>((resolve, reject) => {
-      resolveQr = resolve;
-      rejectQr = reject;
-    });
-
-    void (opts.feishuRegister ?? registerFeishuApp)({
-      region: parsed.data.region,
-      signal: abort.signal,
-      onQRCodeReady: (info) => {
-        session.status = "waiting";
-        session.qrUrl = info.url;
-        session.expireAt = new Date(Date.now() + info.expireIn * 1000).toISOString();
-        resolveQr?.();
-      },
-      onStatusChange: (info) => {
-        session.statusDetail = info.status;
-      },
-    }).then(async (result) => {
-      if (abort.signal.aborted || session.status === "aborted") {
-        session.status = "aborted";
-        scheduleFeishuSetupCleanup(sessionId);
-        return;
-      }
-      const config: ChannelConfig = {
-        id: connectorId,
-        kind: "feishu",
-        enabled: parsed.data.enabled,
-        ...(parsed.data.displayName ? { displayName: parsed.data.displayName } : {}),
-        secrets: { appId: result.appId, appSecret: result.appSecret },
-        options: {
-          transport: "websocket",
-          domain: result.tenantBrand ?? parsed.data.region,
-          receiveIdType: "chat_id",
-        },
-        auth: parsed.data.auth ?? { allowAll: true },
-      };
-      let status = await channels.upsert(config);
-      persistChannels();
-      if (config.enabled) status = await channels.start(config.id);
-      emitInboxChanged({ reason: "connector" });
-      session.status = "completed";
-      session.channelStatus = status;
-      scheduleFeishuSetupCleanup(sessionId);
-    }).catch((err) => {
-      session.status = abort.signal.aborted ? "aborted" : "error";
-      session.error = err instanceof Error ? err.message : String(err);
-      rejectQr?.(err instanceof Error ? err : new Error(String(err)));
-      scheduleFeishuSetupCleanup(sessionId);
-    });
-
-    await Promise.race([
-      qrReady.catch(() => undefined),
-      new Promise((resolve) => setTimeout(resolve, 10_000)),
-    ]);
-    return { session: serializeFeishuSetup(session) };
-  });
-
-  app.get("/im/feishu/register/:id", async (req, reply) => {
-    const session = feishuSetupSessions.get((req.params as { id: string }).id);
-    if (!session) return reply.code(404).send({ error: "unknown_feishu_setup" });
-    return { session: serializeFeishuSetup(session) };
-  });
-
-  app.delete("/im/feishu/register/:id", async (req) => {
-    const session = feishuSetupSessions.get((req.params as { id: string }).id);
-    if (session && (session.status === "initializing" || session.status === "waiting")) {
-      session.abort.abort();
-      session.status = "aborted";
-      scheduleFeishuSetupCleanup(session.id);
-    }
-    return { ok: true };
-  });
-
-  app.post("/im/wechat/register", async (req, reply) => {
-    const parsed = WechatSetupSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_wechat_setup", detail: parsed.error.format() });
-    }
-
-    const sessionId = crypto.randomUUID();
-    const connectorId = parsed.data.id?.trim() || `wechat-${sessionId.slice(0, 8)}`;
-    const abort = new AbortController();
-    const session: WechatSetupSession = {
-      id: sessionId,
-      connectorId,
-      ...(parsed.data.displayName ? { displayName: parsed.data.displayName } : {}),
-      status: "initializing",
-      createdAt: new Date().toISOString(),
-      abort,
-    };
-    wechatSetupSessions.set(sessionId, session);
-
-    let resolveQr: (() => void) | undefined;
-    let rejectQr: ((err: Error) => void) | undefined;
-    const qrReady = new Promise<void>((resolve, reject) => {
-      resolveQr = resolve;
-      rejectQr = reject;
-    });
-
-    void (opts.wechatRegister ?? registerWechatAccount)({
-      signal: abort.signal,
-      onQRCodeReady: (info) => {
-        session.status = "waiting";
-        session.qrUrl = info.url;
-        session.expireAt = new Date(Date.now() + info.expireIn * 1000).toISOString();
-        resolveQr?.();
-      },
-      onStatusChange: (info) => {
-        session.statusDetail = info.status;
-      },
-    }).then(async (result) => {
-      if (abort.signal.aborted || session.status === "aborted") {
-        session.status = "aborted";
-        scheduleWechatSetupCleanup(sessionId);
-        return;
-      }
-      const config: ChannelConfig = {
-        id: connectorId,
-        kind: "wechat",
-        enabled: parsed.data.enabled,
-        ...(parsed.data.displayName ? { displayName: parsed.data.displayName } : {}),
-        secrets: { token: result.token },
-        options: {
-          accountId: result.accountId,
-          baseUrl: result.baseUrl,
-          ...(result.userId ? { userId: result.userId } : {}),
-          groupPolicy: "disabled",
-        },
-        auth: parsed.data.auth ?? { allowAll: true },
-      };
-      let status = await channels.upsert(config);
-      persistChannels();
-      if (config.enabled) status = await channels.start(config.id);
-      emitInboxChanged({ reason: "connector" });
-      session.status = "completed";
-      session.channelStatus = status;
-      scheduleWechatSetupCleanup(sessionId);
-    }).catch((err) => {
-      session.status = abort.signal.aborted ? "aborted" : "error";
-      session.error = err instanceof Error ? err.message : String(err);
-      rejectQr?.(err instanceof Error ? err : new Error(String(err)));
-      scheduleWechatSetupCleanup(sessionId);
-    });
-
-    await Promise.race([
-      qrReady.catch(() => undefined),
-      new Promise((resolve) => setTimeout(resolve, 10_000)),
-    ]);
-    return { session: serializeWechatSetup(session) };
-  });
-
-  app.get("/im/wechat/register/:id", async (req, reply) => {
-    const session = wechatSetupSessions.get((req.params as { id: string }).id);
-    if (!session) return reply.code(404).send({ error: "unknown_wechat_setup" });
-    return { session: serializeWechatSetup(session) };
-  });
-
-  app.delete("/im/wechat/register/:id", async (req) => {
-    const session = wechatSetupSessions.get((req.params as { id: string }).id);
-    if (session && (session.status === "initializing" || session.status === "waiting")) {
-      session.abort.abort();
-      session.status = "aborted";
-      scheduleWechatSetupCleanup(session.id);
-    }
-    return { ok: true };
-  });
-
-  app.get("/im/adapters", async () => ({ adapters: channels.metas() }));
-
-  app.get("/im/connectors", async () => ({
-    connectors: channels.configs(),
-    status: channels.statuses(),
-  }));
-
-  app.post("/im/connectors", async (req, reply) => {
-    const parsed = ChannelConfigSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_channel_config", detail: parsed.error.format() });
-    }
-    try {
-      let status = await channels.upsert(parsed.data);
-      persistChannels();
-      if (parsed.data.enabled) status = await channels.start(parsed.data.id);
-      emitInboxChanged({ reason: "connector" });
-      return { ok: true, status };
-    } catch (err) {
-      return reply.code(400).send({ error: "channel_config_failed", message: err instanceof Error ? err.message : String(err) });
-    }
-  });
-
-  app.post("/im/connectors/:id/start", async (req, reply) => {
-    try {
-      const status = await channels.start((req.params as { id: string }).id);
-      emitInboxChanged({ reason: "status" });
-      return { ok: true, status };
-    } catch (err) {
-      return reply.code(400).send({ error: "channel_start_failed", message: err instanceof Error ? err.message : String(err) });
-    }
-  });
-
-  app.post("/im/connectors/:id/stop", async (req, reply) => {
-    try {
-      const status = await channels.stop((req.params as { id: string }).id);
-      emitInboxChanged({ reason: "status" });
-      return { ok: true, status };
-    } catch (err) {
-      return reply.code(400).send({ error: "channel_stop_failed", message: err instanceof Error ? err.message : String(err) });
-    }
-  });
-
-  app.delete("/im/connectors/:id", async (req) => {
-    await channels.remove((req.params as { id: string }).id);
-    persistChannels();
-    emitInboxChanged({ reason: "connector" });
-    return { ok: true };
-  });
-
-  app.all("/im/:id/webhook", async (req, reply) => {
-    const headers: WebhookRequest["headers"] = {};
-    for (const [key, value] of Object.entries(req.headers)) headers[key] = value;
-    const query: WebhookRequest["query"] = {};
-    for (const [key, value] of Object.entries(req.query as Record<string, string | string[] | undefined>)) {
-      query[key] = value;
-    }
-    let result: WebhookResult;
-    try {
-      result = await channels.handleWebhook((req.params as { id: string }).id, {
-        method: req.method,
-        path: req.url,
-        query,
-        headers,
-        body: req.body,
-        rawBody: (req as RawBodyRequest).rawBody,
-      });
-    } catch (err) {
-      return reply.code(404).send({
-        error: "unknown_channel_connector",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-    if (result.headers) {
-      for (const [key, value] of Object.entries(result.headers)) reply.header(key, value);
-    }
-    return reply.code(result.status ?? 200).send(result.body ?? { ok: true });
+  // ---- 外部 IM 渠道 Gateway + 收件箱 read model ----
+  const channelRouteControls = registerChannelRoutes({
+    ...routeContext,
+    feishuRegister: opts.feishuRegister ?? registerFeishuApp,
+    wechatRegister: opts.wechatRegister ?? registerWechatAccount,
   });
 
   // ---- 流式对话（内部 SSE，渠道无关事件） ----
@@ -1465,215 +928,10 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     return { tools };
   });
 
-  // ---- 知识库 RAG ----
-  const KbIngestSchema = z.object({
-    source: z.string().min(1),
-    text: z.string().min(1),
-    kbId: z.string().optional(),
-  });
-  app.get("/kb/list", async () => ({ kbs: kb.listKbs() }));
-  app.get("/kb/docs", async (req) => {
-    const kbId = (req.query as { kbId?: string }).kbId;
-    return { docs: kb.listDocs(kbId), chunks: kb.count(kbId) };
-  });
-  // 单文档正文（按 chunk 拼接）+ 元数据，供 UI 预览。
-  app.get("/kb/docs/:id", async (req, reply) => {
-    const doc = kb.docContent((req.params as { id: string }).id);
-    if (!doc) return reply.code(404).send({ error: "not_found" });
-    return { doc };
-  });
-  app.post("/kb/docs", async (req, reply) => {
-    const parsed = KbIngestSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_doc", detail: parsed.error.format() });
-    }
-    const doc = await kb.ingest(parsed.data);
-    return { doc };
-  });
-
-  // ---- 本地文件上传 + 异步解析/嵌入 ----
-  interface KbJob {
-    id: string;
-    source: string;
-    kbId: string;
-    status: "queued" | "parsing" | "embedding" | "done" | "error";
-    chunks?: number;
-    done?: number;
-    total?: number;
-    error?: string;
-    createdAt: string;
-  }
-  const kbJobs: KbJob[] = []; // 最近在前，上限 100
-  const KbUploadSchema = z.object({
-    source: z.string().min(1),
-    contentBase64: z.string().min(1),
-    kbId: z.string().optional(),
-  });
-  app.post("/kb/upload", async (req, reply) => {
-    const parsed = KbUploadSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "invalid_upload", detail: parsed.error.format() });
-    }
-    const { source, contentBase64 } = parsed.data;
-    const kbId = parsed.data.kbId ?? "default";
-    const job: KbJob = { id: crypto.randomUUID(), source, kbId, status: "queued", createdAt: new Date().toISOString() };
-    kbJobs.unshift(job);
-    if (kbJobs.length > 100) kbJobs.length = 100;
-    // 后台异步解析 → 分块 → 嵌入 → 入库（不阻塞响应）。
-    void (async () => {
-      try {
-        job.status = "parsing";
-        const buf = Buffer.from(contentBase64, "base64");
-        const text = parseFile(source, buf);
-        if (!text.trim()) throw new Error("解析结果为空");
-        job.status = "embedding";
-        const doc = await kb.ingest({ source, text, kbId }, (p) => {
-          job.done = p.done;
-          job.total = p.total;
-        });
-        job.chunks = doc.chunks;
-        job.status = "done";
-      } catch (e) {
-        job.status = "error";
-        job.error = e instanceof Error ? e.message : String(e);
-      }
-    })();
-    return { jobId: job.id };
-  });
-  app.get("/kb/jobs", async () => ({ jobs: kbJobs.slice(0, 30) }));
-  app.delete("/kb/docs/:id", async (req) => {
-    kb.deleteDoc((req.params as { id: string }).id);
-    return { ok: true };
-  });
-  app.get("/kb/search", async (req) => {
-    const q = req.query as { q?: string; topK?: string; kbId?: string };
-    const hits = await kb.retrieve(q.q ?? "", {
-      ...(q.kbId ? { kbId: q.kbId } : {}),
-      ...(q.topK ? { topK: Number(q.topK) } : {}),
-    });
-    return { hits };
-  });
-
-  // ---- 技能 ----
-  const primarySkillSource = skillSources.find((source) => source.primary) ?? skillSources[0];
-  const skillsDir = primarySkillSource?.dir ?? fsPath.join(agentDir, "skills");
-  app.get("/skills", async () => {
-    await skills.discover().catch(() => {});
-    return { skills: skills.list(), dir: skillsDir, sources: skills.sources() };
-  });
-  // 读取某技能的 SKILL.md 正文（懒加载；用于详情查看）。
-  app.get("/skills/:id/body", async (req, reply) => {
-    const id = (req.params as { id: string }).id;
-    const skill = skills.list().find((s) => s.id === id);
-    if (!skill) return reply.code(404).send({ error: "not_found" });
-    try {
-      const body = fs.readFileSync(skill.bodyPath, "utf8");
-      return { body, bodyPath: skill.bodyPath };
-    } catch (e) {
-      return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-  // 在系统文件管理器中打开技能目录（本机桌面用）。
-  app.post("/skills/open", async (_req, reply) => {
-    try {
-      fs.mkdirSync(skillsDir, { recursive: true });
-      const cmd =
-        process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
-      const { spawn } = await import("node:child_process");
-      spawn(cmd, [skillsDir], { detached: true, stdio: "ignore" }).unref();
-      return { ok: true, dir: skillsDir };
-    } catch (e) {
-      return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
-    }
-  });
-  // 新建一个 SKILL.md 模板（在技能目录下建子目录）。
-  app.post("/skills/template", async (req, reply) => {
-    const body = (req.body ?? {}) as { name?: string };
-    const name = (body.name ?? "my-skill").replace(/[^a-zA-Z0-9._-]+/g, "-").toLowerCase() || "my-skill";
-    const dir = fsPath.join(skillsDir, name);
-    const file = fsPath.join(dir, "SKILL.md");
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      if (!fs.existsSync(file)) {
-        fs.writeFileSync(
-          file,
-          `---
-name: ${name}
-description: 一句话说明这个技能做什么（会进系统提示目录）
-whenToUse: 描述什么情况下模型应该调用 open_skill 加载本技能
-version: "0.1.0"
----
-
-# ${name}
-
-在这里写技能正文：步骤、约定、示例。模型调用 open_skill("${name}") 时才会注入这部分内容。
-`,
-        );
-      }
-      await skills.discover().catch(() => {});
-      return { ok: true, file };
-    } catch (e) {
-      return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
-    }
-  });
+  // ---- 知识库 RAG + 全局 Skills ----
+  registerKnowledgeRoutes(routeContext);
 
   // ---- 会话 ----
-  app.get("/inbox/events", async (req, reply) => {
-    reply.hijack();
-    const raw = reply.raw;
-    raw.on("error", () => {});
-    raw.writeHead(200, {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-      "access-control-allow-origin": req.headers.origin ?? "*",
-    });
-
-    const send = (event: InboxEvent) => {
-      if (!raw.writableEnded && !raw.destroyed) raw.write(`data: ${JSON.stringify(event)}\n\n`);
-    };
-    const heartbeat = setInterval(() => {
-      if (!raw.writableEnded && !raw.destroyed) raw.write(": keepalive\n\n");
-    }, 25_000);
-    heartbeat.unref?.();
-    const cleanup = () => {
-      clearInterval(heartbeat);
-      inboxSubscribers.delete(send);
-    };
-    raw.on("close", cleanup);
-    inboxSubscribers.add(send);
-    send({ type: "ready", at: new Date().toISOString() });
-  });
-
-  app.get("/inbox/threads", async () => {
-    const threads = repo
-      .listThreads()
-      .filter((thread) => thread.channel)
-      .map((thread) => {
-        const history = repo.history(thread.id);
-        const last = [...history].reverse().find((message) => messageText(message.parts).trim());
-        return {
-          id: thread.id,
-          title: thread.title,
-          channel: thread.channel!,
-          ...(thread.projectId ? { projectId: thread.projectId } : {}),
-          modelId: thread.modelId,
-          createdAt: thread.createdAt,
-          updatedAt: thread.updatedAt,
-          messageCount: history.length,
-          ...(last
-            ? {
-                lastMessage: {
-                  role: last.role,
-                  text: messageText(last.parts).trim(),
-                  createdAt: last.createdAt,
-                },
-              }
-            : {}),
-        };
-      });
-    return { threads };
-  });
   app.get("/threads", async (req) => {
     const projectId = (req.query as { projectId?: string }).projectId;
     return { threads: repo.listThreads(projectId ? { projectId } : undefined) };
@@ -2135,21 +1393,10 @@ version: "0.1.0"
       void autoEnableEmbedding();
       return { port: actualPort, host };
     },
-    async stop() {
-      await app.close();
-      for (const session of feishuSetupSessions.values()) {
-        if (session.status === "initializing" || session.status === "waiting") {
-          session.abort.abort();
-          session.status = "aborted";
-        }
-      }
-      for (const session of wechatSetupSessions.values()) {
-        if (session.status === "initializing" || session.status === "waiting") {
-          session.abort.abort();
-          session.status = "aborted";
-        }
-      }
-      stopMemWatch();
+	    async stop() {
+	      await app.close();
+	      channelRouteControls.abortSetupSessions();
+	      stopMemWatch();
       // 停模型前先 flush 待抽取的记忆（抽取要用模型；停了就抽不成）。
       await sessionHost.flushAllExtraction().catch(() => {});
       try {
