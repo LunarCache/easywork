@@ -3,6 +3,7 @@ import type { SkillManager } from "@ew/skills";
 import type { ChannelGateway } from "@ew/im-connectors";
 import type { LocalMemoryProvider } from "@ew/memory";
 import type { McpClientManager } from "@ew/mcp";
+import type { ChannelOperations } from "../channels/operations.js";
 import type { EngineRegistry } from "../engine/registry.js";
 import type { LocalBackend } from "../engine/local-backend.js";
 import type { ModelManager } from "../models/manager.js";
@@ -11,7 +12,6 @@ import type { SessionHost } from "../agent/session-host.js";
 import type { SqliteConversationRepo } from "../store/conversation.js";
 import type { EmbeddingService } from "../memory/embedding-service.js";
 import type { KnowledgeBaseStore } from "../rag/store.js";
-import type { InboxEvent } from "@ew/shared";
 
 export interface CoreHttpContext {
   app: FastifyInstance;
@@ -24,6 +24,7 @@ export interface CoreHttpContext {
   skillsDir: string;
   mcp: McpClientManager;
   channels: ChannelGateway;
+  channelOps: ChannelOperations;
   memory: LocalMemoryProvider;
   embeddings: EmbeddingService;
   kb: KnowledgeBaseStore;
@@ -31,7 +32,4 @@ export interface CoreHttpContext {
   fetchImpl: typeof fetch;
   persistProviders(): void;
   persistMcp(): void;
-  persistChannels(): void;
-  emitInboxChanged(patch: Omit<Extract<InboxEvent, { type: "changed" }>, "type" | "at">): void;
-  inboxSubscribers: Set<(event: InboxEvent) => void>;
 }

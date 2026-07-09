@@ -7,7 +7,6 @@ import Fastify, { type FastifyInstance } from "fastify";
 import {
   messageText,
   GLOBAL_SCOPE,
-  type InboxEvent,
   ChannelConfigSchema,
   type ChannelConfig,
   type McpServerConfig,
@@ -17,8 +16,7 @@ import { builtinTools } from "@ew/tools";
 import { SkillManager, type SkillSourceConfig } from "@ew/skills";
 import { McpClientManager } from "@ew/mcp";
 import {
-  ChannelGateway,
-  ConnectorHost,
+  type ChannelGateway,
   ChannelAdapterRegistry,
   registerBuiltInChannelAdapters,
   registerFeishuApp,
@@ -39,6 +37,7 @@ import { RouterServerManager } from "../engine/router-server-manager.js";
 import { getFreePort } from "../engine/net.js";
 import type { LocalBackend } from "../engine/local-backend.js";
 import { resolveLlamaBin } from "../engine/resolve-llama.js";
+import { ChannelOperations } from "../channels/operations.js";
 import type { CoreHttpContext } from "./context.js";
 import type { RawBodyRequest } from "./http-utils.js";
 import { registerAgentRoutes } from "./routes/agent.js";
@@ -308,22 +307,11 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     if (first) return first;
     throw new Error("no_model_available");
   };
-  const inboxSubscribers = new Set<(event: InboxEvent) => void>();
-  const emitInboxChanged = (patch: Omit<Extract<InboxEvent, { type: "changed" }>, "type" | "at">): void => {
-    if (!inboxSubscribers.size) return;
-    const event: InboxEvent = { type: "changed", at: new Date().toISOString(), ...patch };
-    for (const send of [...inboxSubscribers]) send(event);
-  };
-  const connectorHost = new ConnectorHost({
+  const channelOps = new ChannelOperations({
+    registry: channelRegistry,
+    configs: loadChannelConfigs(),
     repo,
     defaultModel: "",
-    onMessagePersisted: (info) => {
-      emitInboxChanged({
-        reason: "message",
-        threadId: info.threadId,
-        channel: info.channel,
-      });
-    },
     run: (input) => {
       const modelId = resolveChannelModel(input.model);
       const last = input.history[input.history.length - 1];
@@ -339,21 +327,17 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         ...(input.sampling ? { sampling: input.sampling } : {}),
       });
     },
-  });
-  const channels = new ChannelGateway({
-    registry: channelRegistry,
-    configs: loadChannelConfigs(),
-    handleInbound: async (message, adapter) => {
-      await connectorHost.handleInbound(adapter, message);
+    persistConfigs: (configs) => {
+      try {
+        repo.setSetting(CHANNELS_KEY, JSON.stringify(configs));
+      } catch {
+        /* 持久化失败不影响运行 */
+      }
     },
+    feishuRegister: opts.feishuRegister ?? registerFeishuApp,
+    wechatRegister: opts.wechatRegister ?? registerWechatAccount,
   });
-  const persistChannels = (): void => {
-    try {
-      repo.setSetting(CHANNELS_KEY, JSON.stringify(channels.configs()));
-    } catch {
-      /* 持久化失败不影响运行 */
-    }
-  };
+  const channels = channelOps.gateway;
 
   const DEFAULT_EMBED_REPO = "nomic-ai/nomic-embed-text-v1.5-GGUF";
   const DEFAULT_EMBED_FILE = "nomic-embed-text-v1.5.Q4_K_M.gguf";
@@ -455,6 +439,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     skillsDir: primarySkillSource?.dir ?? fsPath.join(agentDir, "skills"),
     mcp,
     channels,
+    channelOps,
     memory,
     embeddings,
     kb,
@@ -462,9 +447,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     fetchImpl: opts.fetch ?? fetch,
     persistProviders,
     persistMcp,
-    persistChannels,
-    emitInboxChanged,
-    inboxSubscribers,
   };
 
   // ---- 模型 / 本地运行时 / 本地网络 ----
@@ -491,11 +473,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   registerProviderRoutes(routeContext);
 
   // ---- 外部 IM 渠道 Gateway + 收件箱 read model ----
-  const channelRouteControls = registerChannelRoutes({
-    ...routeContext,
-    feishuRegister: opts.feishuRegister ?? registerFeishuApp,
-    wechatRegister: opts.wechatRegister ?? registerWechatAccount,
-  });
+  registerChannelRoutes(routeContext);
 
   // ---- Agent 运行（pi 托管会话，SSE 发 AgentEvent）----
   registerAgentRoutes(routeContext);
@@ -547,7 +525,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       await app.listen({ port, host });
       const addr = app.server.address();
       const actualPort = typeof addr === "object" && addr ? addr.port : port;
-      await channels.startAll().catch((err) => {
+      await channelOps.startAll().catch((err) => {
         console.error("[easywork] IM 渠道启动失败:", err);
       });
       // 启动后台自动启用向量记忆（不阻塞 listen）。
@@ -556,7 +534,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     },
     async stop() {
       await app.close();
-      channelRouteControls.abortSetupSessions();
+      channelOps.abortSetupSessions();
       stopMemWatch();
       // 停模型前先 flush 待抽取的记忆（抽取要用模型；停了就抽不成）。
       await sessionHost.flushAllExtraction().catch(() => {});
@@ -566,7 +544,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         /* ignore */
       }
       await local.stopAll().catch(() => {});
-      await channels.stopAll().catch(() => {});
+      await channelOps.stopAll().catch(() => {});
       await embeddings.stop().catch(() => {});
       try {
         repo.close();

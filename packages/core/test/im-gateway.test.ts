@@ -400,6 +400,39 @@ describe("IM ChannelGateway HTTP routes", () => {
     expect(listed.json()).toMatchObject({ connectors: [] });
   });
 
+  it("aborts pending Feishu scan registration when the core stops", async () => {
+    let registerSignal: AbortSignal | undefined;
+    core = createCore({
+      token: "t",
+      dbPath: ":memory:",
+      memoryDbPath: ":memory:",
+      kbDbPath: ":memory:",
+      feishuRegister: async (options) => {
+        registerSignal = options.signal;
+        options.onQRCodeReady({ url: "https://accounts.feishu.cn/qr/test", expireIn: 600 });
+        return await new Promise(() => {});
+      },
+    });
+
+    const started = await core.app.inject({
+      method: "POST",
+      url: "/im/feishu/register",
+      headers: { ...auth, "content-type": "application/json" },
+      payload: {
+        id: "fs-stopping",
+        enabled: false,
+        region: "feishu",
+      },
+    });
+    expect(started.statusCode).toBe(200);
+    expect(registerSignal?.aborted).toBe(false);
+
+    await core.stop();
+    core = undefined;
+
+    expect(registerSignal?.aborted).toBe(true);
+  });
+
   it("creates a WeChat connector from the iLink QR registration helper", async () => {
     core = createCore({
       token: "t",

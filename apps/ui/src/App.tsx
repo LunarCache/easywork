@@ -10,13 +10,11 @@ import { Titlebar } from "./components/Titlebar.js";
 import { Sidebar, type Mode } from "./components/Sidebar.js";
 import { SearchPalette } from "./components/SearchPalette.js";
 import { useConfirm } from "./components/ConfirmDialog.js";
-import { Settings } from "./pages/Settings.js";
+import { SettingsPageHost as Settings, useSettingsPageHost } from "./settings/SettingsHost.js";
 import { Inbox } from "./pages/Inbox.js";
 import { FolderTreeIcon } from "./icons.js";
-import type { SettingsSection } from "./pages/Settings.js";
 
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
-type Overlay = "settings" | null;
 interface ThreadItem {
   id: string;
   title: string;
@@ -26,23 +24,16 @@ interface ThreadItem {
 }
 
 const SESSION_W_KEY = "ew.sessionWidth";
-const SETTINGS_SEC_KEY = "ew.settingsSection";
-const SETTINGS_SECTIONS: SettingsSection[] = ["general", "models", "channels", "kb", "skills", "mcp", "memory"];
 
 const loadSessionWidth = (): number => {
   const n = Number(localStorage.getItem(SESSION_W_KEY));
   return Number.isFinite(n) && n >= 200 && n <= 460 ? n : 272;
 };
 
-const loadSettingsSection = (): SettingsSection => {
-  const value = localStorage.getItem(SETTINGS_SEC_KEY);
-  return SETTINGS_SECTIONS.includes(value as SettingsSection) ? (value as SettingsSection) : "general";
-};
-
 export function App() {
   const { confirm: askConfirm, alert: showAlert, dialog: confirmDialog } = useConfirm();
+  const settingsHost = useSettingsPageHost();
   const [mode, setMode] = useState<Mode>("chat");
-  const [overlay, setOverlay] = useState<Overlay>(null);
   const [models, setModels] = useState<string[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
 
@@ -60,7 +51,6 @@ export function App() {
   const [workBranch, setWorkBranch] = useState<string | undefined>(undefined);
   // 点项目「查看文件」→ 主区切到该项目的文件浏览页（替代对话，左上角「返回任务」回退）。
   const [filesProjectId, setFilesProjectId] = useState<string | null>(null);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>(loadSettingsSection);
 
   // 外观：应用到 <html>；跟随系统时监听 OS 明暗变化实时切换。
   useEffect(() => {
@@ -77,14 +67,6 @@ export function App() {
     setDockOpen(false);
     setWorkBranch(undefined);
   }, [mode, threadId, workThreadId, projectId]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(SETTINGS_SEC_KEY, settingsSection);
-    } catch {
-      /* ignore */
-    }
-  }, [settingsSection]);
 
   const changeTheme = useCallback((next: ThemePrefs) => {
     setTheme(next);
@@ -180,18 +162,11 @@ export function App() {
   }, [check]);
 
   useEffect(() => {
-    const openSettings = ((ev?: Event) => {
-      const section = (ev as CustomEvent<SettingsSection | undefined> | undefined)?.detail;
-      setSettingsSection((current) => section ?? current);
-      setOverlay("settings");
-    }) as EventListener;
     const createWorkspace = () => {
       void newWorkspace();
     };
-    window.addEventListener("ew:open-settings", openSettings);
     window.addEventListener("ew:new-workspace", createWorkspace as EventListener);
     return () => {
-      window.removeEventListener("ew:open-settings", openSettings);
       window.removeEventListener("ew:new-workspace", createWorkspace as EventListener);
     };
   }, []);
@@ -261,8 +236,7 @@ export function App() {
     setMode("work");
   };
   const openChannelSettings = () => {
-    setSettingsSection("channels");
-    setOverlay("settings");
+    settingsHost.openSection("channels");
   };
   // 切换顶部模式（对话/工作区/收件箱）时退出文件浏览页。
   const changeMode = (m: Mode) => {
@@ -349,14 +323,14 @@ export function App() {
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
         taskTitle={taskTitle}
         isDesktop={isDesktop()}
-        showDock={overlay !== "settings" && (mode === "chat" || inWorkChat)}
+        showDock={!settingsHost.isOpen && (mode === "chat" || inWorkChat)}
         dockOpen={dockOpen}
         onToggleDock={() => setDockOpen((v) => !v)}
         {...(mode === "work" && project ? { projectName: project.name } : {})}
         {...(mode === "work" && workBranch ? { branch: workBranch } : {})}
       />
       {/* ad-body 始终挂载（设置打开时 CSS 隐藏而非卸载）——否则会卸载 Chat/Workspace 并中断在途的流式运行。 */}
-      <div className={`ad-body ${overlay === "settings" ? "ad-hidden" : ""}`}>
+      <div className={`ad-body ${settingsHost.isOpen ? "ad-hidden" : ""}`}>
         {sidebarOpen && (
           <>
             <div className="ad-sessions-wrap" style={{ width: sessionWidth }}>
@@ -379,7 +353,7 @@ export function App() {
                 onDelProject={(id, e) => void delProject(id, e)}
                 onOpenFiles={openProjectFiles}
                 onOpenInbox={() => changeMode("inbox")}
-                onOpenSettings={() => setOverlay("settings")}
+                onOpenSettings={() => settingsHost.open()}
                 onOpenSearch={() => setSearchOpen(true)}
               />
             </div>
@@ -434,15 +408,15 @@ export function App() {
           )}
         </main>
       </div>
-      {overlay === "settings" && (
+      {settingsHost.isOpen && (
         <Settings
           theme={theme}
           navWidth={sessionWidth}
-          initialSection={settingsSection}
-          onSectionChange={setSettingsSection}
+          section={settingsHost.section}
+          onSectionChange={settingsHost.openSection}
           onThemeChange={changeTheme}
           onModelsChange={check}
-          onBack={() => setOverlay(null)}
+          onBack={settingsHost.close}
         />
       )}
       {searchOpen && (
