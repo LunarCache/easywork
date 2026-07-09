@@ -241,6 +241,121 @@ whenToUse: tests
     }
   });
 
+  it("returns project skills for a workspace without adding them to the global skills page", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ew-project-skills-"));
+    const workspaceDir = path.join(root, "packages", "app");
+    const localSkillDir = path.join(workspaceDir, ".agents", "skills", "local-skill");
+    const rootSkillDir = path.join(root, ".agents", "skills", "root-skill");
+    fs.mkdirSync(path.join(root, ".git"), { recursive: true });
+    fs.mkdirSync(localSkillDir, { recursive: true });
+    fs.mkdirSync(rootSkillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(localSkillDir, "SKILL.md"),
+      `---
+name: Local Skill
+description: local workspace skill
+---
+# Local Skill`,
+    );
+    fs.writeFileSync(
+      path.join(rootSkillDir, "SKILL.md"),
+      `---
+name: Root Skill
+description: git root workspace skill
+---
+# Root Skill`,
+    );
+    try {
+      core = createCore({
+        token: "t",
+        dbPath: ":memory:",
+        memoryDbPath: ":memory:",
+        kbDbPath: ":memory:",
+      });
+      const created = await core.app.inject({
+        method: "POST",
+        url: "/projects",
+        headers: { authorization: "Bearer t" },
+        payload: { name: "Project Skills", workspaceDir },
+      });
+      expect(created.statusCode).toBe(200);
+      const project = created.json<{ id: string }>();
+
+      const workspaceSkills = await core.app.inject({
+        method: "GET",
+        url: `/workspace/${project.id}/skills`,
+        headers: { authorization: "Bearer t" },
+      });
+      expect(workspaceSkills.statusCode).toBe(200);
+      const body = workspaceSkills.json<{
+        skills: { id: string; source: { kind: string } }[];
+        sources: { kind: string; dir: string }[];
+      }>();
+      expect(body.sources.every((source) => source.kind === "project")).toBe(true);
+      expect(body.skills).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "local-skill", source: expect.objectContaining({ kind: "project" }) }),
+        expect.objectContaining({ id: "root-skill", source: expect.objectContaining({ kind: "project" }) }),
+      ]));
+
+      const globalSkills = await core.app.inject({ method: "GET", url: "/skills", headers: { authorization: "Bearer t" } });
+      expect(globalSkills.statusCode).toBe(200);
+      expect(globalSkills.json<{ skills: { id: string }[] }>().skills.map((skill) => skill.id)).not.toContain("local-skill");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not report the user .agents skills directory as project skills", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ew-project-global-skill-"));
+    const previousAgentsHome = process.env.AGENTS_HOME;
+    const agentsHome = path.join(root, ".agents");
+    const workspaceDir = path.join(root, "workspace");
+    const globalSkillDir = path.join(agentsHome, "skills", "global-standard");
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.mkdirSync(globalSkillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(globalSkillDir, "SKILL.md"),
+      `---
+name: global-standard
+description: user global skill
+---
+# global-standard`,
+    );
+    process.env.AGENTS_HOME = agentsHome;
+    try {
+      core = createCore({
+        token: "t",
+        dbPath: ":memory:",
+        memoryDbPath: ":memory:",
+        kbDbPath: ":memory:",
+      });
+      const created = await core.app.inject({
+        method: "POST",
+        url: "/projects",
+        headers: { authorization: "Bearer t" },
+        payload: { name: "No Global Duplicate", workspaceDir },
+      });
+      expect(created.statusCode).toBe(200);
+      const project = created.json<{ id: string }>();
+
+      const workspaceSkills = await core.app.inject({
+        method: "GET",
+        url: `/workspace/${project.id}/skills`,
+        headers: { authorization: "Bearer t" },
+      });
+      expect(workspaceSkills.statusCode).toBe(200);
+      expect(workspaceSkills.json<{ skills: { id: string }[] }>().skills).toHaveLength(0);
+
+      const globalSkills = await core.app.inject({ method: "GET", url: "/skills", headers: { authorization: "Bearer t" } });
+      expect(globalSkills.statusCode).toBe(200);
+      expect(globalSkills.json<{ skills: { id: string }[] }>().skills.map((skill) => skill.id)).toContain("global-standard");
+    } finally {
+      if (previousAgentsHome === undefined) delete process.env.AGENTS_HOME;
+      else process.env.AGENTS_HOME = previousAgentsHome;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("uses the pi agent skills directory as the default global skills directory", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "ew-skill-default-"));
     const previousDataDir = process.env.EW_DATA_DIR;

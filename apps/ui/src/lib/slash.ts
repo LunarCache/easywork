@@ -10,6 +10,7 @@ export interface SlashCmd {
 
 export const SLASH_CMDS: SlashCmd[] = [
   { name: "model", arg: "来源 / 模型", desc: "先选模型来源，再切换当前会话模型" },
+  { name: "skill", arg: "技能名", desc: "手动调用一个 Skill" },
   { name: "think", arg: "off|low|medium|high", desc: "调整思考强度" },
   { name: "compact", desc: "压缩上下文" },
 ];
@@ -43,6 +44,11 @@ export function parseCmd(text: string): { name: string; arg: string } {
   const sp = body.indexOf(" ");
   if (sp === -1) return { name: body.toLowerCase(), arg: "" };
   return { name: body.slice(0, sp).toLowerCase(), arg: body.slice(sp + 1).trim() };
+}
+
+/** 显式 /skill:name 调用的 skill 名；用于发送时允许手动调用已关闭的自动 Skill。 */
+export function explicitSkillName(text: string): string | null {
+  return /^\/skill:([^\s]+)/i.exec(text.trimStart())?.[1] ?? null;
 }
 
 /** 命令名阶段（未输空格）：按前缀过滤候选命令。 */

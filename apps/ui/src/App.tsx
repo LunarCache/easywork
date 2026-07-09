@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ChannelKind, Project } from "@ew/shared";
+import type { ChannelKind, Project, Skill } from "@ew/shared";
 import type { ModelSourceInfo } from "@ew/sdk";
 import { currentConfig, getClient, initRuntimeConfig } from "./lib/client.js";
 import { applyTheme, loadThemePrefs, saveThemePrefs, type ThemePrefs } from "./lib/prefs.js";
@@ -37,6 +37,7 @@ export function App() {
   const [mode, setMode] = useState<Mode>("chat");
   const [models, setModels] = useState<string[]>([]);
   const [modelSources, setModelSources] = useState<ModelSourceInfo[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
 
   const [threadId, setThreadId] = useState<string>(() => crypto.randomUUID());
@@ -148,10 +149,14 @@ export function App() {
       return;
     }
     try {
-      const info = await getClient().listModels();
+      const [info, skillsInfo] = await Promise.all([
+        getClient().listModels(),
+        getClient().skillsInfo().catch(() => null),
+      ]);
       setModels(info.routed);
       setModelSources(info.modelSources ?? []);
       setContexts(info.context ?? {});
+      if (skillsInfo) setSkills(skillsInfo.skills);
       setStatus("ok");
       void refreshThreads();
       void refreshProjects();
@@ -372,6 +377,7 @@ export function App() {
               key={threadId}
               models={models}
               modelSources={modelSources}
+              skills={skills}
               contexts={contexts}
               threadId={threadId}
               onSaved={refreshThreads}
@@ -389,6 +395,7 @@ export function App() {
                 projects={projects}
                 models={models}
                 modelSources={modelSources}
+                skills={skills}
                 contexts={contexts}
                 threadId={workThreadId || latestWorkThread(project.id)}
                 onChanged={refreshProjects}

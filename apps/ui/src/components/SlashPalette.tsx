@@ -1,18 +1,20 @@
 // 斜杠命令自动补全面板 + 键盘交互 hook（Chat / Workspace composer 共用）。
-// 两阶段：① 命令名（/think /model /compact，按前缀过滤）→ 选无参命令即执行，选带参命令补「/x 」进参数阶段；
-//         ② 参数（think 4 档 / model 先 provider 后模型）→ 选中即执行并清空输入。
+// 两阶段：① 命令名（/think /model /skill /compact，按前缀过滤）→ 选带参命令补入参数前缀；
+//         ② 参数（think 4 档 / model 先 provider 后模型 / skill 按名称搜索）→ 选中即执行或填入。
 import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
-import type { ThinkLevel } from "@ew/shared";
+import type { Skill, ThinkLevel } from "@ew/shared";
 import type { ModelSourceInfo } from "@ew/sdk";
 import { modelLabel } from "../lib/agent-stream.js";
 import { matchCmds, parseCmd, slashQuery, THINK_LEVELS, THINK_LABEL, THINK_META } from "../lib/slash.js";
-import { BrainIcon, CheckIcon, ClockIcon, EnterIcon, ThinkIcon } from "../icons.js";
+import { BrainIcon, CheckIcon, ClockIcon, EnterIcon, SparkIcon, ThinkIcon } from "../icons.js";
+import { loadDisabledSkills } from "../lib/prefs.js";
 
 type SlashIcon = typeof BrainIcon;
 
 export interface SlashHandlers {
   models: string[];
   modelSources?: ModelSourceInfo[];
+  skills?: Skill[];
   currentModel: string;
   currentThink: ThinkLevel;
   usagePct?: number | null;
@@ -78,6 +80,23 @@ function splitModelArg(raw: string): { providerQuery: string; providerToken?: st
   return { providerQuery: value.trim() };
 }
 
+function skillSearchQuery(input: string): string | null {
+  const lower = input.toLowerCase();
+  if (lower === "/skill:") return "";
+  if (lower.startsWith("/skill:")) {
+    const rest = input.slice("/skill:".length);
+    return rest.includes(" ") ? null : rest;
+  }
+  if (lower.startsWith("/skill ")) return input.slice("/skill ".length).trimStart();
+  return null;
+}
+
+function skillSourcePrefix(skill: Skill): string | null {
+  if (skill.source.kind === "project") return "工作区";
+  if (skill.source.kind === "builtin") return "内置";
+  return null;
+}
+
 export function useSlashPalette(
   input: string,
   setInput: (v: string) => void,
@@ -87,7 +106,8 @@ export function useSlashPalette(
   const [dismissed, setDismissed] = useState(false);
 
   const q = slashQuery(input);
-  const stage = q == null ? null : q.includes(" ") ? parseCmd(input).name : "root";
+  const skillQuery = skillSearchQuery(input);
+  const stage = q == null ? null : skillQuery != null ? "skill" : q.includes(" ") ? parseCmd(input).name : "root";
   const sourceByModel = useMemo(() => new Map((h.modelSources ?? []).map((source) => [source.id, source])), [h.modelSources]);
   const modelGroups = useMemo<ModelProviderGroup[]>(() => {
     const byKey = new Map<string, ModelProviderGroup>();
@@ -120,8 +140,37 @@ export function useSlashPalette(
     return [...byKey.values()];
   }, [h.models, sourceByModel]);
   const modelTitle = useCallback((model: string) => modelLabel(sourceByModel.get(model)?.modelId ?? model), [sourceByModel]);
+  const skillItems = useMemo(() => {
+    const disabled = new Set(loadDisabledSkills());
+    return (h.skills ?? [])
+      .map((skill) => ({
+        skill,
+        name: skill.frontmatter.name,
+        disabled: disabled.has(skill.frontmatter.name),
+        desc: [
+          skillSourcePrefix(skill),
+          skill.frontmatter.description || skill.frontmatter.whenToUse || skill.id,
+        ].filter(Boolean).join(" · "),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [h.skills]);
   const items = useMemo<Item[]>(() => {
     if (q == null) return [];
+    if (skillQuery != null) {
+      const needle = skillQuery.toLowerCase();
+      return skillItems
+        .filter(({ name, desc }) => name.toLowerCase().includes(needle) || desc.toLowerCase().includes(needle))
+        .slice(0, 8)
+        .map(({ name, desc, disabled }) => ({
+          key: `skill:${name}`,
+          title: name,
+          desc,
+          cmd: "/skill",
+          value: disabled ? "手动" : undefined,
+          Icon: SparkIcon,
+          run: () => setInput(`/skill:${name} `),
+        }));
+    }
     const hasSpace = q.includes(" ");
     if (!hasSpace) {
       const usagePct = h.usagePct == null ? null : Math.max(0, Math.min(100, h.usagePct));
@@ -146,6 +195,17 @@ export function useSlashPalette(
             value: THINK_LABEL[h.currentThink],
             Icon: ThinkIcon,
             run: () => setInput("/think "),
+          } satisfies Item;
+        }
+        if (c.name === "skill") {
+          return {
+            key: c.name,
+            title: "调用 Skill",
+            desc: c.desc,
+            cmd: "/skill",
+            value: skillItems.length ? `${skillItems.length} 个` : undefined,
+            Icon: SparkIcon,
+            run: () => setInput("/skill:"),
           } satisfies Item;
         }
         return {
@@ -229,7 +289,7 @@ export function useSlashPalette(
         }));
     }
     return [];
-  }, [q, input, h, setInput, modelTitle, modelGroups, sourceByModel]);
+  }, [q, input, h, setInput, modelTitle, modelGroups, sourceByModel, skillItems, skillQuery]);
 
   const active = q != null && !dismissed && items.length > 0;
   const sel = items.length ? Math.min(idx, items.length - 1) : 0;
@@ -271,6 +331,8 @@ export function useSlashPalette(
               ? "命令"
               : stage === "model"
                 ? splitModelArg(modelArgRaw(input)).providerToken ? "选择模型" : "选择模型来源"
+                : stage === "skill"
+                  ? "选择 Skill"
                 : "正在设置 /think"}
           </span>
         </div>

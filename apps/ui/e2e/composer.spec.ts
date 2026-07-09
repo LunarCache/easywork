@@ -1,5 +1,7 @@
 import { test, expect } from "./fixtures.js";
 import type { Page } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
 
 async function pasteImage(page: Page, testId: string): Promise<void> {
   await page.getByTestId(testId).focus();
@@ -65,6 +67,7 @@ test.describe("composer e2e", () => {
     await input.fill("/");
     await expect(page.getByTestId("slash-palette")).toBeVisible();
     await expect(page.getByTestId("slash-item-model")).toBeVisible();
+    await expect(page.getByTestId("slash-item-skill")).toBeVisible();
     await expect(page.getByTestId("slash-item-think")).toBeVisible();
     await expect(page.getByTestId("slash-item-compact")).toBeVisible();
 
@@ -87,6 +90,53 @@ test.describe("composer e2e", () => {
     await expect(page.getByTestId("slash-palette")).toHaveCount(0);
     await expect(input).toHaveValue("");
     await expect(page.getByTestId("chat-think-pill")).toContainText("思考 中");
+  });
+
+  test("聊天页 slash palette 支持选择全局 skill", async ({ page, openApp, client }) => {
+    await client.createSkillTemplate("review-flow");
+    await openApp();
+
+    const input = page.getByTestId("chat-composer-input");
+    await expect(input).toBeVisible();
+
+    await input.fill("/skill:review-flow");
+    await expect(page.getByTestId("slash-palette")).toBeVisible();
+    await expect(page.getByTestId("slash-item-skill:review-flow")).toBeVisible();
+
+    await input.press("Enter");
+
+    await expect(page.getByTestId("slash-palette")).toHaveCount(0);
+    await expect(input).toHaveValue("/skill:review-flow ");
+  });
+
+  test("工作区 slash palette 会合并当前项目的 .agents/skills", async ({ page, openApp, client, workspaceDir }) => {
+    const skillDir = path.join(workspaceDir, ".agents", "skills", "repo-flow");
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      `---
+name: repo-flow
+description: project scoped workflow
+---
+# repo-flow`,
+    );
+    const project = await client.createProject({ name: "Skill Workspace", workspaceDir });
+
+    await openApp();
+    await page.getByTestId(`sidebar-project-${project.id}`).click();
+
+    const input = page.getByTestId("workspace-composer-input");
+    await expect(input).toBeVisible();
+
+    await input.fill("/skill:repo-flow");
+    await expect(page.getByTestId("slash-palette")).toBeVisible();
+    await expect(page.getByTestId("slash-item-skill:repo-flow")).toBeVisible();
+    await expect(page.getByTestId("slash-item-skill:repo-flow")).toContainText("工作区");
+
+    await input.press("Enter");
+
+    await expect(page.getByTestId("slash-palette")).toHaveCount(0);
+    await expect(input).toHaveValue("/skill:repo-flow ");
   });
 
   test("工作区 composer 支持 slash 思考档位和审批策略持久化", async ({ page, openApp, client, workspaceDir }) => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatMessage, ThinkLevel } from "@ew/shared";
+import type { ChatMessage, Skill, ThinkLevel } from "@ew/shared";
 import type { ModelSourceInfo, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { autoGrowComposer, focusComposerEnd, resetComposer } from "../lib/composer.js";
@@ -18,7 +18,7 @@ import { ComposerContextPill, ComposerContextStrip, ComposerUsagePill } from "..
 import { SideDock } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
-import { THINK_LABEL, nextThink } from "../lib/slash.js";
+import { explicitSkillName, THINK_LABEL, nextThink } from "../lib/slash.js";
 import {
   applyAgentEvent,
   messageText,
@@ -74,6 +74,7 @@ const DEMO = !!new URLSearchParams(location.search).get("demo");
 export function Chat({
   models,
   modelSources,
+  skills,
   contexts,
   threadId,
   onSaved,
@@ -82,6 +83,7 @@ export function Chat({
 }: {
   models: string[];
   modelSources?: ModelSourceInfo[];
+  skills?: Skill[];
   contexts: Record<string, number>;
   threadId: string;
   onSaved: () => void;
@@ -261,6 +263,7 @@ export function Chat({
   const slash = useSlashPalette(input, setInput, {
     models,
     modelSources,
+    skills,
     currentModel: model,
     currentThink: thinkLevel,
     usagePct: contextPct,
@@ -296,7 +299,8 @@ export function Chat({
     const apply = (fn: (m: UiMsg) => UiMsg) => setMsgs((current) => updateLastAssistant(current, fn));
 
     const excludeTools = web ? [] : ["web_search", "http_get"];
-    const excludeSkills = loadDisabledSkills();
+    const explicitSkill = explicitSkillName(text);
+    const excludeSkills = loadDisabledSkills().filter((name) => name !== explicitSkill);
     const ac = new AbortController();
     abortRef.current = ac;
     const FS_TOOLS = new Set(["fs_write", "fs_edit", "run_command"]);

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ApprovalMode, ChatMessage, Project, ThinkLevel } from "@ew/shared";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ApprovalMode, ChatMessage, Project, Skill, ThinkLevel } from "@ew/shared";
 import type { GitRemoteInfo, GitStatus, ModelSourceInfo, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { autoGrowComposer, focusComposerEnd, resetComposer } from "../lib/composer.js";
@@ -20,7 +20,7 @@ import { ContextBar } from "../components/ContextBar.js";
 import { SideDock } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
-import { THINK_LABEL, nextThink } from "../lib/slash.js";
+import { explicitSkillName, THINK_LABEL, nextThink } from "../lib/slash.js";
 import { useAvailableModel } from "../hooks/useAvailableModel.js";
 import { useComposerImages } from "../hooks/useComposerImages.js";
 import { useMessageScroll } from "../hooks/useMessageScroll.js";
@@ -71,6 +71,7 @@ export function Workspace({
   projects,
   models,
   modelSources,
+  skills,
   contexts,
   threadId,
   onChanged,
@@ -86,6 +87,7 @@ export function Workspace({
   projects: Project[];
   models: string[];
   modelSources?: ModelSourceInfo[];
+  skills?: Skill[];
   contexts: Record<string, number>;
   /** 当前会话（由 App/会话列表 控制）。 */
   threadId: string;
@@ -109,6 +111,7 @@ export function Workspace({
   const [busy, setBusy] = useState(false);
   const [thinkLevel, setThinkLevel] = useState<ThinkLevel>("off");
   const [notice, setNotice] = useState<string | null>(null);
+  const [projectSkills, setProjectSkills] = useState<Skill[]>([]);
   const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [git, setGit] = useState<GitStatus>({ repo: false, files: [] });
   const [branch, setBranch] = useState<string | undefined>(undefined);
@@ -124,6 +127,29 @@ export function Workspace({
   const { scrollRef, showJump, onMessagesScroll, jumpToBottom } = useMessageScroll(msgs);
   const abortRef = useRef<AbortController | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setProjectSkills([]);
+    void getClient()
+      .workspaceSkillsInfo(project.id)
+      .then((info) => {
+        if (alive) setProjectSkills(info.skills);
+      })
+      .catch(() => {
+        if (alive) setProjectSkills([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [project.id]);
+
+  const slashSkills = useMemo(() => {
+    const byName = new Map<string, Skill>();
+    for (const skill of skills ?? []) byName.set(skill.frontmatter.name, skill);
+    for (const skill of projectSkills) byName.set(skill.frontmatter.name, skill);
+    return [...byName.values()];
+  }, [skills, projectSkills]);
 
   useEffect(() => {
     setThinkLevel(loadThink(model));
@@ -154,6 +180,7 @@ export function Workspace({
   const slash = useSlashPalette(input, setInput, {
     models,
     modelSources,
+    skills: slashSkills,
     currentModel: model,
     currentThink: thinkLevel,
     usagePct: contextPct,
@@ -268,7 +295,8 @@ export function Workspace({
     const apply = (fn: (m: UiMsg) => UiMsg) => setMsgs((current) => updateLastAssistant(current, fn));
     const ac = new AbortController();
     abortRef.current = ac;
-    const excludeSkills = loadDisabledSkills();
+    const explicitSkill = explicitSkillName(text);
+    const excludeSkills = loadDisabledSkills().filter((name) => name !== explicitSkill);
     const MUTATING = new Set(["fs_write", "fs_edit", "run_command"]);
     // 确保审批档位的在途 PATCH 已落库，再发起本轮（服务端按 project.approvalMode 把守危险工具）。
     if (pendingMode.current) await pendingMode.current.catch(() => {});

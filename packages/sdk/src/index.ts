@@ -775,6 +775,11 @@ export class EasyWorkClient {
     return this.getJSON<{ skills: Skill[]; dir: string; sources: SkillSource[] }>("/skills");
   }
 
+  /** 列出某个工作区的项目级技能，仅供工作区 composer 的 /skill 候选使用。 */
+  async workspaceSkillsInfo(projectId: string): Promise<{ skills: Skill[]; sources: SkillSource[] }> {
+    return this.getJSON<{ skills: Skill[]; sources: SkillSource[] }>(`/workspace/${encodeURIComponent(projectId)}/skills`);
+  }
+
   /** 读取某技能的 SKILL.md 正文（详情查看）。 */
   async skillBody(id: string): Promise<{ body: string; bodyPath: string }> {
     return this.getJSON(`/skills/${encodeURIComponent(id)}/body`);

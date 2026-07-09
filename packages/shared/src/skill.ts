@@ -10,11 +10,12 @@ export const SkillFrontmatterSchema = z.object({
 });
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>;
 
-/** Skill 发现来源：只描述全局来源；项目级 skills 不进入管理页。 */
+/** Skill 发现来源：全局来源进入管理页；project 只用于工作区运行/Slash 候选。 */
 export const SkillSourceKindSchema = z.enum([
   "builtin",
   "agents",
   "custom",
+  "project",
 ]);
 export type SkillSourceKind = z.infer<typeof SkillSourceKindSchema>;
 

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import fsPath from "node:path";
+import os from "node:os";
 import { z } from "zod";
 import {
   ApprovalModeSchema,
@@ -8,6 +9,7 @@ import {
   workspaceScope,
   type PreviewMeta,
 } from "@ew/shared";
+import { SkillManager, type SkillSourceConfig } from "@ew/skills";
 import { listDir, readFileSafe, readRawSafe, statFileSafe } from "@ew/tools";
 import { GitService } from "../../git/git.js";
 import { chatWorkspaceDir, defaultWorkspaceDir } from "../../config/paths.js";
@@ -59,6 +61,47 @@ function isExistingDir(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+function findGitRoot(startDir: string): string | null {
+  let dir = fsPath.resolve(startDir);
+  for (;;) {
+    if (fs.existsSync(fsPath.join(dir, ".git"))) return dir;
+    const parent = fsPath.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+function projectSkillSources(workspaceDir: string): SkillSourceConfig[] {
+  const root = fsPath.resolve(workspaceDir);
+  const gitRoot = findGitRoot(root);
+  const agentsHome = process.env.AGENTS_HOME || fsPath.join(os.homedir(), ".agents");
+  const userAgentsSkillsDir = fsPath.resolve(agentsHome, "skills");
+  const sources: SkillSourceConfig[] = [];
+  const addSource = (id: string, label: string, dir: string) => {
+    const resolved = fsPath.resolve(dir);
+    if (resolved === userAgentsSkillsDir || !isExistingDir(resolved)) return;
+    sources.push({ id, label, kind: "project", dir: resolved });
+  };
+
+  addSource("project-pi", "工作区 Skills", fsPath.join(root, ".pi", "skills"));
+
+  let dir = root;
+  let index = 0;
+  for (;;) {
+    addSource(
+      index === 0 ? "project-agents" : `project-agents-${index + 1}`,
+      index === 0 ? "工作区标准目录" : "上级工作区标准目录",
+      fsPath.join(dir, ".agents", "skills"),
+    );
+    if (gitRoot && dir === gitRoot) break;
+    const parent = fsPath.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+    index += 1;
+  }
+  return sources;
 }
 
 async function runInDir(
@@ -181,6 +224,18 @@ export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
     if (!p?.workspaceDir) throw new Error("project_no_workspace");
     return p.workspaceDir;
   };
+
+  app.get("/workspace/:id/skills", async (req, reply) => {
+    try {
+      const root = projectRoot((req.params as { id: string }).id);
+      const sources = projectSkillSources(root);
+      const manager = new SkillManager(sources);
+      await manager.discover().catch(() => []);
+      return { skills: manager.list(), sources };
+    } catch (e) {
+      return reply.code(404).send({ error: "not_found", message: e instanceof Error ? e.message : String(e) });
+    }
+  });
 
   // 工作区只读文件浏览（供 UI 文件树 / 文件查看）。写经 agent fs 工具走审批，不开直接写端点。
   app.get("/workspace/:id/fs/list", async (req, reply) => {
