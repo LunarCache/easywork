@@ -1,6 +1,6 @@
 import { OpenAICompatibleEngine } from "@ew/providers";
 import type { EngineRegistry } from "../engine/registry.js";
-import { getModel as getPiModel } from "@earendil-works/pi-ai";
+import { modelIdsForProvider, normalizeProviderConfig } from "./catalog.js";
 
 export type CloudProviderKind = "openai-compatible" | "pi-native";
 export type CloudProviderModelModality = "text" | "image";
@@ -120,62 +120,4 @@ export class ProviderManager {
     for (const c of this.configs.values()) if (c.modelConfigs.some((m) => m.id === modelId)) return c;
     return undefined;
   }
-}
-
-function normalizeProviderConfig(cfg: CloudProviderConfig): CloudProviderConfig & { kind: CloudProviderKind } {
-  const kind = cfg.kind ?? "openai-compatible";
-  if (kind === "openai-compatible" && !cfg.baseUrl) {
-    throw new Error("openai-compatible provider requires baseUrl");
-  }
-  const modelConfigs = normalizeModelConfigs(cfg.modelConfigs);
-  if (modelConfigs.length === 0) {
-    throw new Error("provider requires at least one modelConfig");
-  }
-  return {
-    ...cfg,
-    kind,
-    modelConfigs,
-    ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl.replace(/\/$/, "") } : {}),
-  };
-}
-
-export function modelConfigForModel(cfg: CloudProviderConfig, modelId: string): CloudProviderModelConfig | undefined {
-  return cfg.modelConfigs?.find((m) => m.id === modelId);
-}
-
-export function contextWindowForModel(cfg: CloudProviderConfig, modelId: string): number | undefined {
-  return modelConfigForModel(cfg, modelId)?.contextWindow
-    ?? ((cfg.kind ?? "openai-compatible") === "pi-native"
-      ? getPiModel(cfg.id as never, modelId as never)?.contextWindow
-      : undefined);
-}
-
-export function inputModalitiesForModel(cfg: CloudProviderConfig, modelId: string): CloudProviderModelModality[] {
-  return modelConfigForModel(cfg, modelId)?.inputModalities ?? ["text"];
-}
-
-function normalizeModelConfigs(configs: CloudProviderModelConfig[]): CloudProviderModelConfig[] {
-  const out = new Map<string, CloudProviderModelConfig>();
-  for (const cfg of configs) {
-    const id = cfg.id.trim();
-    if (!id) continue;
-    const inputModalities = uniqueModalities(cfg.inputModalities);
-    const contextWindow = Math.floor(cfg.contextWindow);
-    if (!Number.isFinite(contextWindow) || contextWindow <= 0) continue;
-    out.set(id, {
-      id,
-      contextWindow,
-      inputModalities,
-    });
-  }
-  return [...out.values()];
-}
-
-function modelIdsForProvider(cfg: CloudProviderConfig): string[] {
-  return cfg.modelConfigs.map((m) => m.id);
-}
-
-function uniqueModalities(modalities: CloudProviderModelModality[]): CloudProviderModelModality[] {
-  const out = modalities.filter((m, index, all) => (m === "text" || m === "image") && all.indexOf(m) === index);
-  return out.includes("text") ? out : ["text", ...out];
 }

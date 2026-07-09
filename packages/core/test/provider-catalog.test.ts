@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ProviderCatalog } from "../src/providers/catalog.js";
+import {
+  ProviderCatalog,
+  normalizeProviderConfig,
+  runtimeModelForProviderConfig,
+  runtimeModelsForProviderConfig,
+} from "../src/providers/catalog.js";
 
 describe("ProviderCatalog", () => {
   it("builds a sorted built-in provider catalog from pi model metadata", () => {
@@ -38,10 +43,11 @@ describe("ProviderCatalog", () => {
 
     expect(providers.map((provider) => provider.id)).toEqual(["openai", "anthropic", "custom-provider"]);
     expect(providers[0]).toMatchObject({
-      id: "openai",
-      label: "OpenAI",
-      apiFamilies: ["openai-responses"],
-      sampleModels: ["gpt-test"],
+	      id: "openai",
+	      label: "OpenAI",
+	      apiFamilies: ["openai-responses"],
+	      apiOptions: [{ id: "openai-responses", label: "OpenAI Responses" }],
+	      sampleModels: ["gpt-test"],
       models: [{
         id: "gpt-test",
         contextWindow: 128000,
@@ -50,6 +56,10 @@ describe("ProviderCatalog", () => {
     });
     expect(providers[2]?.label).toBe("Custom Provider");
     expect(providers[2]?.models[0]?.inputModalities).toEqual(["text", "image"]);
+    expect(catalog.info().apiFamilies).toContainEqual({
+      id: "openai-completions",
+      label: "OpenAI Chat Completions",
+    });
   });
 
   it("probes compatible providers with /models fallback and normalizes model metadata", async () => {
@@ -93,5 +103,30 @@ describe("ProviderCatalog", () => {
     await expect(catalog.probeCompatibleModels({ baseUrl: "https://api.example.test/v1" }))
       .resolves.toMatchObject({ models: ["model-a"] });
     expect(calls).toEqual(["https://api.example.test/v1/models"]);
+  });
+
+  it("normalizes provider configs and projects runtime model metadata", () => {
+    const cfg = normalizeProviderConfig({
+      id: "custom",
+      baseUrl: "https://api.example.test/v1/",
+      headers: { "x-provider": "custom" },
+      modelConfigs: [
+        { id: " model-a ", contextWindow: 131072.9, inputModalities: ["image"] },
+        { id: "model-b", contextWindow: 0, inputModalities: ["text"] },
+        { id: "model-a", contextWindow: 32768, inputModalities: ["text"] },
+      ],
+    });
+
+    expect(cfg.baseUrl).toBe("https://api.example.test/v1");
+    expect(cfg.modelConfigs).toEqual([
+      { id: "model-a", contextWindow: 32768, inputModalities: ["text"] },
+    ]);
+    expect(runtimeModelForProviderConfig(cfg, "model-a")).toMatchObject({
+      id: "model-a",
+      input: ["text"],
+      contextWindow: 32768,
+      headers: { "x-provider": "custom" },
+    });
+    expect(runtimeModelsForProviderConfig(cfg)).toHaveLength(1);
   });
 });

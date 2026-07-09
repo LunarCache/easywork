@@ -20,11 +20,12 @@ import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, Approv
 import type { McpClientManager } from "@ew/mcp";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { LocalBackend } from "../engine/local-backend.js";
+import type { ProviderManager } from "../providers/manager.js";
 import {
   contextWindowForModel,
-  inputModalitiesForModel,
-  type ProviderManager,
-} from "../providers/manager.js";
+  runtimeModelForProviderConfig,
+  runtimeModelsForProviderConfig,
+} from "../providers/catalog.js";
 import type { KnowledgeBaseStore } from "../rag/store.js";
 import {
   buildEwCustomTools,
@@ -180,16 +181,7 @@ export class SessionHost {
           ...(cfg.headers ? { headers: cfg.headers } : {}),
           api: cfg.api ?? "openai-completions",
           authHeader: true,
-          models: cfg.modelConfigs.map((model) => ({
-            id: model.id,
-            name: model.id,
-            reasoning: false,
-            input: inputModalitiesForModel(cfg, model.id),
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            contextWindow: contextWindowForModel(cfg, model.id) ?? 32768,
-            maxTokens: 4096,
-            ...(cfg.headers ? { headers: cfg.headers } : {}),
-          })),
+          models: runtimeModelsForProviderConfig(cfg),
         });
       }
       this.registeredProviders.add(cfg.id);
@@ -244,17 +236,10 @@ export class SessionHost {
       }
       // registry 未命中（理论不应发生）→ 手搓兜底，带上 headers，鉴权由共享 AuthStorage 提供。
       return {
-        id: modelId,
-        name: modelId,
+        ...runtimeModelForProviderConfig(cfg, modelId),
         api: cfg.api ?? "openai-completions",
         provider: cfg.id,
         baseUrl: cfg.baseUrl ?? "",
-        reasoning: false,
-        input: inputModalitiesForModel(cfg, modelId),
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: contextWindowForModel(cfg, modelId) ?? 32768,
-        maxTokens: 4096,
-        ...(cfg.headers ? { headers: cfg.headers } : {}),
       };
     }
     throw new Error(`model_not_resolvable: ${modelId}`);

@@ -14,6 +14,13 @@ export { parseGGUFBuffer, readGGUFHeader, type GGUFMetadata } from "./models/ggu
 
 // 云端 provider
 export { ProviderManager, type CloudProviderConfig } from "./providers/manager.js";
+export {
+  ProviderCatalog,
+  normalizeProviderConfig,
+  runtimeModelForProviderConfig,
+  runtimeModelsForProviderConfig,
+} from "./providers/catalog.js";
+export type { ProviderCatalogInfo, ProviderCatalogItem, ProviderCatalogModel } from "./providers/catalog.js";
 
 // OpenAI 兼容转换（供测试/复用）
 export {

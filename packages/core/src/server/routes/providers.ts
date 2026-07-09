@@ -7,7 +7,7 @@ export function registerProviderRoutes(ctx: CoreHttpContext): void {
 
   app.get("/providers", async () => ({ providers: providers.list() }));
 
-  app.get("/providers/catalog", async () => ({ providers: catalog.builtInProviders() }));
+  app.get("/providers/catalog", async () => catalog.info());
 
   app.post("/providers/probe-models", async (req, reply) => {
     const parsed = ProviderModelProbeSchema.safeParse(req.body);

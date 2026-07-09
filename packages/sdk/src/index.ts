@@ -134,13 +134,24 @@ export interface ProviderCatalogModel {
   inputModalities: ProviderModelModality[];
 }
 
+export interface ProviderApiFamily {
+  id: string;
+  label: string;
+}
+
 export interface ProviderCatalogItem {
   id: string;
   label: string;
   apiFamilies: string[];
+  apiOptions: ProviderApiFamily[];
   modelCount: number;
   sampleModels: string[];
   models: ProviderCatalogModel[];
+}
+
+export interface ProviderCatalogInfo {
+  providers: ProviderCatalogItem[];
+  apiFamilies: ProviderApiFamily[];
 }
 
 export interface ChannelAdaptersInfo {
@@ -400,8 +411,12 @@ export class EasyWorkClient {
   }
 
   async providerCatalog(): Promise<ProviderCatalogItem[]> {
-    const { providers } = await this.getJSON<{ providers: ProviderCatalogItem[] }>("/providers/catalog");
+    const { providers } = await this.providerCatalogInfo();
     return providers;
+  }
+
+  async providerCatalogInfo(): Promise<ProviderCatalogInfo> {
+    return this.getJSON<ProviderCatalogInfo>("/providers/catalog");
   }
 
   async probeProviderModelConfigs(input: ProbeProviderModelsInput): Promise<ProbeProviderModelsResult> {

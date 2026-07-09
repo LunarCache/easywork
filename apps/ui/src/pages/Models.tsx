@@ -3,6 +3,7 @@ import type { GGUFVariant, HFModelSummary, LocalModel } from "@ew/shared";
 import type {
   ProviderCatalogItem,
   ProviderCatalogModel,
+  ProviderApiFamily,
   ProviderInfo,
   ProviderModelConfig,
   ProviderModelModality,
@@ -43,19 +44,6 @@ const PROVIDER_CATALOG_FEATURED = new Set([
   "github-copilot",
   "vercel-ai-gateway",
 ]);
-
-const API_PROTOCOLS = [
-  { id: "openai-completions", label: "OpenAI Chat Completions" },
-  { id: "openai-responses", label: "OpenAI Responses" },
-  { id: "anthropic-messages", label: "Anthropic Messages" },
-  { id: "google-generative-ai", label: "Google Generative AI" },
-  { id: "mistral-conversations", label: "Mistral Conversations" },
-  { id: "azure-openai-responses", label: "Azure OpenAI Responses" },
-  { id: "bedrock-converse-stream", label: "Bedrock Converse" },
-  { id: "google-vertex", label: "Google Vertex" },
-];
-
-const API_PROTOCOL_LABELS = new Map(API_PROTOCOLS.map((item) => [item.id, item.label]));
 
 interface ProviderFormModel {
   rowId: string;
@@ -115,6 +103,15 @@ function formModelsToConfig(models: ProviderFormModel[]): ProviderModelConfig[] 
     });
   }
   return [...out.values()];
+}
+
+function apiLabel(api: string, options: ProviderApiFamily[]): string {
+  return options.find((item) => item.id === api)?.label ?? api;
+}
+
+function formatApiFamilies(options: ProviderApiFamily[], fallback: string[] = []): string {
+  const labels = options.length ? options.map((item) => item.label) : fallback;
+  return labels.join(" / ");
 }
 
 function fmtSize(bytes: number): string {
@@ -199,6 +196,7 @@ export function Models({ onChange }: { onChange: () => void }) {
   });
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogItem[]>([]);
+  const [providerApiFamilies, setProviderApiFamilies] = useState<ProviderApiFamily[]>([]);
   const [providerCatalogLoading, setProviderCatalogLoading] = useState(false);
   const [providerConfigOpen, setProviderConfigOpen] = useState(false);
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
@@ -278,7 +276,9 @@ export function Models({ onChange }: { onChange: () => void }) {
   const refreshProviderCatalog = useCallback(async () => {
     setProviderCatalogLoading(true);
     try {
-      setProviderCatalog(await getClient().providerCatalog());
+      const catalog = await getClient().providerCatalogInfo();
+      setProviderCatalog(catalog.providers);
+      setProviderApiFamilies(catalog.apiFamilies);
     } catch {
       /* ignore */
     } finally {
@@ -486,7 +486,7 @@ export function Models({ onChange }: { onChange: () => void }) {
     setProv({
       kind: "pi-native",
       id: p.id,
-      api: p.apiFamilies[0] ?? "",
+      api: p.apiOptions[0]?.id ?? p.apiFamilies[0] ?? "",
       baseUrl: "",
       apiKey: prov.apiKey,
       models: p.models.map((m) => m.id).join(", "),
@@ -530,10 +530,11 @@ export function Models({ onChange }: { onChange: () => void }) {
   const apiProtocolIds = [
     ...new Set([
       prov.api,
-      ...(selectedCatalog?.apiFamilies ?? []),
-      ...(prov.kind === "openai-compatible" ? API_PROTOCOLS.map((item) => item.id) : []),
+      ...(selectedCatalog?.apiOptions.map((item) => item.id) ?? selectedCatalog?.apiFamilies ?? []),
+      ...(prov.kind === "openai-compatible" ? providerApiFamilies.map((item) => item.id) : []),
     ].filter(Boolean)),
   ];
+  const apiProtocolOptions = [...providerApiFamilies, ...(selectedCatalog?.apiOptions ?? [])];
   const fetchProviderModels = async () => {
     if (prov.kind !== "openai-compatible") return;
     if (!prov.baseUrl.trim()) return setProvNote("请先填写 Base URL");
@@ -693,7 +694,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                       className={`set-select-btn ${apiMenuOpen ? "open" : ""}`}
                       onClick={() => setApiMenuOpen((open) => !open)}
                     >
-                      <span>{(API_PROTOCOL_LABELS.get(prov.api) ?? prov.api) || "选择 API 协议"}</span>
+                      <span>{prov.api ? apiLabel(prov.api, apiProtocolOptions) : "选择 API 协议"}</span>
                       <ChevronDownIcon size={13} className="set-select-chev" />
                     </button>
                     {apiMenuOpen && (
@@ -710,7 +711,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                                 setApiMenuOpen(false);
                               }}
                             >
-                              <span>{API_PROTOCOL_LABELS.get(api) ?? api}</span>
+                              <span>{apiLabel(api, apiProtocolOptions)}</span>
                               {api === prov.api && <CheckIcon size={14} className="set-select-check" />}
                             </button>
                           ))}
@@ -792,7 +793,7 @@ export function Models({ onChange }: { onChange: () => void }) {
               {selectedCatalog ? (
                 <div className="provider-native-note">
                   <BrandIcon brand={brandKeyForProvider(selectedCatalog.id)} size="sm" />
-                  <span>内置信息：{selectedCatalog.apiFamilies.join(" / ")}</span>
+                  <span>内置信息：{formatApiFamilies(selectedCatalog.apiOptions, selectedCatalog.apiFamilies)}</span>
                   <span>已载入 {selectedCatalog.models.length} 个模型</span>
                 </div>
               ) : prov.kind === "openai-compatible" ? (
@@ -859,7 +860,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                         <span>{p.label}</span>
                         <span className="set-pill ghost">内置</span>
                       </div>
-                      <div className="provider-catalog-meta">{p.modelCount} models · {p.apiFamilies.join(" / ")}</div>
+                      <div className="provider-catalog-meta">{p.modelCount} models · {formatApiFamilies(p.apiOptions, p.apiFamilies)}</div>
                     </div>
                   </button>
                 ))}

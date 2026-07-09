@@ -1,6 +1,15 @@
-import { getModels as defaultGetPiModels, getProviders as defaultGetPiProviders } from "@earendil-works/pi-ai";
+import {
+  getModel as defaultGetPiModel,
+  getModels as defaultGetPiModels,
+  getProviders as defaultGetPiProviders,
+} from "@earendil-works/pi-ai";
 import { z } from "zod";
-import type { CloudProviderModelConfig, CloudProviderModelModality } from "./manager.js";
+import type {
+  CloudProviderConfig,
+  CloudProviderKind,
+  CloudProviderModelConfig,
+  CloudProviderModelModality,
+} from "./manager.js";
 
 type PiProvider = ReturnType<typeof defaultGetPiProviders>[number];
 
@@ -35,6 +44,12 @@ export const ProviderModelProbeSchema = z.object({
 });
 
 export type ProviderModelProbeInput = z.infer<typeof ProviderModelProbeSchema>;
+export type NormalizedCloudProviderConfig = CloudProviderConfig & { kind: CloudProviderKind };
+
+export interface ProviderApiFamily {
+  id: string;
+  label: string;
+}
 
 export interface ProviderCatalogModel {
   id: string;
@@ -48,14 +63,31 @@ export interface ProviderCatalogItem {
   id: string;
   label: string;
   apiFamilies: string[];
+  apiOptions: ProviderApiFamily[];
   modelCount: number;
   sampleModels: string[];
   models: ProviderCatalogModel[];
 }
 
+export interface ProviderCatalogInfo {
+  providers: ProviderCatalogItem[];
+  apiFamilies: ProviderApiFamily[];
+}
+
 export interface ProviderModelProbeResult {
   modelConfigs: CloudProviderModelConfig[];
   models: string[];
+}
+
+export interface ProviderRuntimeModel {
+  id: string;
+  name: string;
+  reasoning: false;
+  input: CloudProviderModelModality[];
+  cost: { input: 0; output: 0; cacheRead: 0; cacheWrite: 0 };
+  contextWindow: number;
+  maxTokens: 4096;
+  headers?: Record<string, string>;
 }
 
 interface PiCatalogModel {
@@ -72,7 +104,29 @@ export interface ProviderCatalogDeps {
   getPiModels?: (provider: string) => PiCatalogModel[];
 }
 
-const DEFAULT_COMPATIBLE_CONTEXT_WINDOW = 32768;
+export const DEFAULT_COMPATIBLE_CONTEXT_WINDOW = 32768;
+
+const API_FAMILY_LABELS: Record<string, string> = {
+  "openai-completions": "OpenAI Chat Completions",
+  "openai-responses": "OpenAI Responses",
+  "anthropic-messages": "Anthropic Messages",
+  "google-generative-ai": "Google Generative AI",
+  "mistral-conversations": "Mistral Conversations",
+  "azure-openai-responses": "Azure OpenAI Responses",
+  "bedrock-converse-stream": "Bedrock Converse",
+  "google-vertex": "Google Vertex",
+};
+
+const COMPATIBLE_API_FAMILIES = [
+  "openai-completions",
+  "openai-responses",
+  "anthropic-messages",
+  "google-generative-ai",
+  "mistral-conversations",
+  "azure-openai-responses",
+  "bedrock-converse-stream",
+  "google-vertex",
+];
 
 const PI_PROVIDER_LABELS: Record<string, string> = {
   "amazon-bedrock": "Amazon Bedrock",
@@ -159,6 +213,7 @@ export class ProviderCatalog {
           id,
           label: PI_PROVIDER_LABELS[id] ?? titleFromId(id),
           apiFamilies: [...new Set(models.map((m) => m.api))],
+          apiOptions: apiOptionsForIds([...new Set(models.map((m) => m.api))]),
           modelCount: models.length,
           sampleModels: models.slice(0, 3).map((m) => m.id),
           models: models.map((m) => ({
@@ -176,6 +231,17 @@ export class ProviderCatalog {
         if (ap !== bp) return ap - bp;
         return a.label.localeCompare(b.label);
       });
+  }
+
+  info(): ProviderCatalogInfo {
+    return {
+      providers: this.builtInProviders(),
+      apiFamilies: apiOptionsForIds(COMPATIBLE_API_FAMILIES),
+    };
+  }
+
+  compatibleApiFamilies(): ProviderApiFamily[] {
+    return apiOptionsForIds(COMPATIBLE_API_FAMILIES);
   }
 
   async probeCompatibleModels(input: ProviderModelProbeInput): Promise<ProviderModelProbeResult> {
@@ -210,6 +276,59 @@ export class ProviderCatalog {
   }
 }
 
+export function normalizeProviderConfig(cfg: CloudProviderConfig): NormalizedCloudProviderConfig {
+  const kind = cfg.kind ?? "openai-compatible";
+  if (kind === "openai-compatible" && !cfg.baseUrl) {
+    throw new Error("openai-compatible provider requires baseUrl");
+  }
+  const modelConfigs = normalizeModelConfigs(cfg.modelConfigs);
+  if (modelConfigs.length === 0) {
+    throw new Error("provider requires at least one modelConfig");
+  }
+  return {
+    ...cfg,
+    kind,
+    modelConfigs,
+    ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl.replace(/\/$/, "") } : {}),
+  };
+}
+
+export function modelIdsForProvider(cfg: CloudProviderConfig): string[] {
+  return cfg.modelConfigs.map((m) => m.id);
+}
+
+export function modelConfigForModel(cfg: CloudProviderConfig, modelId: string): CloudProviderModelConfig | undefined {
+  return cfg.modelConfigs?.find((m) => m.id === modelId);
+}
+
+export function contextWindowForModel(cfg: CloudProviderConfig, modelId: string): number | undefined {
+  return modelConfigForModel(cfg, modelId)?.contextWindow
+    ?? ((cfg.kind ?? "openai-compatible") === "pi-native"
+      ? defaultGetPiModel(cfg.id as PiProvider, modelId as never)?.contextWindow
+      : undefined);
+}
+
+export function inputModalitiesForModel(cfg: CloudProviderConfig, modelId: string): CloudProviderModelModality[] {
+  return modelConfigForModel(cfg, modelId)?.inputModalities ?? ["text"];
+}
+
+export function runtimeModelsForProviderConfig(cfg: CloudProviderConfig): ProviderRuntimeModel[] {
+  return modelIdsForProvider(cfg).map((modelId) => runtimeModelForProviderConfig(cfg, modelId));
+}
+
+export function runtimeModelForProviderConfig(cfg: CloudProviderConfig, modelId: string): ProviderRuntimeModel {
+  return {
+    id: modelId,
+    name: modelId,
+    reasoning: false,
+    input: inputModalitiesForModel(cfg, modelId),
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: contextWindowForModel(cfg, modelId) ?? DEFAULT_COMPATIBLE_CONTEXT_WINDOW,
+    maxTokens: 4096,
+    ...(cfg.headers ? { headers: cfg.headers } : {}),
+  };
+}
+
 function modelConfigsFromResponse(payload: unknown): CloudProviderModelConfig[] {
   const data = (payload as { data?: unknown })?.data;
   const rawItems = Array.isArray(data) ? data : Array.isArray(payload) ? payload : [];
@@ -217,6 +336,23 @@ function modelConfigsFromResponse(payload: unknown): CloudProviderModelConfig[] 
   for (const item of rawItems) {
     const model = modelConfigFromResponseItem(item);
     if (model && !out.has(model.id)) out.set(model.id, model);
+  }
+  return [...out.values()];
+}
+
+function normalizeModelConfigs(configs: CloudProviderModelConfig[]): CloudProviderModelConfig[] {
+  const out = new Map<string, CloudProviderModelConfig>();
+  for (const cfg of configs) {
+    const id = cfg.id.trim();
+    if (!id) continue;
+    const inputModalities = normalizeModalities(cfg.inputModalities);
+    const contextWindow = Math.floor(cfg.contextWindow);
+    if (!Number.isFinite(contextWindow) || contextWindow <= 0) continue;
+    out.set(id, {
+      id,
+      contextWindow,
+      inputModalities,
+    });
   }
   return [...out.values()];
 }
@@ -255,6 +391,10 @@ function normalizeModalities(values: readonly string[] | undefined): CloudProvid
   const out = (values ?? []).filter((m, index, all): m is CloudProviderModelModality =>
     (m === "text" || m === "image") && all.indexOf(m) === index);
   return out.includes("text") ? out : ["text", ...out];
+}
+
+function apiOptionsForIds(ids: string[]): ProviderApiFamily[] {
+  return ids.map((id) => ({ id, label: API_FAMILY_LABELS[id] ?? titleFromId(id) }));
 }
 
 function titleFromId(id: string): string {

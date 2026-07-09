@@ -131,8 +131,15 @@ describe("daemon end-to-end (SDK → core → engine)", () => {
 
     const catalog = await client.providerCatalog();
     expect(catalog.find((p) => p.id === "openai")?.apiFamilies).toContain("openai-responses");
+    expect(catalog.find((p) => p.id === "openai")?.apiOptions).toContainEqual({
+      id: "openai-responses",
+      label: "OpenAI Responses",
+    });
     expect(catalog.find((p) => p.id === "anthropic")?.apiFamilies).toContain("anthropic-messages");
     expect(catalog.find((p) => p.id === "google")?.modelCount).toBeGreaterThan(0);
+    await expect(client.providerCatalogInfo()).resolves.toMatchObject({
+      apiFamilies: expect.arrayContaining([{ id: "openai-completions", label: "OpenAI Chat Completions" }]),
+    });
     const anthropic = catalog.find((p) => p.id === "anthropic");
     expect(anthropic?.models.length).toBe(anthropic?.modelCount);
     expect(anthropic?.models[0]).toMatchObject({
