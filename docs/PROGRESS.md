@@ -15,8 +15,8 @@
 - **记忆（作用域化）**：全局池 + 每工作区私有池；渐进式披露注入 + 批量事实抽取；sqlite-vec ⊕ 词法混合召回；markdown 可手改回灌。
 - **知识库 RAG**：上传 → 解析 → 分块 → 嵌入 → RRF 混合检索 + 引用来源。
 - **思考过程持久化**：reasoning 落库并跨会话回放（不回喂模型）。
-- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 外部渠道聊天优先收件箱 + 整页设置（模型/渠道/知识库/Skills/MCP/记忆 内嵌）+ 统一弹层。
-- **外部渠道**：`@ew/im-connectors` Channel Gateway（adapter registry + 配置/状态 + allowlist + webhook 分发），Telegram 已迁入同一抽象并支持可取消 long-poll；Feishu/Lark 默认走官方 SDK WebSocket 长连接并支持扫码创建应用，高级模式保留 webhook（URL verification、token/signature、加密回调解密、文本收发），且 public webhook 只在 `transport:webhook` + 验证 secret 配置完整时启用；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；Discord / 企业微信待补平台 adapter。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/知识库/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层。
+- **外部渠道**：`@ew/im-connectors` Channel Gateway（adapter registry + 配置/状态 + allowlist + webhook 分发），core 侧 `ChannelOperations` 统一连接器生命周期、Feishu/WeChat 扫码 setup session、收件箱 read model 与 SSE invalidation；Telegram 已迁入同一抽象并支持可取消 long-poll；Feishu/Lark 默认走官方 SDK WebSocket 长连接并支持扫码创建应用，高级模式保留 webhook（URL verification、token/signature、加密回调解密、文本收发），且 public webhook 只在 `transport:webhook` + 验证 secret 配置完整时启用；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；Discord / 企业微信待补平台 adapter。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP / IM 连接器持久化）。
 - **命令行（CLI）**：`easywork` 既是 daemon 入口也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性，支持管道 stdin、`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `kb ls·search·add·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。
 - **打包发布（macOS）**：daemon 打成单文件原生二进制（Node SEA，运行免 Node）；Tauri 出 dmg（Apple Silicon，内置 daemon + sqlite-vec）；`install.sh` 一键安装并自动备齐 llama 运行时（缺失经 llama.app 装）；`v*` tag 触发 GitHub Actions 构建 + 发布到 Releases。
@@ -32,6 +32,13 @@
 ---
 
 ## 里程碑日志
+
+## 2026-07-09 — Channel Operations + Settings Host 深模块化
+
+- **Channel Operations 应用层**：新增 `packages/core/src/channels/operations.ts`，把 `ChannelGateway`、`ConnectorHost`、connector CRUD/启停、Feishu/WeChat QR setup session、inbox read model 与 `/inbox/events` SSE invalidation 收到同一个 core-side 边界；`routes/channels.ts` 退化为薄 HTTP adapter，`app.ts` 只负责装配与生命周期。
+- **生命周期收口**：core stop 会先 abort 未完成的 Feishu/WeChat 扫码 setup session，再统一停止连接器，避免取消/退出后异步成功继续落库或启动 connector。
+- **设置页 page-host**：新增 `apps/ui/src/settings/SettingsHost.tsx`，集中 section registry、上次分区持久化、`ew:open-settings` 定向打开、visited keep-alive 与整页覆盖布局；`pages/Settings.tsx` 保留兼容 re-export，`App.tsx` 不再直接持有设置页运行态。
+- **验证**：`npx vitest run packages/core/test/im-gateway.test.ts packages/core/test/channel-operations.test.ts`、`npm run typecheck --workspace @ew/core`、`npx playwright test apps/ui/e2e/settings.spec.ts` = **4 passed**、`npm run lint`、`npm run typecheck`、`npm test` = **273 passed / 1 skipped**、`git diff --check`。
 
 ## 2026-07-08 — Skills 全局来源分组
 

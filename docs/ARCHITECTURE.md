@@ -31,7 +31,7 @@
 ```
 packages/
   shared/         @ew/shared        纯 zod schema + 类型（契约层，零运行时依赖）
-  core/           @ew/core          daemon 库：server / routes / SessionHost(托管 pi) / ew-extensions / /v1 网关 / RAG / store
+  core/           @ew/core          daemon 库：server / routes / SessionHost(托管 pi) / ew-extensions / ChannelOperations / /v1 网关 / RAG / store
   providers/      @ew/providers     LlamaServerEngine（--host/--api-key）/ OpenAICompatibleEngine / harmony 解析
   memory/         @ew/memory        MemoryProvider：local（作用域化分层 + SqliteVecIndex 语义 ⊕ 词法召回）+ mem0
   tools/          @ew/tools         内置工具 + SSRF 防护
@@ -41,7 +41,7 @@ packages/
   sdk/            @ew/sdk           daemon HTTP API 的类型化客户端
 apps/
   desktop/        @ew/desktop       Tauri 2 外壳（Rust src-tauri）+ sidecar 启动 daemon
-  ui/             @ew/ui            React 18 + Vite 前端
+  ui/             @ew/ui            React 19 + Vite 前端
   daemon/         @ew/daemon        CLI 入口 easywork serve
 ```
 
@@ -55,8 +55,9 @@ apps/
 - `ChannelAdapterRegistry`：注册平台 adapter；当前内置 Telegram、Feishu/Lark 与 WeChat iLink，后续 Discord gateway、WeCom callback 都挂这里。
 - `ChannelGateway`：托管配置、状态、生命周期、allowlist 鉴权、webhook 分发和出站 `ChannelTarget` 透传。
 - `ConnectorHost`：唯一把入站消息接到同一个大脑的宿主层，负责 `resolveThreadForChannel`、载历史、调用 `SessionHost.run`、把 `AgentEvent` 聚合为 IM 回复并落库。
+- `ChannelOperations`（`@ew/core`）：core 侧应用层模块，包住 gateway/host，把连接器 CRUD/启停、Feishu/WeChat 扫码 setup session、inbox read model 与 `/inbox/events` SSE invalidation 收成一个边界；HTTP route 只做鉴权后的参数校验和响应映射。
 
-`@ew/core` 暴露管理面：`GET /im/adapters`、`GET/POST/DELETE /im/connectors`、`POST /im/connectors/:id/start|stop`，这些都走 daemon Bearer 鉴权。Feishu/Lark 另有 `POST/GET/DELETE /im/feishu/register` 扫码注册 helper：core 启动 SDK registerApp 短会话，二维码确认成功后自动保存 `transport:websocket` 连接器并按需启动；取消或 core stop 会 abort 未完成扫码会话，避免取消后落库。`GET /inbox/threads` 是给桌面收件箱的只读读模型：从 `ConversationRepo` 里筛选 `thread.channel`，聚合最后一条文本消息和消息数，不引入第二套 IM 消息表；`GET /inbox/events` 是 Bearer 鉴权的 SSE 失效通知，只发 `ready/changed`，消息正文仍通过 read model 读取。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。Core 只针对 webhook 捕获 raw body 供签名校验，并在读取前/读取中执行 32MiB 上限。Feishu/Lark adapter 的高级 webhook 模式负责 URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化和文本回复；非 `transport:webhook` 或未配置 `verificationToken`/`encryptKey` 时拒绝 public webhook。渠道配置先落 SQLite settings；平台 secret 目前随配置存储，后续可在不改 adapter seam 的情况下迁到 keychain/secret ref。
+`@ew/core` 暴露管理面：`GET /im/adapters`、`GET/POST/DELETE /im/connectors`、`POST /im/connectors/:id/start|stop`，这些都走 daemon Bearer 鉴权，并由 `ChannelOperations` 调用 gateway 完成实际变更。Feishu/Lark 另有 `POST/GET/DELETE /im/feishu/register` 扫码注册 helper：core 启动 SDK registerApp 短会话，二维码确认成功后自动保存 `transport:websocket` 连接器并按需启动；取消或 core stop 会 abort 未完成扫码会话，避免取消后落库。WeChat 也通过同一 setup session 模式完成 iLink QR 登录和 connector 保存。`GET /inbox/threads` 是给桌面收件箱的只读读模型：从 `ConversationRepo` 里筛选 `thread.channel`，聚合最后一条文本消息和消息数，不引入第二套 IM 消息表；`GET /inbox/events` 是 Bearer 鉴权的 SSE 失效通知，只发 `ready/changed`，消息正文仍通过 read model 读取。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。Core 只针对 webhook 捕获 raw body 供签名校验，并在读取前/读取中执行 32MiB 上限。Feishu/Lark adapter 的高级 webhook 模式负责 URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化和文本回复；非 `transport:webhook` 或未配置 `verificationToken`/`encryptKey` 时拒绝 public webhook。渠道配置先落 SQLite settings；平台 secret 目前随配置存储，后续可在不改 adapter seam 的情况下迁到 keychain/secret ref。
 
 ## 技术栈
 
@@ -68,7 +69,7 @@ apps/
 | 契约 / 校验 | zod + zod-to-json-schema |
 | 本地 DB | `node:sqlite`（内置 DatabaseSync，零原生编译） |
 | 记忆 / RAG | 本地 CPU embedding（nomic-embed-text 768 维）+ **sqlite-vec** 语义 ⊕ 词法混合召回（RRF）；记忆作用域化 + 渐进式披露 |
-| UI | React 18 + Vite + react-markdown |
+| UI | React 19 + Vite + react-markdown |
 | 桌面 | Tauri 2（Rust 外壳 + TS 前端，sidecar 启动 daemon） |
 | 打包 | daemon Node SEA 单文件二进制；Tauri dmg；GitHub Actions（`v*` tag → Releases） |
 | 库构建 / 测试 | tsup（esbuild）/ Vitest |
