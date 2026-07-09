@@ -1,39 +1,26 @@
 // R1 — 宿主骨架：把 pi-coding-agent 的 `createAgentSession`（无头嵌入）封装为 EasyWork 的 agent 内核。
 // 输入/输出仍是我们自己的契约：调用方给 {threadId, modelId, text, cwd}，本模块产出我们的 SSE `AgentEvent`。
 // 这是「pi 为核 + 单一输出口」的唯一边界翻译（见 plan），不是「在旧 loop 上适配」。
-import os from "node:os";
-import path from "node:path";
-import fs from "node:fs";
 import {
   createAgentSession,
-  AuthStorage,
-  ModelRegistry,
-  DefaultResourceLoader,
-  SessionManager,
   type AgentSession,
   type AgentSessionEvent,
 } from "@earendil-works/pi-coding-agent";
-import { streamSimple, completeSimple } from "@earendil-works/pi-ai";
-import type { Model, Api, Context as PiContext, AssistantMessageEventStream, AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
+import type { Context as PiContext, AssistantMessageEventStream, AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import { GLOBAL_SCOPE } from "@ew/shared";
 import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, ApprovalMode, SamplingParams, ThinkLevel, Tool } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
-import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { LocalBackend } from "../engine/local-backend.js";
 import type { ProviderManager } from "../providers/manager.js";
-import {
-  contextWindowForModel,
-  runtimeModelForProviderConfig,
-  runtimeModelsForProviderConfig,
-} from "../providers/catalog.js";
 import type { KnowledgeBaseStore } from "../rag/store.js";
-import {
-  buildEwCustomTools,
-  memoryExtensionFactory,
-  permissionExtensionFactory,
-  type RunRuntime,
-} from "./ew-extensions.js";
+import type { RunRuntime } from "./ew-extensions.js";
 import { ExtractionScheduler } from "../memory/extraction-scheduler.js";
+import { promptTokensOf, type AgentTokenUsage } from "./agent-usage.js";
+import { AgentProviderRuntime } from "./provider-runtime.js";
+import { runAgentTurn } from "./run-agent-turn.js";
+import { agentSessionResourceKey, buildAgentSessionResources } from "./session-resources.js";
+import { AgentSessionStore } from "./session-store.js";
+import { ThreadRunQueue } from "./thread-run-queue.js";
 
 /** 宿主依赖（从 daemon 注入）。 */
 export interface SessionHostDeps {
@@ -105,53 +92,25 @@ interface HostedSession {
  */
 export class SessionHost {
   private readonly sessions = new Map<string, HostedSession>();
+  private readonly sessionStore: AgentSessionStore;
   private readonly agentDir: string;
-  // pi 会话落盘目录：按 threadId 持久化，重启/重建时 resume → 模型跨重启恢复上下文。
-  // 注意：ConversationRepo 仍是 UI/检索/映射的真相源；这里只承载「给模型的上下文」。
-  private readonly sessionsDir: string;
-  // R2：单一、落盘的共享 auth/registry（OAuth 与 key 跨重启持久；所有会话复用）。
-  private readonly authStorage: AuthStorage;
-  private readonly modelRegistry: ModelRegistry;
-  private readonly registeredProviders = new Set<string>();
-  private readonly managedAuthProviders = new Set<string>();
+  // R2：provider/runtime seam 拥有共享 auth/registry（OAuth 与 key 跨重启持久；所有会话复用）。
+  private readonly providerRuntime: AgentProviderRuntime;
   // H1：按 threadId 串行化 run（pi 会话 + 全局 subscribe 不可并发复用）。
-  private readonly runChain = new Map<string, Promise<void>>();
+  private readonly runQueue = new ThreadRunQueue();
   // 被动记忆抽取调度（宿主拥有：关闭时能在停模型前 flush、删会话时丢弃不抽、压缩不触发并发）。
   private readonly extraction = new ExtractionScheduler(async (input) => {
     if (this.deps.memory) await this.deps.memory.observe(input);
   });
 
   constructor(private readonly deps: SessionHostDeps) {
-    this.agentDir = deps.agentDir ?? path.join(os.homedir(), ".easywork", "pi-agent");
-    fs.mkdirSync(this.agentDir, { recursive: true });
-    this.sessionsDir = path.join(this.agentDir, "sessions");
-    fs.mkdirSync(this.sessionsDir, { recursive: true });
-    this.tunePiSettings();
-    this.authStorage = AuthStorage.create(path.join(this.agentDir, "auth.json"));
-    // llama 忽略 key，仅为通过 pi 的 provider key 校验。
-    this.authStorage.set("local", { type: "api_key", key: "local" });
-    this.modelRegistry = ModelRegistry.create(this.authStorage, path.join(this.agentDir, "models.json"));
-    this.syncCloudProviders();
-  }
-
-  /**
-   * 调校 pi 设置（写 agentDir/settings.json，SettingsManager 启动时读取）。
-   * 关键：pi 默认 compaction.reserveTokens=16384，而本地模型 contextWindow 常为 4k/8k，
-   * 导致 shouldCompact = tokens > contextWindow-16384 恒为真 → 每轮都触发压缩（一次 LLM 摘要），
-   * 表现为输出结束后还卡几秒。下调到合理值，仅在接近真实上限时才压缩；overflow 兜底仍在。
-   */
-  private tunePiSettings(): void {
-    const file = path.join(this.agentDir, "settings.json");
-    try {
-      const cur = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>) : {};
-      const comp = (cur.compaction as Record<string, unknown> | undefined) ?? {};
-      if (comp.reserveTokens == null) {
-        cur.compaction = { ...comp, reserveTokens: 2048 };
-        fs.writeFileSync(file, JSON.stringify(cur, null, 2), "utf8");
-      }
-    } catch {
-      /* 设置写入失败不影响运行 */
-    }
+    this.sessionStore = new AgentSessionStore(deps.agentDir);
+    this.agentDir = this.sessionStore.agentDir;
+    this.providerRuntime = new AgentProviderRuntime({
+      agentDir: this.agentDir,
+      local: this.deps.local,
+      providers: this.deps.providers,
+    });
   }
 
   /**
@@ -159,90 +118,12 @@ export class SessionHost {
    * 幂等 + 全量对账：已删除的 provider 会被注销。provider 增删后调用。
    */
   syncCloudProviders(): void {
-    const present = new Set<string>();
-    for (const cfg of this.deps.providers.dump()) {
-      present.add(cfg.id);
-      if (cfg.apiKey) {
-        this.authStorage.set(cfg.id, { type: "api_key", key: cfg.apiKey });
-        this.managedAuthProviders.add(cfg.id);
-      }
-      if ((cfg.kind ?? "openai-compatible") === "pi-native") {
-        if (cfg.baseUrl || cfg.headers) {
-          this.modelRegistry.registerProvider(cfg.id, {
-            ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
-            ...(cfg.headers ? { headers: cfg.headers } : {}),
-            authHeader: true,
-          });
-        }
-      } else {
-        this.modelRegistry.registerProvider(cfg.id, {
-          baseUrl: cfg.baseUrl,
-          ...(cfg.apiKey ? { apiKey: cfg.apiKey } : {}),
-          ...(cfg.headers ? { headers: cfg.headers } : {}),
-          api: cfg.api ?? "openai-completions",
-          authHeader: true,
-          models: runtimeModelsForProviderConfig(cfg),
-        });
-      }
-      this.registeredProviders.add(cfg.id);
-    }
-    for (const id of [...this.registeredProviders]) {
-      if (present.has(id)) continue;
-      this.modelRegistry.unregisterProvider(id);
-      if (this.managedAuthProviders.has(id)) {
-        this.authStorage.remove(id);
-        this.managedAuthProviders.delete(id);
-      }
-      this.registeredProviders.delete(id);
-    }
+    this.providerRuntime.syncCloudProviders();
   }
 
   /** 解析一个 EasyWork modelId → pi `Model`（本地 llama / 云端 provider）。 */
-  private resolveModel(modelId: string): Model<Api> {
-    const localBase = this.deps.local.baseUrlFor(modelId);
-    if (localBase) {
-      // llama 设了 --api-key 时（0.0.0.0 暴露），pi 调用本机也需带该 key。
-      const key = this.deps.local.getApiKey?.() || "local";
-      this.authStorage.set("local", { type: "api_key", key });
-      const ctx = this.deps.local.contexts()[modelId];
-      return {
-        id: modelId,
-        name: modelId,
-        api: "openai-completions",
-        provider: "local",
-        baseUrl: localBase,
-        reasoning: false,
-        input: ["text", "image"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: ctx && ctx > 0 ? ctx : 8192,
-        maxTokens: 4096,
-      };
-    }
-    const cfg = this.deps.providers.findByModel(modelId);
-    if (cfg) {
-      if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
-      const m = this.modelRegistry.find(cfg.id, modelId);
-      if (m) {
-        const ctx = contextWindowForModel(cfg, modelId);
-        return {
-          ...m,
-          ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
-          ...(ctx ? { contextWindow: ctx } : {}),
-          ...(cfg.headers ? { headers: cfg.headers } : {}),
-        };
-      }
-      if ((cfg.kind ?? "openai-compatible") === "pi-native") {
-        throw new Error(`pi_native_model_not_found: ${cfg.id}/${modelId}`);
-      }
-      // registry 未命中（理论不应发生）→ 手搓兜底，带上 headers，鉴权由共享 AuthStorage 提供。
-      return {
-        ...runtimeModelForProviderConfig(cfg, modelId),
-        api: cfg.api ?? "openai-completions",
-        provider: cfg.id,
-        baseUrl: cfg.baseUrl ?? "",
-      };
-    }
-    throw new Error(`model_not_resolvable: ${modelId}`);
+  private resolveModel(modelId: string) {
+    return this.providerRuntime.resolveModel(modelId);
   }
 
   /**
@@ -254,12 +135,7 @@ export class SessionHost {
     context: PiContext,
     opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number } = {},
   ): Promise<AssistantMessageEventStream | null> {
-    const cfg = this.deps.providers.findByModel(modelId);
-    if (!cfg) return null;
-    if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
-    const model = this.resolveModel(modelId);
-    const auth = await this.modelRegistry.getApiKeyAndHeaders(model);
-    return streamSimple(model, context, this.streamOpts(auth, opts));
+    return this.providerRuntime.streamCloud(modelId, context, opts);
   }
 
   /** 云端非流式（completeSimple）：与 streamCloud 同源，供 /v1 非流式统一走 pi。非云端返回 null。 */
@@ -268,38 +144,7 @@ export class SessionHost {
     context: PiContext,
     opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number } = {},
   ): Promise<AssistantMessage | null> {
-    const cfg = this.deps.providers.findByModel(modelId);
-    if (!cfg) return null;
-    if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
-    const model = this.resolveModel(modelId);
-    const auth = await this.modelRegistry.getApiKeyAndHeaders(model);
-    return completeSimple(model, context, this.streamOpts(auth, opts));
-  }
-
-  private streamOpts(
-    auth: Awaited<ReturnType<ModelRegistry["getApiKeyAndHeaders"]>>,
-    opts: { signal?: AbortSignal; temperature?: number; maxTokens?: number },
-  ): Record<string, unknown> {
-    return {
-      ...(auth.ok && auth.apiKey ? { apiKey: auth.apiKey } : {}),
-      ...(auth.ok && auth.headers ? { headers: auth.headers } : {}),
-      ...(opts.signal ? { signal: opts.signal } : {}),
-      ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
-      ...(opts.maxTokens != null ? { maxTokens: opts.maxTokens } : {}),
-    };
-  }
-
-  /**
-   * 按 threadId 取/建持久化 SessionManager：文件存在则 open() 续接（跨重启/重建恢复
-   * pi 上下文，含 compaction），否则 create() 后定向到该 threadId 文件（create 惰性写，
-   * setSessionFile 指向不存在的目标只是重设路径、不产生孤儿文件）。
-   */
-  private sessionManagerFor(threadId: string, cwd: string): SessionManager {
-    const file = path.join(this.sessionsDir, `${threadId}.jsonl`);
-    if (fs.existsSync(file)) return SessionManager.open(file, this.sessionsDir, cwd);
-    const sm = SessionManager.create(cwd, this.sessionsDir);
-    sm.setSessionFile(file);
-    return sm;
+    return this.providerRuntime.completeCloud(modelId, context, opts);
   }
 
   /**
@@ -307,23 +152,8 @@ export class SessionHost {
    * （存档消息文本无 token 数，且不含 system/记忆/工具 schema 开销，只能从 pi 实测 usage 取）。
    * promptTokens 含缓存命中/写入（cacheRead+cacheWrite），与实时事件口径一致。
    */
-  lastUsage(threadId: string): { promptTokens: number; completionTokens: number; totalTokens: number } | null {
-    const file = path.join(this.sessionsDir, `${threadId}.jsonl`);
-    if (!fs.existsSync(file)) return null;
-    let last: { promptTokens: number; completionTokens: number; totalTokens: number } | null = null;
-    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const o = JSON.parse(line) as { message?: { role?: string; usage?: PiUsage } };
-        const m = o.message;
-        if (m?.role === "assistant" && m.usage) {
-          last = { promptTokens: promptTokensOf(m.usage), completionTokens: m.usage.output, totalTokens: m.usage.totalTokens };
-        }
-      } catch {
-        /* 跳过坏行 */
-      }
-    }
-    return last;
+  lastUsage(threadId: string): AgentTokenUsage | null {
+    return this.sessionStore.lastUsage(threadId);
   }
 
   /** 取/建该 thread 的会话。modelId/cwd/workspace/scope 变化则重建。 */
@@ -335,7 +165,7 @@ export class SessionHost {
     memoryScope: string,
     excludeSkills: string[],
   ): Promise<HostedSession> {
-    const excludeSkillsKey = excludeSkills.slice().sort().join(",");
+    const excludeSkillsKey = agentSessionResourceKey(excludeSkills);
     const existing = this.sessions.get(threadId);
     if (
       existing &&
@@ -354,54 +184,31 @@ export class SessionHost {
       this.sessions.delete(threadId);
     }
     const model = this.resolveModel(modelId);
-    // R4：每会话一个权限运行时（run() 前写入 mode/approval）；仅工作区模式装载权限扩展。
-    const runtime: RunRuntime = { mode: "approve-each", alwaysApproved: new Set() };
-    // R3：记忆扩展（清单注入系统提示词 + 批量抽取）+ R4 权限扩展（tool_call 审批）。
-    const factories: ExtensionFactory[] = [];
-    if (this.deps.memory) {
-      factories.push(
-        memoryExtensionFactory({
-          memory: this.deps.memory,
-          scope: memoryScope,
-          runtime,
-          onTurn: (conv) => this.extraction.note(threadId, memoryScope, modelId, conv),
-        }),
-      );
-    }
-    // 权限/路径限定扩展：始终装载——escapesCwd 硬隔离让 read/edit/write 都不能逃出 cwd（工作区）；
-    // bash 是任意 shell 无法按路径沙箱，经审批把守。工作区模式按项目档位；对话模式由调用方传 auto-edits
-    //（工作区内写放行、bash 需审批）。
-    factories.push(permissionExtensionFactory(runtime, cwd));
-    const excluded = new Set(excludeSkills);
-    const resourceLoader = new DefaultResourceLoader({
-      cwd,
+    const resources = await buildAgentSessionResources({
       agentDir: this.agentDir,
-      extensionFactories: factories,
-      ...(this.deps.globalSkillPaths?.length ? { additionalSkillPaths: this.deps.globalSkillPaths } : {}),
-      // 禁用的 Skill 按名过滤掉（默认无 → 不改变发现结果）。
-      ...(excluded.size
-        ? { skillsOverride: (base) => ({ ...base, skills: base.skills.filter((s) => !excluded.has(s.name)) }) }
-        : {}),
-    });
-    await resourceLoader.reload();
-    const customTools = await buildEwCustomTools({
-      sessionId: threadId,
-      cwd,
-      memoryScope,
+      noteMemoryTurn: (threadId, scope, modelId, conv) => this.extraction.note(threadId, scope, modelId, conv),
+      ...(this.deps.globalSkillPaths?.length ? { globalSkillPaths: this.deps.globalSkillPaths } : {}),
       ...(this.deps.memory ? { memory: this.deps.memory } : {}),
       ...(this.deps.repo ? { repo: this.deps.repo } : {}),
       ...(this.deps.kb ? { kb: this.deps.kb } : {}),
       ...(this.deps.mcp ? { mcp: this.deps.mcp } : {}),
       ...(this.deps.builtins ? { builtins: this.deps.builtins } : {}),
+    }, {
+      threadId,
+      modelId,
+      cwd,
+      memoryScope,
+      excludeSkills,
     });
+    const { runtime, resourceLoader, customTools } = resources;
     const { session } = await createAgentSession({
       model,
-      authStorage: this.authStorage,
-      modelRegistry: this.modelRegistry,
+      authStorage: this.providerRuntime.authStorage,
+      modelRegistry: this.providerRuntime.modelRegistry,
       cwd,
       agentDir: this.agentDir,
       // 按 threadId 持久化 + resume：daemon 重启 / 换模型重建后，模型仍带上重启前上下文。
-      sessionManager: this.sessionManagerFor(threadId, cwd),
+      sessionManager: this.sessionStore.sessionManagerFor(threadId, cwd),
       resourceLoader,
       // 聊天/工作区均提供完整 pi 编码工具（read/bash/edit/write/grep/ls/find）+ EasyWork customTools；
       // 安全由权限扩展统一把守：escapesCwd 限定 fs 路径，bash 经审批（对话模式 auto-edits）。
@@ -455,13 +262,7 @@ export class SessionHost {
 
   /** 跑一轮，产出我们的 `AgentEvent` 流（供 SSE 转发）。按 threadId 串行化。 */
   async *run(input: EwAgentRunInput): AsyncGenerator<AgentEvent> {
-    const prev = this.runChain.get(input.threadId) ?? Promise.resolve();
-    let release!: () => void;
-    const mine = new Promise<void>((r) => {
-      release = r;
-    });
-    this.runChain.set(input.threadId, prev.then(() => mine));
-    await prev.catch(() => {}); // 等同 thread 上一轮收尾，避免并发复用同一 pi 会话
+    const release = await this.runQueue.acquire(input.threadId);
     try {
       yield* this.runOne(input);
     } finally {
@@ -474,13 +275,7 @@ export class SessionHost {
    * 不能与 run 并发动同一 AgentSession。无活动会话（未建/未跑过）则跳过。
    */
   async compact(threadId: string): Promise<{ tokensBefore?: number; tokensAfter?: number; skipped?: boolean }> {
-    const prev = this.runChain.get(threadId) ?? Promise.resolve();
-    let release!: () => void;
-    const mine = new Promise<void>((r) => {
-      release = r;
-    });
-    this.runChain.set(threadId, prev.then(() => mine));
-    await prev.catch(() => {});
+    const release = await this.runQueue.acquire(threadId);
     try {
       // 必须在屏障之后再读 session：在途的换模型 run 会 dispose 旧会话并建新会话；
       // 在创建中的首轮 run 也要等它建好。提前读会拿到将被弃用/尚不存在的会话。
@@ -560,86 +355,22 @@ export class SessionHost {
     // 且模型不会看到上一版答案（上下文正确）。须在 snapshot 之前做。
     if (input.regenerate) await this.rollbackLastUserTurn(session);
 
-    // 用户取消「不计入上下文」：快照本轮 prompt 前的会话消息，取消时回滚到此（移除本轮用户消息 + 部分助手输出）。
-    const snapshot = session.agent.state.messages.slice();
-
-    // R5b：中断透传——信号 abort → 中止 pi 当前轮，并标记 aborted。
-    const onAbort = (): void => {
-      hosted.runtime.aborted = true;
-      void session.abort().catch(() => {});
-    };
-    if (input.signal) {
-      if (input.signal.aborted) onAbort();
-      else input.signal.addEventListener("abort", onAbort);
-    }
-
-    const queue: AgentEvent[] = [];
-    let notify: (() => void) | null = null;
-    let done = false;
-    let failed: string | null = null;
-    const wake = (): void => {
-      const n = notify;
-      notify = null;
-      n?.();
-    };
-    const push = (e: AgentEvent): void => {
-      queue.push(e);
-      wake();
-    };
-
-    const unsub = session.subscribe((ev) => {
-      try {
-        for (const m of mapSessionEvent(ev)) push(m);
-        // 自动重试 / 自动压缩会先发 agent_end{willRetry:true} 再 continue —— 此时不能终止本轮，
-        // 否则吞掉重试/压缩后的续写。只在真正收尾（willRetry=false）时结束。
-        if (ev.type === "agent_end" && !ev.willRetry) {
-          done = true;
-          wake();
-        }
-      } catch (err) {
-        failed = err instanceof Error ? err.message : String(err);
-        done = true;
-        wake();
-      }
-    });
-
     // 思考：云端经 setThinkingLevel，本地经 streamFn 注入 payload（enable_thinking/thinking_budget_tokens）。
     // 本地额外补 /think·/no_think 文本兜底——若 llama.cpp 构建不认 payload 字段，文本指令仍能可靠开/关
     // （Qwen3 约定；与 payload 同向不冲突）。云端不注入文本。
-    const isLocal = !!this.deps.local.baseUrlFor(input.modelId);
+    const isLocal = this.providerRuntime.isLocalModel(input.modelId);
     const directive = isLocal ? (hosted.runtime.thinkingLevel === "off" ? " /no_think" : " /think") : "";
     const promptText = directive ? `${input.text}${directive}` : input.text;
-    const promptDone = session
-      .prompt(promptText, input.images?.length ? { images: input.images } : undefined)
-      .catch((err: unknown) => {
-      failed = err instanceof Error ? err.message : String(err);
-      done = true;
-      wake();
+    yield* runAgentTurn({
+      session,
+      text: promptText,
+      ...(input.images?.length ? { images: input.images } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+      mapEvent: mapSessionEvent,
+      onAbort: () => {
+        hosted.runtime.aborted = true;
+      },
     });
-
-    try {
-      while (true) {
-        while (queue.length) yield queue.shift()!;
-        if (done) break;
-        await new Promise<void>((resolve) => {
-          notify = resolve;
-        });
-      }
-      while (queue.length) yield queue.shift()!;
-      await promptDone;
-      if (failed) yield { type: "error", message: failed };
-    } finally {
-      unsub();
-      input.signal?.removeEventListener("abort", onAbort);
-      // 用户取消：回滚 pi 进程内上下文到本轮之前，使取消的这一轮「不计入上下文」（不影响后续轮）。
-      if (input.signal?.aborted) {
-        try {
-          session.agent.state.messages = snapshot;
-        } catch {
-          /* 回滚失败不致命：下轮仍可继续 */
-        }
-      }
-    }
   }
 
   /** flush 全部会话的待抽取缓冲（daemon 关停时在停模型前调用，避免丢尾部）。 */
@@ -661,13 +392,7 @@ export class SessionHost {
     }
     s.dispose();
     this.sessions.delete(threadId);
-    if (file) {
-      try {
-        fs.rmSync(file, { force: true });
-      } catch {
-        /* 删除会话文件失败不致命 */
-      }
-    }
+    this.sessionStore.deleteSessionFile(file);
   }
 
   /**
@@ -684,13 +409,6 @@ export class SessionHost {
     for (const s of this.sessions.values()) s.dispose();
     this.sessions.clear();
   }
-}
-
-type PiUsage = { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number };
-
-/** pi Usage → 完整提示词 token（含缓存命中/写入；只取 input 会在 prompt cache 活跃时严重低估上下文占用）。 */
-function promptTokensOf(u: { input: number; cacheRead: number; cacheWrite: number }): number {
-  return u.input + u.cacheRead + u.cacheWrite;
 }
 
 /** pi `AgentSessionEvent` → 我们的 `AgentEvent`（0..n 条）。唯一的边界翻译。 */

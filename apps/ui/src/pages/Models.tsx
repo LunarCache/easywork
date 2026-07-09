@@ -45,6 +45,17 @@ const PROVIDER_CATALOG_FEATURED = new Set([
   "vercel-ai-gateway",
 ]);
 
+const DEFAULT_PROVIDER_API_FAMILIES: ProviderApiFamily[] = [
+  { id: "openai-completions", label: "OpenAI Chat Completions" },
+  { id: "openai-responses", label: "OpenAI Responses" },
+  { id: "anthropic-messages", label: "Anthropic Messages" },
+  { id: "google-generative-ai", label: "Google Generative AI" },
+  { id: "mistral-conversations", label: "Mistral Conversations" },
+  { id: "azure-openai-responses", label: "Azure OpenAI Responses" },
+  { id: "bedrock-converse-stream", label: "Bedrock Converse" },
+  { id: "google-vertex", label: "Google Vertex" },
+];
+
 interface ProviderFormModel {
   rowId: string;
   id: string;
@@ -196,7 +207,7 @@ export function Models({ onChange }: { onChange: () => void }) {
   });
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [providerCatalog, setProviderCatalog] = useState<ProviderCatalogItem[]>([]);
-  const [providerApiFamilies, setProviderApiFamilies] = useState<ProviderApiFamily[]>([]);
+  const [providerApiFamilies, setProviderApiFamilies] = useState<ProviderApiFamily[]>(DEFAULT_PROVIDER_API_FAMILIES);
   const [providerCatalogLoading, setProviderCatalogLoading] = useState(false);
   const [providerConfigOpen, setProviderConfigOpen] = useState(false);
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
@@ -527,14 +538,15 @@ export function Models({ onChange }: { onChange: () => void }) {
   const updateProviderModel = (rowId: string, patch: Partial<Omit<ProviderFormModel, "rowId">>) => {
     setProviderModels((cur) => cur.map((m) => (m.rowId === rowId ? { ...m, ...patch } : m)));
   };
+  const availableProviderApiFamilies = providerApiFamilies.length > 0 ? providerApiFamilies : DEFAULT_PROVIDER_API_FAMILIES;
   const apiProtocolIds = [
     ...new Set([
       prov.api,
       ...(selectedCatalog?.apiOptions.map((item) => item.id) ?? selectedCatalog?.apiFamilies ?? []),
-      ...(prov.kind === "openai-compatible" ? providerApiFamilies.map((item) => item.id) : []),
+      ...(prov.kind === "openai-compatible" ? availableProviderApiFamilies.map((item) => item.id) : []),
     ].filter(Boolean)),
   ];
-  const apiProtocolOptions = [...providerApiFamilies, ...(selectedCatalog?.apiOptions ?? [])];
+  const apiProtocolOptions = [...availableProviderApiFamilies, ...(selectedCatalog?.apiOptions ?? [])];
   const fetchProviderModels = async () => {
     if (prov.kind !== "openai-compatible") return;
     if (!prov.baseUrl.trim()) return setProvNote("请先填写 Base URL");

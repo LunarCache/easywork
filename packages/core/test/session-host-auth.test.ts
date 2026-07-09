@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AgentProviderRuntime } from "../src/agent/provider-runtime.js";
 import { SessionHost } from "../src/agent/session-host.js";
 import type { LocalBackend } from "../src/engine/local-backend.js";
 import type { ProviderManager, CloudProviderConfig } from "../src/providers/manager.js";
@@ -21,7 +22,15 @@ function makeDeps(configs: CloudProviderConfig[]) {
   return { local, providers };
 }
 
-describe("SessionHost.syncCloudProviders", () => {
+function makeRuntime(configs: CloudProviderConfig[], agentDir: string) {
+  const deps = makeDeps(configs);
+  return {
+    ...deps,
+    runtime: new AgentProviderRuntime({ ...deps, agentDir }),
+  };
+}
+
+describe("AgentProviderRuntime", () => {
   it("seeds local key + persists cloud provider key, and reconciles removals", () => {
     const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-r2-")));
     const cfg: CloudProviderConfig = {
@@ -30,8 +39,7 @@ describe("SessionHost.syncCloudProviders", () => {
       apiKey: "sk-test-123",
       modelConfigs: [{ id: "some/model", contextWindow: 32768, inputModalities: ["text"] }],
     };
-    const deps = makeDeps([cfg]);
-    const host = new SessionHost({ ...deps, agentDir });
+    const { providers, runtime } = makeRuntime([cfg], agentDir);
 
     // 重新打开同一 auth.json，断言持久化结果（与 host 内句柄解耦）。
     const reopened = () => AuthStorage.create(path.join(agentDir, "auth.json"));
@@ -40,13 +48,12 @@ describe("SessionHost.syncCloudProviders", () => {
     expect(store.get("openrouter")).toEqual({ type: "api_key", key: "sk-test-123" });
 
     // 删除该 provider 后对账 → 凭据被注销。
-    (deps.providers as unknown as { setDump: (n: CloudProviderConfig[]) => void }).setDump([]);
-    host.syncCloudProviders();
+    (providers as unknown as { setDump: (n: CloudProviderConfig[]) => void }).setDump([]);
+    runtime.syncCloudProviders();
     store = reopened();
     expect(store.get("openrouter")).toBeUndefined();
     expect(store.get("local")).toEqual({ type: "api_key", key: "local" });
 
-    host.disposeAll();
     fs.rmSync(agentDir, { recursive: true, force: true });
   });
 
@@ -59,15 +66,13 @@ describe("SessionHost.syncCloudProviders", () => {
       apiKey: "sk-ant-test",
       modelConfigs: [{ id: "claude-haiku-4-5", contextWindow: 200000, inputModalities: ["text"] }],
     };
-    const host = new SessionHost({ ...makeDeps([cfg]), agentDir });
+    const { runtime } = makeRuntime([cfg], agentDir);
 
-    const resolved = (host as unknown as { resolveModel(modelId: string): { provider: string; api: string; contextWindow?: number } })
-      .resolveModel("claude-haiku-4-5");
+    const resolved = runtime.resolveModel("claude-haiku-4-5");
     expect(resolved.provider).toBe("anthropic");
     expect(resolved.api).toBe("anthropic-messages");
     expect(resolved.contextWindow).toBe(200000);
 
-    host.disposeAll();
     fs.rmSync(agentDir, { recursive: true, force: true });
   });
 
@@ -81,16 +86,14 @@ describe("SessionHost.syncCloudProviders", () => {
       api: "anthropic-messages",
       modelConfigs: [{ id: "claude-haiku-4-5", contextWindow: 200000, inputModalities: ["text"] }],
     };
-    const deps = makeDeps([cfg]);
-    const host = new SessionHost({ ...deps, agentDir });
+    const { providers, runtime } = makeRuntime([cfg], agentDir);
 
-    (deps.providers as unknown as { setDump: (n: CloudProviderConfig[]) => void }).setDump([]);
-    host.syncCloudProviders();
+    (providers as unknown as { setDump: (n: CloudProviderConfig[]) => void }).setDump([]);
+    runtime.syncCloudProviders();
 
     const store = AuthStorage.create(authPath);
     expect(store.get("anthropic")).toEqual({ type: "api_key", key: "existing-key" });
 
-    host.disposeAll();
     fs.rmSync(agentDir, { recursive: true, force: true });
   });
 
@@ -107,28 +110,25 @@ describe("SessionHost.syncCloudProviders", () => {
         { id: "vision-model", contextWindow: 131072, inputModalities: ["text", "image"] },
       ],
     };
-    const host = new SessionHost({ ...makeDeps([cfg]), agentDir });
+    const { runtime } = makeRuntime([cfg], agentDir);
 
-    const resolve = (host as unknown as {
-      resolveModel(modelId: string): { contextWindow?: number; input?: string[] };
-    }).resolveModel.bind(host);
+    const resolve = runtime.resolveModel.bind(runtime);
     expect(resolve("text-only")).toMatchObject({ contextWindow: 32768, input: ["text"] });
     expect(resolve("vision-model")).toMatchObject({ contextWindow: 131072, input: ["text", "image"] });
 
-    host.disposeAll();
     fs.rmSync(agentDir, { recursive: true, force: true });
   });
 
   it("throws on unresolvable model", () => {
     const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-r2-")));
-    const deps = makeDeps([]);
-    const host = new SessionHost({ ...deps, agentDir });
-    // resolveModel 是私有的，经 run() 间接触发；这里只验证构造不抛、目录建立。
+    const { runtime } = makeRuntime([], agentDir);
     expect(fs.existsSync(path.join(agentDir, "auth.json"))).toBe(true);
-    host.disposeAll();
+    expect(() => runtime.resolveModel("missing-model")).toThrow("model_not_resolvable: missing-model");
     fs.rmSync(agentDir, { recursive: true, force: true });
   });
+});
 
+describe("SessionHost runtime settings", () => {
   it("调低 compaction.reserveTokens（防小上下文模型每轮压缩）", () => {
     const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-tune-")));
     const host = new SessionHost({ ...makeDeps([]), agentDir });
