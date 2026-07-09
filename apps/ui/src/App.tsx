@@ -12,7 +12,7 @@ import { SearchPalette } from "./components/SearchPalette.js";
 import { useConfirm } from "./components/ConfirmDialog.js";
 import { SettingsPageHost as Settings, useSettingsPageHost } from "./settings/SettingsHost.js";
 import { Inbox } from "./pages/Inbox.js";
-import { FolderTreeIcon } from "./icons.js";
+import { FolderTreeIcon, PlusIcon } from "./icons.js";
 
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
 interface ThreadItem {
@@ -27,7 +27,7 @@ const SESSION_W_KEY = "ew.sessionWidth";
 
 const loadSessionWidth = (): number => {
   const n = Number(localStorage.getItem(SESSION_W_KEY));
-  return Number.isFinite(n) && n >= 200 && n <= 460 ? n : 272;
+  return Number.isFinite(n) && n >= 208 && n <= 420 ? n : 248;
 };
 
 export function App() {
@@ -395,12 +395,15 @@ export function App() {
                 setDockOpen={setDockOpen}
               />
             ) : (
-              <div className="empty">
-                <div className="ring">
+              <div className="app-empty">
+                <div className="app-empty-mark">
                   <FolderTreeIcon size={28} />
                 </div>
-                <h2>工作区</h2>
-                <p>在本地项目目录里让 AI 读写文件、运行命令完成编码任务。点击「新建工作区」选择目录开始。</p>
+                <h2>还没有工作区</h2>
+                <p>选择一个本地项目目录，让 AI 围绕它读写文件、运行命令。</p>
+                <button className="set-btn primary" onClick={() => void newWorkspace()}>
+                  <PlusIcon size={15} /> 新建工作区
+                </button>
               </div>
             ))}
           {mode === "inbox" && (

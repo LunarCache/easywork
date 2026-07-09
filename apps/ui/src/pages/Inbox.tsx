@@ -499,12 +499,12 @@ export function Inbox({
             </footer>
           </>
         ) : (
-          <div className="inbox-empty hero">
-            <div className="ring">
-              <InboxIcon size={28} />
+          <div className="inbox-empty hero app-empty">
+            <div className="app-empty-mark">
+              <InboxIcon size={24} />
             </div>
             <h2>收件箱</h2>
-            <p>微信、飞书、Telegram 等外部渠道收到消息后，会按联系人映射为这里的会话。</p>
+            <p>连接微信、飞书或 Telegram 后，外部消息会按联系人汇聚到这里。</p>
             <button className="inbox-primary" onClick={openSettings}>
               <GearIcon size={15} />
               打开渠道设置

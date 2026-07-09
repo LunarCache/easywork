@@ -3,7 +3,7 @@ import type { Project } from "@ew/shared";
 import { getClient } from "../lib/client.js";
 import { ProjectFileTree } from "../components/ProjectFileTree.js";
 import { FileViewer } from "../components/FileViewer.js";
-import { ArrowLeftIcon, FolderIcon } from "../icons.js";
+import { ArrowLeftIcon, FileIcon, FolderIcon } from "../icons.js";
 
 /**
  * 项目文件浏览页：占满主区（替代对话），左侧目录树 + 右侧文件预览（统一 FileViewer）。
@@ -35,7 +35,13 @@ export function FilesPage({ project, onBack }: { project: Project; onBack: () =>
           {sel ? (
             <FileViewer key={sel} source={{ kind: "fs", scope: "workspace", id: project.id, path: sel }} />
           ) : (
-            <div className="files-empty">从左侧选择文件查看内容</div>
+            <div className="files-empty app-empty compact">
+              <div className="app-empty-mark">
+                <FileIcon size={24} />
+              </div>
+              <h2>选择文件</h2>
+              <p>从左侧目录树打开一个文件进行预览。</p>
+            </div>
           )}
         </div>
       </div>

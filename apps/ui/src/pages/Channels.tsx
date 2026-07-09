@@ -5,6 +5,7 @@ import * as QRCode from "qrcode";
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "../components/ConfirmDialog.js";
 import { BrandIcon, brandKeyForChannel } from "../components/BrandIcon.js";
+import { ConfigEmptyState, ConfigResourceCard, ConfigToolbar } from "../components/ConfigPrimitives.js";
 import { PlusIcon, PlayIcon, StopIcon, TrashIcon, GearIcon } from "../icons.js";
 
 function kindLabel(kind: string, adapters: ChannelAdapterMeta[]): string {
@@ -306,13 +307,15 @@ export function Channels() {
 
   return (
     <div className="page channels-page" data-testid="channels-page">
-      <div className="skills-head">
+      <ConfigToolbar
+        actions={(
+          <button className="set-btn secondary icon" title="新建渠道" onClick={startAdd} disabled={adapters.length === 0}>
+            <PlusIcon size={16} />
+          </button>
+        )}
+      >
         <p className="skills-lead">外部渠道经过 Channel Gateway 统一进同一个大脑；这里管理连接器配置、启停与授权范围。</p>
-        <span className="bar-spacer" />
-        <button className="set-btn secondary icon" title="新建渠道" onClick={startAdd} disabled={adapters.length === 0}>
-          <PlusIcon size={16} />
-        </button>
-      </div>
+      </ConfigToolbar>
 
       {note && <div className="note" data-testid="channels-note">{note}</div>}
 
@@ -672,13 +675,16 @@ export function Channels() {
 
       <div className="mcp-list" data-testid="channels-list">
         {connectors.length === 0 ? (
-          <div className="empty-models">
-            <div className="ring">
-              <GearIcon size={22} />
-            </div>
-            <h2>还没有渠道</h2>
-            <p>先新建一个连接器，外部消息就能进到同一个会话系统里。</p>
-          </div>
+          <ConfigEmptyState
+            icon={<GearIcon size={24} />}
+            title="还没有渠道"
+            description="先新建一个连接器，外部消息就能进到同一个会话系统里。"
+            action={(
+              <button className="set-btn primary" onClick={startAdd} disabled={adapters.length === 0}>
+                <PlusIcon size={15} /> 新建渠道
+              </button>
+            )}
+          />
         ) : (
           connectors.map((c) => {
             const s = statusById.get(c.id);
@@ -690,42 +696,50 @@ export function Channels() {
                 ? "iLink"
               : meta?.supportsWebhook ? "webhook" : "long-poll";
             return (
-              <div className="mcp-card" key={c.id} data-testid={`channels-card-${c.id}`}>
-                <BrandIcon brand={brandKeyForChannel(c.kind)} size="lg" />
-              <div className="mcp-card-body">
-                <div className="mcp-card-name">
-                  <span>{c.displayName || c.id}</span>
-                  <span className="set-pill">{kindLabel(c.kind, adapters)}</span>
-                  {running ? <span className="set-pill">运行中</span> : <span className="set-pill ghost">已停止</span>}
-                  <span className={transportLabel === "webhook" ? "set-pill" : "set-pill ghost"}>{transportLabel}</span>
-                </div>
+              <ConfigResourceCard
+                key={c.id}
+                className="mcp-card"
+                testId={`channels-card-${c.id}`}
+                icon={<BrandIcon brand={brandKeyForChannel(c.kind)} size="lg" />}
+                actions={(
+                  <>
+                    <button className="mcp-icon-btn" title={running ? "停止" : "启动"} onClick={() => void toggle(c, s)} disabled={busy === c.id}>
+                      {running ? <StopIcon size={16} /> : <PlayIcon size={16} />}
+                    </button>
+                    <button
+                      className="mcp-icon-btn"
+                      title="编辑"
+                      onClick={() => {
+                        setEditing(c);
+                        setFeishuSetup(null);
+                        setWechatSetup(null);
+                        setShowFeishuAdvanced(c.kind === "feishu");
+                        setShowWechatAdvanced(c.kind === "wechat");
+                      }}
+                      disabled={busy === c.id}
+                    >
+                      <GearIcon size={16} />
+                    </button>
+                    <button className="mcp-icon-btn danger" title="删除" onClick={() => void remove(c)} disabled={busy === c.id}>
+                      <TrashIcon size={16} />
+                    </button>
+                  </>
+                )}
+              >
+                <div className="mcp-card-body">
+                  <div className="mcp-card-name">
+                    <span>{c.displayName || c.id}</span>
+                    <span className="set-pill">{kindLabel(c.kind, adapters)}</span>
+                    {running ? <span className="set-pill">运行中</span> : <span className="set-pill ghost">已停止</span>}
+                    <span className={transportLabel === "webhook" ? "set-pill" : "set-pill ghost"}>{transportLabel}</span>
+                  </div>
                   <div className="mcp-card-detail">
                     {meta?.label ?? c.kind}
                     {c.auth?.allowAll ? " · 全部允许" : " · 限定范围"}
                     {s?.lastError ? ` · ${s.lastError}` : ""}
                   </div>
                 </div>
-                <button className="mcp-icon-btn" title={running ? "停止" : "启动"} onClick={() => void toggle(c, s)} disabled={busy === c.id}>
-                  {running ? <StopIcon size={16} /> : <PlayIcon size={16} />}
-                </button>
-                <button
-                  className="mcp-icon-btn"
-                  title="编辑"
-                  onClick={() => {
-                    setEditing(c);
-                    setFeishuSetup(null);
-                    setWechatSetup(null);
-                    setShowFeishuAdvanced(c.kind === "feishu");
-                    setShowWechatAdvanced(c.kind === "wechat");
-                  }}
-                  disabled={busy === c.id}
-                >
-                  <GearIcon size={16} />
-                </button>
-                <button className="mcp-icon-btn danger" title="删除" onClick={() => void remove(c)} disabled={busy === c.id}>
-                  <TrashIcon size={16} />
-                </button>
-              </div>
+              </ConfigResourceCard>
             );
           })
         )}

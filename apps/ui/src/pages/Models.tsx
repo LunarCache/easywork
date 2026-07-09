@@ -12,6 +12,7 @@ import type {
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "../components/ConfirmDialog.js";
 import { BrandIcon, brandKeyForModel, brandKeyForProvider } from "../components/BrandIcon.js";
+import { ConfigEmptyState, ConfigResourceCard, ConfigToolbar } from "../components/ConfigPrimitives.js";
 import {
   AlertIcon,
   BoxIcon,
@@ -887,7 +888,18 @@ export function Models({ onChange }: { onChange: () => void }) {
   // ===== 主视图：本地 / 云端 卡片列表 =====
   return (
     <div className="page mdl-page" data-testid="models-page">
-      <div className="mdl-head">
+      <ConfigToolbar
+        className="mdl-head"
+        actions={tab === "local" ? (
+          <button className="set-btn primary" title="搜索并下载 HuggingFace GGUF 模型" onClick={() => setView("search")}>
+            <DownloadIcon size={16} /> 下载模型
+          </button>
+        ) : (
+          <button className="set-btn primary" title="添加云端模型 Provider" onClick={openAddProvider}>
+            <PlusIcon size={16} /> 添加 Provider
+          </button>
+        )}
+      >
         <div className="seg mdl-tabs" data-testid="models-tabs">
           <button
             className={tab === "local" ? "on" : ""}
@@ -906,46 +918,28 @@ export function Models({ onChange }: { onChange: () => void }) {
             <GlobeIcon size={14} /> 云端
           </button>
         </div>
-        <span className="bar-spacer" />
-        {tab === "local" ? (
-          <button className="set-btn primary" title="搜索并下载 HuggingFace GGUF 模型" onClick={() => setView("search")}>
-            <DownloadIcon size={16} /> 下载模型
-          </button>
-        ) : (
-          <button className="set-btn primary" title="添加云端模型 Provider" onClick={openAddProvider}>
-            <PlusIcon size={16} /> 添加 Provider
-          </button>
-        )}
-      </div>
+      </ConfigToolbar>
       {progressNote}
 
       {tab === "local" ? (
         <>
           {/* 网络访问：把模型服务（llama router + /v1 网关）暴露到局域网 */}
-          <div className="set-group">
-            <div className="set-row">
-              <div className="set-row-info">
-                <div className="set-row-title">暴露到局域网</div>
-                <div className="set-row-desc">开启后局域网内其它设备可直连模型服务（绑定 0.0.0.0，须 api-key）；关闭则仅本机。</div>
+          <div className={`local-net-panel ${net?.bindHost === "0.0.0.0" ? "exposed" : ""}`}>
+            <div className="local-net-main">
+              <div className="local-net-copy">
+                <div className="local-net-title">
+                  <span className={`local-net-dot ${net?.bindHost === "0.0.0.0" ? "on" : ""}`} />
+                  <span>网络访问</span>
+                  <span className="set-pill ghost">{net?.bindHost === "0.0.0.0" ? "局域网" : "仅本机"}</span>
+                </div>
+                <div className="local-net-desc">
+                  本地默认只监听 127.0.0.1；开启后绑定 0.0.0.0，局域网设备需带 Bearer token 访问。
+                </div>
               </div>
-              <button
-                className={`set-toggle ${net?.bindHost === "0.0.0.0" ? "on" : ""}`}
-                disabled={netBusy}
-                onClick={() => void changeBind(net?.bindHost === "0.0.0.0" ? "127.0.0.1" : "0.0.0.0")}
-                title={net?.bindHost === "0.0.0.0" ? "收回到仅本机" : "暴露到局域网"}
-              >
-                <span />
-              </button>
-            </div>
-            <div className="set-row">
-              <div className="set-row-info">
-                <div className="set-row-title">API Key</div>
-                <div className="set-row-desc">绑定 0.0.0.0 时必填；留空自动生成。</div>
-              </div>
-              <div className="set-row-control">
+              <div className="local-net-controls">
                 <input
-                  className="set-key-input"
-                  placeholder="api-key"
+                  className="local-net-key"
+                  placeholder="API Key（留空自动生成）"
                   type="text"
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
@@ -953,27 +947,34 @@ export function Models({ onChange }: { onChange: () => void }) {
                 <button className="set-btn secondary" disabled={netBusy} onClick={() => setApiKeyInput(genApiKey())}>
                   生成
                 </button>
+                <button
+                  className={`set-toggle ${net?.bindHost === "0.0.0.0" ? "on" : ""}`}
+                  disabled={netBusy}
+                  onClick={() => void changeBind(net?.bindHost === "0.0.0.0" ? "127.0.0.1" : "0.0.0.0")}
+                  title={net?.bindHost === "0.0.0.0" ? "收回到仅本机" : "暴露到局域网"}
+                >
+                  <span />
+                </button>
               </div>
             </div>
-          </div>
-          {net?.bindHost === "0.0.0.0" && (
-            <div className="note">
-              <AlertIcon size={14} style={{ verticalAlign: "-2px", marginRight: 5 }} />
-              已绑定 0.0.0.0：局域网设备需带 <code>Authorization: Bearer {net.apiKey}</code> 才能访问。请仅在可信网络使用。
-            </div>
-          )}
-          {net && net.endpoints.length > 0 && (
-            <div className="set-group">
-              <div className="set-row col">
-                <div className="set-row-title">已加载模型端点（外部可直连）</div>
+            {net?.bindHost === "0.0.0.0" && (
+              <div className="local-net-warning">
+                <AlertIcon size={13} />
+                <span>已暴露到局域网，请仅在可信网络使用。</span>
+                <code>Authorization: Bearer {net.apiKey}</code>
+              </div>
+            )}
+            {net && net.endpoints.length > 0 && (
+              <div className="local-net-endpoints">
+                <span className="local-net-endpoints-label">已加载端点</span>
                 {net.endpoints.map((ep) => (
-                  <div key={ep.id} className="sub mono">
-                    {ep.id.split("/").pop()} → {endpointUrl(ep.port)}
-                  </div>
+                  <code key={ep.id}>
+                    {ep.id.split("/").pop()}{" -> "}{endpointUrl(ep.port)}
+                  </code>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
           {runtime && !runtime.found && (
             <div className="rt-banner warn">
               <AlertIcon size={15} />
@@ -989,14 +990,16 @@ export function Models({ onChange }: { onChange: () => void }) {
             </div>
           )}
           {local.length === 0 ? (
-            <div className="empty-models">
-              <BoxIcon size={26} />
-              <p>还没有本地模型</p>
-              <span>搜索 GGUF 模型并下载到本机。</span>
-              <button className="set-btn primary empty-action" onClick={() => setView("search")}>
-                <DownloadIcon size={15} /> 下载模型
-              </button>
-            </div>
+            <ConfigEmptyState
+              icon={<BoxIcon size={26} />}
+              title="还没有本地模型"
+              description="搜索 GGUF 模型并下载到本机。"
+              action={(
+                <button className="set-btn primary" onClick={() => setView("search")}>
+                  <DownloadIcon size={15} /> 下载模型
+                </button>
+              )}
+            />
           ) : (
             <div className="mdl-list">
               {local.map((m) => {
@@ -1007,8 +1010,41 @@ export function Models({ onChange }: { onChange: () => void }) {
                 const isBusy = busy === m.path;
                 const quant = quantOf(m);
                 return (
-                  <div key={m.id} className="mdl-card">
-                    <BrandIcon brand={brandKeyForModel(m.repoId, m.fileName, m.arch)} size="lg" />
+                  <ConfigResourceCard
+                    key={m.id}
+                    icon={<BrandIcon brand={brandKeyForModel(m.repoId, m.fileName, m.arch)} size="lg" />}
+                    actions={(
+                      <>
+                        {isEmbed ? (
+                          embedReady ? (
+                            <button className="set-btn secondary" disabled title="向量记忆已启用">
+                              已启用
+                            </button>
+                          ) : (
+                            <button className="set-btn secondary" disabled={embedBusy} onClick={() => void enableEmbed(m)}>
+                              {embedBusy ? "启用中…" : "启用向量"}
+                            </button>
+                          )
+                        ) : isLoaded ? (
+                          <button className="set-btn secondary" disabled={isBusy} onClick={() => void unload(m)}>
+                            {isBusy ? "卸载中…" : "卸载"}
+                          </button>
+                        ) : (
+                          <button className="set-btn secondary" disabled={isBusy} onClick={() => void load(m)}>
+                            {isBusy ? "加载中…" : "加载"}
+                          </button>
+                        )}
+                        <button
+                          className="mcp-icon-btn danger"
+                          title="删除本地模型（从磁盘移除）"
+                          disabled={isBusy}
+                          onClick={() => void delLocal(m)}
+                        >
+                          <TrashIcon size={14} />
+                        </button>
+                      </>
+                    )}
+                  >
                     <div className="mdl-body">
                       <div className="mdl-name-row">
                         <span className="mdl-name mono" title={m.fileName}>
@@ -1028,34 +1064,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                         <span>{fmtSize(m.sizeBytes)}</span>
                       </div>
                     </div>
-                    {isEmbed ? (
-                      embedReady ? (
-                        <button className="set-btn secondary" disabled title="向量记忆已启用">
-                          已启用
-                        </button>
-                      ) : (
-                        <button className="set-btn secondary" disabled={embedBusy} onClick={() => void enableEmbed(m)}>
-                          {embedBusy ? "启用中…" : "启用向量"}
-                        </button>
-                      )
-                    ) : isLoaded ? (
-                      <button className="set-btn secondary" disabled={isBusy} onClick={() => void unload(m)}>
-                        {isBusy ? "卸载中…" : "卸载"}
-                      </button>
-                    ) : (
-                      <button className="set-btn secondary" disabled={isBusy} onClick={() => void load(m)}>
-                        {isBusy ? "加载中…" : "加载"}
-                      </button>
-                    )}
-                    <button
-                      className="mcp-icon-btn danger"
-                      title="删除本地模型（从磁盘移除）"
-                      disabled={isBusy}
-                      onClick={() => void delLocal(m)}
-                    >
-                      <TrashIcon size={14} />
-                    </button>
-                  </div>
+                  </ConfigResourceCard>
                 );
               })}
             </div>
@@ -1065,16 +1074,25 @@ export function Models({ onChange }: { onChange: () => void }) {
         <>
           {provNote && <div className="note">{provNote}</div>}
           {providers.length === 0 ? (
-            <div className="empty-models">
-              <GlobeIcon size={26} />
-              <p>还没有云端 Provider</p>
-              <span>接入 OpenAI 兼容端点。</span>
-            </div>
+            <ConfigEmptyState icon={<GlobeIcon size={26} />} title="还没有云端 Provider" description="接入兼容端点或内置模型服务商。" />
           ) : (
-            <div className="mdl-list">
+            <div className="mdl-list provider-list">
               {providers.map((p) => (
-                <div key={p.id} className="mdl-card">
-                  <BrandIcon brand={brandKeyForProvider(p.id, p.baseUrl)} size="lg" />
+                <ConfigResourceCard
+                  key={p.id}
+                  className="provider-card-compact"
+                  icon={<BrandIcon brand={brandKeyForProvider(p.id, p.baseUrl)} size="lg" />}
+                  actions={(
+                    <>
+                      <button className="mcp-icon-btn" title="编辑" onClick={() => editProvider(p)}>
+                        <EditIcon size={14} />
+                      </button>
+                      <button className="mcp-icon-btn danger" title="删除" onClick={() => void removeProvider(p.id)}>
+                        <TrashIcon size={14} />
+                      </button>
+                    </>
+                  )}
+                >
                   <div className="mdl-body">
                     <div className="mdl-name-row">
                       <span className="mdl-name mono">{p.id}</span>
@@ -1085,13 +1103,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                       {p.kind === "pi-native" && p.baseUrl ? <span>override {p.baseUrl}</span> : null}
                     </div>
                   </div>
-                  <button className="mcp-icon-btn" title="编辑" onClick={() => editProvider(p)}>
-                    <EditIcon size={14} />
-                  </button>
-                  <button className="mcp-icon-btn danger" title="删除" onClick={() => void removeProvider(p.id)}>
-                    <TrashIcon size={14} />
-                  </button>
-                </div>
+                </ConfigResourceCard>
               ))}
             </div>
           )}

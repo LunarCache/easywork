@@ -35,7 +35,6 @@ import {
 } from "../lib/agent-stream.js";
 import {
   ArrowUpIcon,
-  TerminalIcon,
   ShieldIcon,
   ChevronDownIcon,
   CheckIcon,
@@ -511,13 +510,8 @@ export function Workspace({
       <div className={`ws-main ${empty ? "empty-state" : ""}`}>
         {empty ? (
           <div className="ws-hero">
-            <div className="ws-hero-mark">
-              <TerminalIcon size={30} />
-            </div>
             <h1 className="ws-hero-greet">{greeting}</h1>
-            <p className="ws-hero-sub">
-              在这里，AI 可以围绕当前项目读文件、改代码、跑命令和查看 git 改动。
-            </p>
+            <p className="ws-hero-sub">当前工作区：{project.name}</p>
             <div className="greet-pills ws-starters">
               {STARTERS.map(({ label, prompt, Icon }) => (
                 <button key={label} className="greet-pill" onClick={() => startFrom(prompt)}>
@@ -568,7 +562,7 @@ export function Workspace({
         previewId={project.id}
         onFilesRefresh={() => void refreshWsFiles()}
         onRevealDir={() => void getClient().wsReveal(project.id)}
-        filesEmpty="该工作区暂无可显示的文件。"
+        filesEmpty="暂无工作区文件。"
         msgs={msgs}
         exec={(c) => getClient().wsExec(project.id, c)}
         previewUrl={previewUrl}

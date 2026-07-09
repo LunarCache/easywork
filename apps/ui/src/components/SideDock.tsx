@@ -45,6 +45,10 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function DockEmpty({ children }: { children: ReactNode }) {
+  return <div className="rev-empty sd-empty">{children}</div>;
+}
+
 /**
  * 统一右侧「工作台坞」：对话区与工作区共用。
  * tab = 改动(git，按需) / 文件(工件+文件树) / 终端(最近命令) / 预览(网页)。
@@ -243,7 +247,7 @@ function FilesTab({
     setSel(hit.path);
   }, [openTarget, files]);
 
-  if (files.length === 0) return <div className="rev-empty">{emptyHint}</div>;
+  if (files.length === 0) return <DockEmpty>{emptyHint}</DockEmpty>;
   return (
     <div className="rev-scroll">
       {files.map((f) => {
@@ -336,9 +340,7 @@ function TerminalTab({
             {e.truncated && <div className="term-trunc">输出过长，已截断。</div>}
           </div>
         ))}
-        {!aiLast && history.length === 0 && (
-          <div className="rev-empty">在下方输入命令并回车即可在此工作目录执行；AI 运行过的命令也会出现在这里。</div>
-        )}
+        {!aiLast && history.length === 0 && <DockEmpty>输入命令后，结果会显示在这里。</DockEmpty>}
       </div>
       <div className="term-input">
         <span className="term-dollar">$</span>
@@ -372,9 +374,7 @@ function PreviewTab({ url, onClear }: { url: string | null; onClear: () => void 
   const [copied, setCopied] = useState(false);
   if (!url)
     return (
-      <div className="rev-empty">
-        点消息里的来源或链接，会在这里内联预览网页（不会把整个应用导航走）。部分站点禁止被内嵌时显示空白，可复制链接到浏览器打开。
-      </div>
+      <DockEmpty>打开消息中的链接后，会在这里预览。</DockEmpty>
     );
   return (
     <>
@@ -465,9 +465,9 @@ function DiffTab({ git }: { git: GitContext }) {
 
   if (!status.repo)
     return (
-      <div className="rev-empty">
-        该目录不是 git 仓库。运行 <code>git init</code> 后即可在此审阅改动。
-      </div>
+      <DockEmpty>
+        当前目录不是 Git 仓库。运行 <code>git init</code> 后即可审阅改动。
+      </DockEmpty>
     );
 
   return (
@@ -495,7 +495,7 @@ function DiffTab({ git }: { git: GitContext }) {
       {netNote && <div className={`rev-net-note ${netNote.ok ? "" : "err"}`}>{netNote.text}</div>}
 
       <div className="rev-scroll">
-        {status.files.length === 0 && <div className="rev-empty">工作区干净，无改动。</div>}
+        {status.files.length === 0 && <DockEmpty>工作区干净，无改动。</DockEmpty>}
 
         {unstaged.length > 0 && (
           <Group

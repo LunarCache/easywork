@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Skill, SkillSource } from "@ew/shared";
 import { getClient } from "../lib/client.js";
+import { ConfigEmptyState, ConfigToolbar } from "../components/ConfigPrimitives.js";
 import { loadDisabledSkills, saveDisabledSkills } from "../lib/prefs.js";
 import { SparkIcon, FolderIcon, PlusIcon, ArrowLeftIcon, CheckIcon, XIcon } from "../icons.js";
 
@@ -130,7 +131,7 @@ export function Skills() {
     const fm = detail.skill.frontmatter;
     return (
       <div className="page skills-page">
-      <div className="skill-detail-head">
+        <div className="skill-detail-head">
           <button className="files-back" data-testid="skills-detail-back" onClick={() => setDetail(null)}>
             <ArrowLeftIcon size={15} /> 返回
           </button>
@@ -148,16 +149,20 @@ export function Skills() {
 
   return (
     <div className="page skills-page">
-      <div className="skills-head">
+      <ConfigToolbar
+        actions={(
+          <>
+            <button className="set-btn ghost soft icon" title="打开技能目录" onClick={() => void openDir()}>
+              <FolderIcon size={16} />
+            </button>
+            <button className="set-btn secondary icon" data-testid="skills-new-button" title="新建技能" onClick={newTemplate}>
+              <PlusIcon size={16} />
+            </button>
+          </>
+        )}
+      >
         <p className="skills-lead">{loading ? "正在扫描全局技能…" : `已发现 ${skills.length} 个全局技能`}</p>
-        <span className="bar-spacer" />
-        <button className="set-btn ghost soft icon" title="打开技能目录" onClick={() => void openDir()}>
-          <FolderIcon size={16} />
-        </button>
-        <button className="set-btn secondary icon" data-testid="skills-new-button" title="新建技能" onClick={newTemplate}>
-          <PlusIcon size={16} />
-        </button>
-      </div>
+      </ConfigToolbar>
       {creating && (
         <div className="skills-new" data-testid="skills-new-inline">
           <PlusIcon size={14} />
@@ -183,11 +188,11 @@ export function Skills() {
       {note && <div className="note">{note}</div>}
 
       {!loading && sourceGroups.length === 0 ? (
-        <div className="empty-models">
-          <SparkIcon size={24} />
-          <p>还没有发现技能</p>
-          <span>可以新建模板，或把带 SKILL.md 的目录放入技能目录。</span>
-        </div>
+        <ConfigEmptyState
+          icon={<SparkIcon size={24} />}
+          title="还没有发现技能"
+          description="可以新建模板，或把带 SKILL.md 的目录放入技能目录。"
+        />
       ) : (
         <div className="skill-sources">
           {sourceGroups.map(({ source, skills: groupSkills }) => (

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { McpServerConfig } from "@ew/shared";
 import { getClient } from "../lib/client.js";
+import { ConfigEmptyState, ConfigResourceCard, ConfigToolbar } from "../components/ConfigPrimitives.js";
 import { useConfirm } from "../components/ConfirmDialog.js";
 import { TrashIcon, RefreshIcon, PlusIcon, ArrowLeftIcon, GearIcon } from "../icons.js";
 
@@ -253,16 +254,29 @@ export function Mcp() {
 
   return (
     <div className="page mcp-page" data-testid="mcp-page">
-      <div className="skills-head">
+      <ConfigToolbar
+        actions={(
+          <button className="set-btn secondary icon" data-testid="mcp-add-button" title="添加服务器" onClick={startAdd}>
+            <PlusIcon size={16} />
+          </button>
+        )}
+      >
         <p className="skills-lead">接入 Model Context Protocol 工具服务器（stdio / HTTP），以 mcp__&lt;server&gt;__&lt;tool&gt; 暴露给模型。</p>
-        <span className="bar-spacer" />
-        <button className="set-btn secondary icon" data-testid="mcp-add-button" title="添加服务器" onClick={startAdd}>
-          <PlusIcon size={16} />
-        </button>
-      </div>
+      </ConfigToolbar>
       {note && <div className="note" data-testid="mcp-note">{note}</div>}
 
-      {servers.length === 0 ? null : (
+      {servers.length === 0 ? (
+        <ConfigEmptyState
+          icon={<GearIcon size={24} />}
+          title="还没有 MCP 服务器"
+          description="添加一个 HTTP 或 stdio 服务器后，工具会以 mcp__server__tool 暴露给模型。"
+          action={(
+            <button className="set-btn primary" onClick={startAdd}>
+              <PlusIcon size={15} /> 添加服务器
+            </button>
+          )}
+        />
+      ) : (
         <div className="mcp-list" data-testid="mcp-list">
           {servers.map((s) => {
             const on = s.enabled !== false;
@@ -276,8 +290,37 @@ export function Mcp() {
               s.transport.kind === "stdio" ? `${s.transport.command} ${s.transport.args.join(" ")}` : s.transport.url;
             const status = !on ? "已禁用" : busy ? "连接中…" : ok ? "已连接" : err ? "连接失败" : "未探测";
             return (
-              <div key={s.id} className="mcp-card" data-testid={`mcp-card-${s.id}`}>
-                <span className={`mcp-dot ${ok ? "ok" : err ? "err" : "busy"}`} />
+              <ConfigResourceCard
+                key={s.id}
+                className="mcp-card"
+                testId={`mcp-card-${s.id}`}
+                icon={<span className={`mcp-dot ${ok ? "ok" : err ? "err" : "busy"}`} />}
+                actions={(
+                  <>
+                    <button className="mcp-icon-btn" data-testid={`mcp-edit-${s.id}`} title="编辑配置" onClick={() => editConfig(s)}>
+                      <GearIcon size={13} />
+                    </button>
+                    <button className="mcp-icon-btn" data-testid={`mcp-probe-${s.id}`} title="重新探测" onClick={() => void probeOne(s)}>
+                      <RefreshIcon size={13} className={busy ? "spin" : ""} />
+                    </button>
+                    <button className="mcp-icon-btn danger" data-testid={`mcp-delete-${s.id}`} title="删除" onClick={() => void remove(s.id)}>
+                      <TrashIcon size={13} />
+                    </button>
+                    <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} data-testid={`mcp-status-${s.id}`} title={err ? (res?.error ?? "") : ""}>
+                      {status}
+                    </span>
+                    <button
+                      className={`set-toggle ${on ? "on" : ""}`}
+                      data-testid={`mcp-toggle-${s.id}`}
+                      title={on ? "已启用（点击禁用）" : "已禁用（点击启用）"}
+                      aria-pressed={on}
+                      onClick={(e) => void toggleEnabled(s, e)}
+                    >
+                      <span />
+                    </button>
+                  </>
+                )}
+              >
                 <div className="mcp-card-body">
                   <div className="mcp-card-name">
                     <span className="mono" data-testid={`mcp-card-name-${s.id}`}>{s.displayName || s.id}</span>
@@ -293,28 +336,7 @@ export function Mcp() {
                     </div>
                   )}
                 </div>
-                <button className="mcp-icon-btn" data-testid={`mcp-edit-${s.id}`} title="编辑配置" onClick={() => editConfig(s)}>
-                  <GearIcon size={13} />
-                </button>
-                <button className="mcp-icon-btn" data-testid={`mcp-probe-${s.id}`} title="重新探测" onClick={() => void probeOne(s)}>
-                  <RefreshIcon size={13} className={busy ? "spin" : ""} />
-                </button>
-                <button className="mcp-icon-btn danger" data-testid={`mcp-delete-${s.id}`} title="删除" onClick={() => void remove(s.id)}>
-                  <TrashIcon size={13} />
-                </button>
-                <span className={`mcp-status ${ok ? "ok" : err ? "err" : ""}`} data-testid={`mcp-status-${s.id}`} title={err ? (res?.error ?? "") : ""}>
-                  {status}
-                </span>
-                <button
-                  className={`set-toggle ${on ? "on" : ""}`}
-                  data-testid={`mcp-toggle-${s.id}`}
-                  title={on ? "已启用（点击禁用）" : "已禁用（点击启用）"}
-                  aria-pressed={on}
-                  onClick={(e) => void toggleEnabled(s, e)}
-                >
-                  <span />
-                </button>
-              </div>
+              </ConfigResourceCard>
             );
           })}
         </div>

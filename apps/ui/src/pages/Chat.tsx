@@ -66,10 +66,10 @@ const STARTERS: { label: string; prompt: string; Icon: typeof CodeIcon }[] = [
   { label: "头脑风暴", prompt: "我想做一个项目，帮我头脑风暴一些点子：", Icon: SparkIcon },
 ];
 
-const QUICK_ACTIONS: { label: string; hint: string; action: "search" | "workspace" | "settings"; Icon: typeof GlobeIcon }[] = [
-  { label: "试试联网搜索", hint: "直接从网页找资料", action: "search", Icon: GlobeIcon },
-  { label: "打开工作区", hint: "让 AI 读写你的项目", action: "workspace", Icon: FileIcon },
-  { label: "配置模型", hint: "本地模型或云端 provider", action: "settings", Icon: SlidersIcon },
+const QUICK_ACTIONS: { label: string; action: "search" | "workspace" | "settings"; Icon: typeof GlobeIcon }[] = [
+  { label: "联网搜索", action: "search", Icon: GlobeIcon },
+  { label: "打开工作区", action: "workspace", Icon: FileIcon },
+  { label: "配置模型", action: "settings", Icon: SlidersIcon },
 ];
 
 // 工具卡 / 消息渲染已抽到 components/MessageStream.tsx（聊天与工作区共用）。
@@ -393,226 +393,222 @@ export function Chat({
 
   return (
     <div className="chat-wrap">
-      <div className="chat">
-      <div className="messages" ref={scrollRef} onScroll={onMessagesScroll}>
-        {msgs.length === 0 && (
-          <div className="greeting">
-            <span className="greet-spark">
-              <SparkIcon size={30} />
-            </span>
-            <h1>有什么可以帮你？</h1>
-            <p className="greet-sub">
-              EasyWork 适合两类事：直接问模型，或者进入工作区让 AI 帮你动项目。
-              {!model && " 还没加载模型，先去配置一下就能开始。"}
-            </p>
-            <div className="greet-pills">
-              {STARTERS.map(({ label, prompt, Icon }) => (
-                <button
-                  key={label}
-                  className="greet-pill"
-                  onClick={() => {
-                    setInput(prompt);
-                    requestAnimationFrame(() => focusComposerEnd(taRef.current));
-                  }}
-                >
-                  <Icon size={14} />
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="greet-quick">
-              {QUICK_ACTIONS.map(({ label, hint, action, Icon }) => (
-                <button key={label} className="greet-quick-card" onClick={() => openQuickAction(action)}>
-                  <span className="greet-quick-ico">
-                    <Icon size={15} />
-                  </span>
-                  <span className="greet-quick-copy">
-                    <strong>{label}</strong>
-                    <small>{hint}</small>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        <MessageStream
-          msgs={msgs}
-          busy={busy}
-          onOpenUrl={(u) => {
-            setPreviewUrl(u);
-            setDockOpen(true);
-          }}
-          onOpenFile={(p) => {
-            setDockOpen(true);
-            setDockTarget({ path: p, nonce: Date.now() });
-          }}
-          onRetry={retry}
-          onEdit={editRetry}
-        />
-      </div>
-      {showJump && (
-        <button className="jump-bottom" title="跳到最新" onClick={jumpToBottom}>
-          <ChevronDownIcon size={18} />
-        </button>
-      )}
-      {approval && (
-        <ApprovalCard toolName={approval.toolName} args={approval.args} onRespond={(v) => void respondApproval(v)} />
-      )}
-      <footer className="composer">
-        <div className="composer-box">
-          <ComposerContextStrip>
-            <ModelSelect models={models} value={model} onChange={setModel} up variant="strip" />
-            <ComposerContextPill
-              tone={thinkLevel !== "off" ? "on" : "default"}
-              onClick={cycleThink}
-              title="思考档位（点击循环：低/中/高/关）"
-              testId="chat-think-pill"
-            >
-              <ThinkIcon size={14} />
-              <span>思考 {THINK_LABEL[thinkLevel]}</span>
-            </ComposerContextPill>
-            <ComposerContextPill tone={web ? "on" : "default"} onClick={() => setWeb((v) => !v)} title="联网搜索">
-              <GlobeIcon size={14} />
-              <span>{web ? "联网已开" : "联网已关"}</span>
-            </ComposerContextPill>
-            <ComposerContextPill
-              tone={kb ? "on" : "default"}
-              onClick={() => setKb((v) => !v)}
-              title={kb ? `知识库${kbId ? `·${kbId}` : "·全部"}` : "知识库"}
-            >
-              <BoxIcon size={14} />
-              <span>{kb ? `知识库·${kbId ?? "全部"}` : "知识库已关"}</span>
-            </ComposerContextPill>
-            {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
-          </ComposerContextStrip>
-          {images.length > 0 && (
-            <div className="composer-images" data-testid="chat-image-strip">
-              {images.map((im, j) => (
-                <div key={j} className="cimg">
-                  <img src={`data:${im.mimeType};base64,${im.data}`} alt="" />
-                  <button data-testid={`chat-image-remove-${j}`} onClick={() => setImages((cur) => cur.filter((_, k) => k !== j))}>
-                    <XIcon size={12} />
+      <div className={`chat ${msgs.length === 0 ? "is-empty" : ""}`}>
+        <div className="messages" ref={scrollRef} onScroll={onMessagesScroll}>
+          {msgs.length === 0 && (
+            <div className="greeting">
+              <span className="greet-spark">
+                <SparkIcon size={30} />
+              </span>
+              <h1>有什么可以帮你？</h1>
+              <p className="greet-sub">
+                {model ? "直接输入，或从下面选一个起手式。" : "还没加载模型，先配置一下就能开始。"}
+              </p>
+              <div className="greet-pills">
+                {STARTERS.map(({ label, prompt, Icon }) => (
+                  <button
+                    key={label}
+                    className="greet-pill"
+                    onClick={() => {
+                      setInput(prompt);
+                      requestAnimationFrame(() => focusComposerEnd(taRef.current));
+                    }}
+                  >
+                    <Icon size={14} />
+                    {label}
                   </button>
-                </div>
-              ))}
+                ))}
+              </div>
+              <div className="greet-quick">
+                {QUICK_ACTIONS.map(({ label, action, Icon }) => (
+                  <button key={label} className="greet-quick-card" onClick={() => openQuickAction(action)}>
+                    <span className="greet-quick-ico">
+                      <Icon size={15} />
+                    </span>
+                    <span className="greet-quick-label">{label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
-          <input
-            ref={fileRef}
-            data-testid="chat-upload-input"
-            type="file"
-            accept="image/*"
-            multiple
-            style={{ display: "none" }}
-            onChange={(e) => {
-              void onPickImages(e.target.files);
-              e.target.value = "";
+          <MessageStream
+            msgs={msgs}
+            busy={busy}
+            onOpenUrl={(u) => {
+              setPreviewUrl(u);
+              setDockOpen(true);
             }}
+            onOpenFile={(p) => {
+              setDockOpen(true);
+              setDockTarget({ path: p, nonce: Date.now() });
+            }}
+            onRetry={retry}
+            onEdit={editRetry}
           />
-          {slash.palette}
-          <textarea
-            ref={taRef}
-            data-testid="chat-composer-input"
-            value={input}
-            rows={1}
-            placeholder="发送消息…（/ 唤起命令）"
-            onChange={(e) => {
-              setInput(e.target.value);
-              autoGrowComposer(e.target);
-            }}
-            onPaste={onPasteImages}
-            onKeyDown={(e) => {
-              // 输入法组词中按回车只确认候选词，不发送（中文/日文等 IME）
-              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-              if (slash.onKeyDown(e)) return; // 斜杠命令面板优先消费方向/回车/Esc
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-          />
-          <div className="composer-bar">
-            <div className="composer-bar-left">
-              <button className="cbtn" data-testid="chat-upload-button" title="上传图片" onClick={() => fileRef.current?.click()}>
-                <PlusBtnIcon size={18} />
-              </button>
-              {images.length > 0 && (
-                <span className="cmini-chip" data-testid="chat-image-chip" title={`已附加 ${images.length} 张图片`}>
-                  <FileImageIcon size={14} />
-                  <span>{images.length} 张图</span>
-                </span>
-              )}
-            </div>
-            <div className="composer-bar-right">
-              <div className="params-wrap">
-                <button
-                  className={`params-btn ${Object.keys(sampling).length ? "on" : ""}`}
-                  onClick={() => setParamsOpen((v) => !v)}
-                  disabled={!model}
-                  title="生成参数（按当前模型）"
-                >
-                  <SlidersIcon size={16} />
+        </div>
+        {showJump && (
+          <button className="jump-bottom" title="跳到最新" onClick={jumpToBottom}>
+            <ChevronDownIcon size={18} />
+          </button>
+        )}
+        {approval && (
+          <ApprovalCard toolName={approval.toolName} args={approval.args} onRespond={(v) => void respondApproval(v)} />
+        )}
+        <footer className="composer">
+          <div className="composer-box">
+            <ComposerContextStrip>
+              <ModelSelect models={models} value={model} onChange={setModel} up variant="strip" />
+              <ComposerContextPill
+                tone={thinkLevel !== "off" ? "on" : "default"}
+                onClick={cycleThink}
+                title="思考档位（点击循环：低/中/高/关）"
+                testId="chat-think-pill"
+              >
+                <ThinkIcon size={14} />
+                <span>思考 {THINK_LABEL[thinkLevel]}</span>
+              </ComposerContextPill>
+              <ComposerContextPill tone={web ? "on" : "default"} onClick={() => setWeb((v) => !v)} title="联网搜索">
+                <GlobeIcon size={14} />
+                <span>{web ? "联网已开" : "联网已关"}</span>
+              </ComposerContextPill>
+              <ComposerContextPill
+                tone={kb ? "on" : "default"}
+                onClick={() => setKb((v) => !v)}
+                title={kb ? `知识库${kbId ? `·${kbId}` : "·全部"}` : "知识库"}
+              >
+                <BoxIcon size={14} />
+                <span>{kb ? `知识库·${kbId ?? "全部"}` : "知识库已关"}</span>
+              </ComposerContextPill>
+              {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
+            </ComposerContextStrip>
+            {images.length > 0 && (
+              <div className="composer-images" data-testid="chat-image-strip">
+                {images.map((im, j) => (
+                  <div key={j} className="cimg">
+                    <img src={`data:${im.mimeType};base64,${im.data}`} alt="" />
+                    <button data-testid={`chat-image-remove-${j}`} onClick={() => setImages((cur) => cur.filter((_, k) => k !== j))}>
+                      <XIcon size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <input
+              ref={fileRef}
+              data-testid="chat-upload-input"
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: "none" }}
+              onChange={(e) => {
+                void onPickImages(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            {slash.palette}
+            <textarea
+              ref={taRef}
+              data-testid="chat-composer-input"
+              value={input}
+              rows={1}
+              placeholder="发送消息…（/ 唤起命令）"
+              onChange={(e) => {
+                setInput(e.target.value);
+                autoGrowComposer(e.target);
+              }}
+              onPaste={onPasteImages}
+              onKeyDown={(e) => {
+                // 输入法组词中按回车只确认候选词，不发送（中文/日文等 IME）
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                if (slash.onKeyDown(e)) return; // 斜杠命令面板优先消费方向/回车/Esc
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            <div className="composer-bar">
+              <div className="composer-bar-left">
+                <button className="cbtn" data-testid="chat-upload-button" title="上传图片" onClick={() => fileRef.current?.click()}>
+                  <PlusBtnIcon size={18} />
                 </button>
-                {paramsOpen && (
-                  <>
-                    <div className="menu-backdrop" onClick={() => setParamsOpen(false)} />
-                    <div className="params-pop up">
-                      <div className="pp-head">
-                        <span>生成参数 · {modelLabel(model)}</span>
-                        <button
-                          className="pp-reset"
-                          onClick={() => {
-                            setSampling({});
-                            saveSampling(model, {});
-                          }}
-                        >
-                          重置
-                        </button>
-                      </div>
-                      {(
-                        [
-                          ["temperature", "温度", "0.7", "0.05"],
-                          ["topP", "top_p", "0.9", "0.05"],
-                          ["topK", "top_k", "40", "1"],
-                          ["minP", "min_p", "0", "0.01"],
-                          ["repeatPenalty", "重复惩罚", "1.0", "0.05"],
-                          ["maxTokens", "max_tokens", "无上限", "64"],
-                        ] as const
-                      ).map(([key, label, ph, step]) => (
-                        <label key={key} className="pp-row">
-                          <span>{label}</span>
-                          <input
-                            type="number"
-                            step={step}
-                            placeholder={`默认 ${ph}`}
-                            value={sampling[key] ?? ""}
-                            onChange={(e) => setParam(key, e.target.value)}
-                          />
-                        </label>
-                      ))}
-                      <div className="pp-note">仅对「{modelLabel(model)}」生效，自动保存。</div>
-                    </div>
-                  </>
+                {images.length > 0 && (
+                  <span className="cmini-chip" data-testid="chat-image-chip" title={`已附加 ${images.length} 张图片`}>
+                    <FileImageIcon size={14} />
+                    <span>{images.length} 张图</span>
+                  </span>
                 )}
               </div>
-              {busy ? (
-                <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
-                  <StopIcon size={15} fill="currentColor" />
-                </button>
-              ) : (
-                <button className="csend" onClick={() => void send()} disabled={!model} title="发送">
-                  <ArrowUpIcon size={18} />
-                </button>
-              )}
+              <div className="composer-bar-right">
+                <div className="params-wrap">
+                  <button
+                    className={`params-btn ${Object.keys(sampling).length ? "on" : ""}`}
+                    onClick={() => setParamsOpen((v) => !v)}
+                    disabled={!model}
+                    title="生成参数（按当前模型）"
+                  >
+                    <SlidersIcon size={16} />
+                  </button>
+                  {paramsOpen && (
+                    <>
+                      <div className="menu-backdrop" onClick={() => setParamsOpen(false)} />
+                      <div className="params-pop up">
+                        <div className="pp-head">
+                          <span>生成参数 · {modelLabel(model)}</span>
+                          <button
+                            className="pp-reset"
+                            onClick={() => {
+                              setSampling({});
+                              saveSampling(model, {});
+                            }}
+                          >
+                            重置
+                          </button>
+                        </div>
+                        {(
+                          [
+                            ["temperature", "温度", "0.7", "0.05"],
+                            ["topP", "top_p", "0.9", "0.05"],
+                            ["topK", "top_k", "40", "1"],
+                            ["minP", "min_p", "0", "0.01"],
+                            ["repeatPenalty", "重复惩罚", "1.0", "0.05"],
+                            ["maxTokens", "max_tokens", "无上限", "64"],
+                          ] as const
+                        ).map(([key, label, ph, step]) => (
+                          <label key={key} className="pp-row">
+                            <span>{label}</span>
+                            <input
+                              type="number"
+                              step={step}
+                              placeholder={`默认 ${ph}`}
+                              value={sampling[key] ?? ""}
+                              onChange={(e) => setParam(key, e.target.value)}
+                            />
+                          </label>
+                        ))}
+                        <div className="pp-note">仅对「{modelLabel(model)}」生效，自动保存。</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {busy ? (
+                  <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
+                    <StopIcon size={15} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button className="csend" onClick={() => void send()} disabled={!model} title="发送">
+                    <ArrowUpIcon size={18} />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-        {notice && (
-          <div className="composer-note">
-            <span className="composer-status">{notice}</span>
-          </div>
-        )}
-      </footer>
+          {notice && (
+            <div className="composer-note">
+              <span className="composer-status">{notice}</span>
+            </div>
+          )}
+        </footer>
       </div>
       <SideDock
         open={dockOpen}
@@ -622,7 +618,7 @@ export function Chat({
         previewId={threadId}
         onFilesRefresh={() => void refreshFiles()}
         onRevealDir={() => void getClient().chatReveal(threadId)}
-        filesEmpty="本会话还没有产出文件。让 AI 写文件、或运行命令生成网页 / 构建物后，会在这里展示并可预览。"
+        filesEmpty="暂无会话文件。"
         msgs={msgs}
         exec={(c) => getClient().chatExec(threadId, c)}
         previewUrl={previewUrl}
