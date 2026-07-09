@@ -67,5 +67,16 @@ test.describe("knowledge base and skills e2e", () => {
     await expect(page.getByTestId("skills-new-button")).toBeVisible();
     await expect(page.getByTestId("skills-source-builtin")).toContainText(skillName);
     await expect(page.getByTestId(`skill-card-${created!.id}`)).toBeVisible();
+    await expect(page.getByTestId(`skill-status-${created!.id}`)).toHaveText("已启用");
+
+    await page.getByTestId(`skill-toggle-${created!.id}`).click();
+    await expect(page.getByTestId(`skill-status-${created!.id}`)).toHaveText("已关闭");
+    await page.reload();
+    await page.getByTestId("sidebar-settings").click();
+    await page.getByTestId("settings-nav-skills").click();
+    await expect(page.getByTestId(`skill-status-${created!.id}`)).toHaveText("已关闭");
+
+    await page.getByTestId(`skill-toggle-${created!.id}`).click();
+    await expect(page.getByTestId(`skill-status-${created!.id}`)).toHaveText("已启用");
   });
 });

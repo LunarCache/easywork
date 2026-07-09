@@ -20,7 +20,7 @@ import { ContextBar } from "../components/ContextBar.js";
 import { SideDock } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
-import { explicitSkillName, THINK_LABEL, nextThink } from "../lib/slash.js";
+import { THINK_LABEL, nextThink } from "../lib/slash.js";
 import { useAvailableModel } from "../hooks/useAvailableModel.js";
 import { useComposerImages } from "../hooks/useComposerImages.js";
 import { useMessageScroll } from "../hooks/useMessageScroll.js";
@@ -295,8 +295,7 @@ export function Workspace({
     const apply = (fn: (m: UiMsg) => UiMsg) => setMsgs((current) => updateLastAssistant(current, fn));
     const ac = new AbortController();
     abortRef.current = ac;
-    const explicitSkill = explicitSkillName(text);
-    const excludeSkills = loadDisabledSkills().filter((name) => name !== explicitSkill);
+    const excludeSkills = loadDisabledSkills();
     const MUTATING = new Set(["fs_write", "fs_edit", "run_command"]);
     // 确保审批档位的在途 PATCH 已落库，再发起本轮（服务端按 project.approvalMode 把守危险工具）。
     if (pendingMode.current) await pendingMode.current.catch(() => {});

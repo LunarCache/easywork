@@ -109,6 +109,26 @@ test.describe("composer e2e", () => {
     await expect(input).toHaveValue("/skill:review-flow ");
   });
 
+  test("聊天页 slash palette 不展示已关闭的 skill", async ({ page, openApp, client }) => {
+    await client.createSkillTemplate("disabled-flow");
+    await openApp();
+
+    const input = page.getByTestId("chat-composer-input");
+    await expect(input).toBeVisible();
+
+    await input.fill("/skill:disabled-flow");
+    await expect(page.getByTestId("slash-item-skill:disabled-flow")).toBeVisible();
+
+    await page.evaluate(() => {
+      localStorage.setItem("ew.disabledSkills", JSON.stringify(["disabled-flow"]));
+    });
+    await input.fill("");
+    await input.fill("/skill:disabled-flow");
+
+    await expect(page.getByTestId("slash-item-skill:disabled-flow")).toHaveCount(0);
+    await expect(page.getByTestId("slash-palette")).toHaveCount(0);
+  });
+
   test("工作区 slash palette 会合并当前项目的 .agents/skills", async ({ page, openApp, client, workspaceDir }) => {
     const skillDir = path.join(workspaceDir, ".agents", "skills", "repo-flow");
     fs.mkdirSync(skillDir, { recursive: true });

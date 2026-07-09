@@ -141,12 +141,10 @@ export function useSlashPalette(
   }, [h.models, sourceByModel]);
   const modelTitle = useCallback((model: string) => modelLabel(sourceByModel.get(model)?.modelId ?? model), [sourceByModel]);
   const skillItems = useMemo(() => {
-    const disabled = new Set(loadDisabledSkills());
     return (h.skills ?? [])
       .map((skill) => ({
         skill,
         name: skill.frontmatter.name,
-        disabled: disabled.has(skill.frontmatter.name),
         desc: [
           skillSourcePrefix(skill),
           skill.frontmatter.description || skill.frontmatter.whenToUse || skill.id,
@@ -158,15 +156,16 @@ export function useSlashPalette(
     if (q == null) return [];
     if (skillQuery != null) {
       const needle = skillQuery.toLowerCase();
+      const disabled = new Set(loadDisabledSkills());
       return skillItems
+        .filter(({ name }) => !disabled.has(name))
         .filter(({ name, desc }) => name.toLowerCase().includes(needle) || desc.toLowerCase().includes(needle))
         .slice(0, 8)
-        .map(({ name, desc, disabled }) => ({
+        .map(({ name, desc }) => ({
           key: `skill:${name}`,
           title: name,
           desc,
           cmd: "/skill",
-          value: disabled ? "手动" : undefined,
           Icon: SparkIcon,
           run: () => setInput(`/skill:${name} `),
         }));
@@ -198,12 +197,13 @@ export function useSlashPalette(
           } satisfies Item;
         }
         if (c.name === "skill") {
+          const enabledSkills = skillItems.filter(({ name }) => !loadDisabledSkills().includes(name));
           return {
             key: c.name,
             title: "调用 Skill",
             desc: c.desc,
             cmd: "/skill",
-            value: skillItems.length ? `${skillItems.length} 个` : undefined,
+            value: enabledSkills.length ? `${enabledSkills.length} 个` : undefined,
             Icon: SparkIcon,
             run: () => setInput("/skill:"),
           } satisfies Item;

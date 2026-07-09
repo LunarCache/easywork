@@ -18,7 +18,7 @@ import { ComposerContextPill, ComposerContextStrip, ComposerUsagePill } from "..
 import { SideDock } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
-import { explicitSkillName, THINK_LABEL, nextThink } from "../lib/slash.js";
+import { THINK_LABEL, nextThink } from "../lib/slash.js";
 import {
   applyAgentEvent,
   messageText,
@@ -299,8 +299,7 @@ export function Chat({
     const apply = (fn: (m: UiMsg) => UiMsg) => setMsgs((current) => updateLastAssistant(current, fn));
 
     const excludeTools = web ? [] : ["web_search", "http_get"];
-    const explicitSkill = explicitSkillName(text);
-    const excludeSkills = loadDisabledSkills().filter((name) => name !== explicitSkill);
+    const excludeSkills = loadDisabledSkills();
     const ac = new AbortController();
     abortRef.current = ac;
     const FS_TOOLS = new Set(["fs_write", "fs_edit", "run_command"]);

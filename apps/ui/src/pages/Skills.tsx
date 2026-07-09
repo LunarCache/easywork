@@ -212,7 +212,7 @@ export function Skills() {
                     const name = s.frontmatter.name;
                     const on = !disabled.includes(name);
                     return (
-                      <div key={s.id} className="skill-card" data-testid={`skill-card-${s.id}`} onClick={() => void openDetail(s)}>
+                      <div key={s.id} className="skills-card" data-testid={`skill-card-${s.id}`} onClick={() => void openDetail(s)}>
                         <span className="skill-ico">
                           <SparkIcon size={18} />
                         </span>
@@ -226,14 +226,21 @@ export function Skills() {
                             {s.frontmatter.description || s.frontmatter.whenToUse || "（无描述）"}
                           </div>
                         </div>
-                        <button
-                          className={`set-toggle ${on ? "on" : ""}`}
-                          title={on ? "已启用（点击关闭）" : "已关闭（点击启用）"}
-                          aria-pressed={on}
-                          onClick={(e) => toggle(name, e)}
-                        >
-                          <span />
-                        </button>
+                        <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
+                          <span className={`skill-state ${on ? "on" : ""}`} data-testid={`skill-status-${s.id}`}>
+                            {on ? "已启用" : "已关闭"}
+                          </span>
+                          <button
+                            className={`set-toggle ${on ? "on" : ""}`}
+                            data-testid={`skill-toggle-${s.id}`}
+                            title={on ? "已启用（点击关闭）" : "已关闭（点击启用）"}
+                            aria-label={on ? `关闭 ${name}` : `启用 ${name}`}
+                            aria-pressed={on}
+                            onClick={(e) => toggle(name, e)}
+                          >
+                            <span />
+                          </button>
+                        </div>
                       </div>
                     );
                   })}

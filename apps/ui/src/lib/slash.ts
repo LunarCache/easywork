@@ -46,11 +46,6 @@ export function parseCmd(text: string): { name: string; arg: string } {
   return { name: body.slice(0, sp).toLowerCase(), arg: body.slice(sp + 1).trim() };
 }
 
-/** 显式 /skill:name 调用的 skill 名；用于发送时允许手动调用已关闭的自动 Skill。 */
-export function explicitSkillName(text: string): string | null {
-  return /^\/skill:([^\s]+)/i.exec(text.trimStart())?.[1] ?? null;
-}
-
 /** 命令名阶段（未输空格）：按前缀过滤候选命令。 */
 export function matchCmds(name: string): SlashCmd[] {
   const n = name.toLowerCase();
