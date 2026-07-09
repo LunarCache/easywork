@@ -30,6 +30,7 @@ export interface CoreHttpContext {
   repo: SqliteConversationRepo;
   fetchImpl: typeof fetch;
   persistProviders(): void;
+  persistMcp(): void;
   persistChannels(): void;
   emitInboxChanged(patch: Omit<Extract<InboxEvent, { type: "changed" }>, "type" | "at">): void;
   inboxSubscribers: Set<(event: InboxEvent) => void>;

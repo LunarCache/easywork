@@ -64,14 +64,6 @@ interface ProviderFormModel {
   inputModalities: ProviderModelModality[];
 }
 
-function splitProviderModels(value: string): string[] {
-  const ids = value
-    .split(/[,\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return [...new Set(ids)];
-}
-
 function resetScrollContainers(node: HTMLElement | null) {
   if (!node) return;
   let el: HTMLElement | null = node;
@@ -523,17 +515,6 @@ export function Models({ onChange }: { onChange: () => void }) {
   };
 
   const providerModelIds = providerModels.map((m) => m.id).filter(Boolean);
-  const setProviderModelIds = (models: string[]) => {
-    setProviderModels((cur) => {
-      const existing = new Map(cur.map((m) => [m.id, m]));
-      return splitProviderModels(models.join("\n")).map((id) => existing.get(id) ?? {
-        rowId: crypto.randomUUID(),
-        id,
-        context: "32768",
-        inputModalities: ["text"],
-      });
-    });
-  };
   const addProviderModelRow = () => {
     setProviderModels((cur) => [...cur, newProviderModelRow()]);
   };
@@ -559,15 +540,15 @@ export function Models({ onChange }: { onChange: () => void }) {
     setModelProbeBusy(true);
     setProvNote("");
     try {
-      const models = await getClient().probeProviderModels({
+      const result = await getClient().probeProviderModelConfigs({
         baseUrl: prov.baseUrl.trim(),
         ...(prov.apiKey.trim() ? { apiKey: prov.apiKey.trim() } : {}),
       });
-      if (models.length === 0) {
+      if (result.modelConfigs.length === 0) {
         setProvNote("未获取到模型列表，请手动填入模型 ID。");
       } else {
-        setProviderModelIds(models);
-        setProvNote(`已获取 ${models.length} 个模型。`);
+        setProviderModels(modelConfigsToForm(result.modelConfigs));
+        setProvNote(`已获取 ${result.modelConfigs.length} 个模型。`);
       }
     } catch (e) {
       setProvNote(`获取模型列表失败：${e instanceof Error ? e.message : String(e)}。请手动填入模型 ID。`);

@@ -225,6 +225,11 @@ export interface ProbeProviderModelsInput {
   headers?: Record<string, string>;
 }
 
+export interface ProbeProviderModelsResult {
+  models: string[];
+  modelConfigs: ProviderModelConfig[];
+}
+
 export class EasyWorkClient {
   private readonly baseUrl: string;
   private readonly token: string;
@@ -399,8 +404,12 @@ export class EasyWorkClient {
     return providers;
   }
 
+  async probeProviderModelConfigs(input: ProbeProviderModelsInput): Promise<ProbeProviderModelsResult> {
+    return this.postJSON<ProbeProviderModelsResult>("/providers/probe-models", input);
+  }
+
   async probeProviderModels(input: ProbeProviderModelsInput): Promise<string[]> {
-    const { models } = await this.postJSON<{ models: string[] }>("/providers/probe-models", input);
+    const { models } = await this.probeProviderModelConfigs(input);
     return models;
   }
 
