@@ -1,6 +1,12 @@
 import { OpenAICompatibleEngine } from "@ew/providers";
 import type { EngineRegistry } from "../engine/registry.js";
-import { modelIdsForProvider, normalizeProviderConfig } from "./catalog.js";
+import {
+  modelIdsForProvider,
+  normalizeProviderConfig,
+  parseProviderModelRouteId,
+  providerModelRouteId,
+  routeIdsForProvider,
+} from "./catalog.js";
 
 export type CloudProviderKind = "openai-compatible" | "pi-native";
 export type CloudProviderModelModality = "text" | "image";
@@ -25,6 +31,14 @@ export interface CloudProviderConfig {
   headers?: Record<string, string>;
   /** Per-model metadata. Model ids used for routing are derived from this list. */
   modelConfigs: CloudProviderModelConfig[];
+}
+
+export interface CloudProviderModelRef {
+  config: CloudProviderConfig;
+  /** EasyWork 内部使用的 provider-scoped route id。 */
+  routeId: string;
+  /** 发给上游 provider 的真实模型 id。 */
+  modelId: string;
 }
 
 /**
@@ -61,17 +75,21 @@ export class ProviderManager {
       baseUrl,
       apiKey: normalized.apiKey,
       headers: normalized.headers,
+      mapModelId: (modelId) => {
+        const parsed = parseProviderModelRouteId(modelId);
+        return parsed?.providerId === normalized.id ? parsed.modelId : modelId;
+      },
       ...(this.fetchImpl ? { fetch: this.fetchImpl } : {}),
     });
     this.registry.register(engine);
-    for (const model of modelIdsForProvider(normalized)) this.registry.routeModel(model, engine);
+    for (const model of routeIdsForProvider(normalized)) this.registry.routeModel(model, engine);
     this.configs.set(normalized.id, normalized);
   }
 
   remove(id: string): void {
     const cfg = this.configs.get(id);
     if (!cfg) return;
-    for (const model of modelIdsForProvider(cfg)) this.registry.unrouteModel(model);
+    for (const model of routeIdsForProvider(cfg)) this.registry.unrouteModel(model);
     this.registry.unregister(id);
     this.configs.delete(id);
   }
@@ -94,17 +112,17 @@ export class ProviderManager {
     }));
   }
 
-  /** 当前配置暴露给 EasyWork 的模型 id（openai-compatible 与 pi-native 都包含）。 */
+  /** 当前配置暴露给 EasyWork 的 provider-scoped 模型 id（openai-compatible 与 pi-native 都包含）。 */
   modelIds(): string[] {
-    return [...new Set([...this.configs.values()].flatMap((c) => modelIdsForProvider(c)))];
+    return [...new Set([...this.configs.values()].flatMap((c) => routeIdsForProvider(c)))];
   }
 
-  /** 每个云端模型 → 手动配置的上下文窗口（供 /models 的 context 映射、UI 进度环）。 */
+  /** 每个云端 route id → 手动配置的上下文窗口（供 /models 的 context 映射、UI 进度环）。 */
   contexts(): Record<string, number> {
     const out: Record<string, number> = {};
     for (const c of this.configs.values()) {
       for (const m of c.modelConfigs) {
-        out[m.id] = m.contextWindow;
+        out[providerModelRouteId(c.id, m.id)] = m.contextWindow;
       }
     }
     return out;
@@ -115,9 +133,27 @@ export class ProviderManager {
     return [...this.configs.values()];
   }
 
-  /** 找到暴露了某 model id 的 provider 配置（供 pi-ai 解析云端模型）。 */
+  /** 找到暴露了某 route id / legacy raw model id 的 provider 配置（供旧调用点兼容）。 */
   findByModel(modelId: string): CloudProviderConfig | undefined {
-    for (const c of this.configs.values()) if (c.modelConfigs.some((m) => m.id === modelId)) return c;
+    return this.resolveModelRef(modelId)?.config;
+  }
+
+  /** 解析 EasyWork route id → provider 配置 + 上游真实 model id。 */
+  resolveModelRef(modelId: string): CloudProviderModelRef | undefined {
+    const scoped = parseProviderModelRouteId(modelId);
+    if (scoped) {
+      const cfg = this.configs.get(scoped.providerId);
+      if (cfg?.modelConfigs.some((m) => m.id === scoped.modelId)) {
+        return { config: cfg, routeId: modelId, modelId: scoped.modelId };
+      }
+      return undefined;
+    }
+    // Legacy raw id fallback：老线程或外部 /v1 客户端仍可能直接传裸模型名。
+    for (const c of this.configs.values()) {
+      if (c.modelConfigs.some((m) => m.id === modelId)) {
+        return { config: c, routeId: providerModelRouteId(c.id, modelId), modelId };
+      }
+    }
     return undefined;
   }
 }

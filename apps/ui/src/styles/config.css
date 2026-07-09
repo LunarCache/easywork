@@ -176,6 +176,19 @@
 .provider-card-compact .mcp-icon-btn { opacity: .75; }
 .provider-card-compact .mcp-icon-btn:hover { opacity: 1; }
 .provider-card-compact .mdl-specs { max-width: 100%; }
+.local-model-card.tuning { align-items: flex-start; }
+.local-model-card.tuning .cfg-resource-actions { padding-top: 2px; }
+.local-sampling-panel { margin-top: 12px; padding: 12px; border: 1px solid color-mix(in srgb, var(--border) 82%, transparent); border-radius: var(--r); background: color-mix(in srgb, var(--bg-inset) 38%, transparent); }
+.local-sampling-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.local-sampling-head strong { display: block; color: var(--text); font-size: 13px; font-weight: 700; }
+.local-sampling-head span { display: block; margin-top: 3px; color: var(--text-tertiary); font-size: 12px; line-height: 1.45; }
+.local-sampling-presets { flex: none; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.local-sampling-grid { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 9px; }
+.local-sampling-field { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.local-sampling-field span { color: var(--text-2); font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.local-sampling-field input { width: 100%; min-width: 0; height: 34px; }
+.local-sampling-field em { color: var(--text-tertiary); font-size: 11px; font-style: normal; }
+.local-sampling-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .set-add { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 13px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--color-bg-card); color: var(--text); cursor: pointer; font-size: 13px; font-weight: 600; white-space: nowrap; flex: none; transition: background var(--ease) 0.12s, color var(--ease) 0.12s, border-color var(--ease) 0.12s, filter var(--ease) 0.12s; }
 .set-add:hover:not(:disabled) { background: var(--color-bg-tertiary); }
 .set-add:disabled { opacity: 0.5; cursor: default; }
@@ -349,6 +362,9 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
   .local-net-main { align-items: stretch; flex-direction: column; }
   .local-net-controls { width: 100%; flex-wrap: wrap; }
   .local-net-key { flex: 1 1 190px; width: auto; }
+  .local-sampling-head { flex-direction: column; }
+  .local-sampling-presets { justify-content: flex-start; }
+  .local-sampling-grid { grid-template-columns: 1fr; }
   .provider-list { grid-template-columns: 1fr; }
   .provider-catalog-grid { grid-template-columns: 1fr; }
   .provider-form-grid { grid-template-columns: 1fr; }

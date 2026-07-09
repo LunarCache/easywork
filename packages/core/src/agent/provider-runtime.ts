@@ -115,12 +115,14 @@ export class AgentProviderRuntime {
         maxTokens: 4096,
       };
     }
-    const cfg = this.deps.providers.findByModel(modelId);
-    if (cfg) {
+    const ref = this.deps.providers.resolveModelRef(modelId);
+    if (ref) {
+      const cfg = ref.config;
+      const upstreamModelId = ref.modelId;
       if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
-      const m = this.modelRegistry.find(cfg.id, modelId);
+      const m = this.modelRegistry.find(cfg.id, upstreamModelId);
       if (m) {
-        const ctx = contextWindowForModel(cfg, modelId);
+        const ctx = contextWindowForModel(cfg, upstreamModelId);
         return {
           ...m,
           ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
@@ -129,11 +131,11 @@ export class AgentProviderRuntime {
         };
       }
       if ((cfg.kind ?? "openai-compatible") === "pi-native") {
-        throw new Error(`pi_native_model_not_found: ${cfg.id}/${modelId}`);
+        throw new Error(`pi_native_model_not_found: ${cfg.id}/${upstreamModelId}`);
       }
       // registry 未命中（理论不应发生）→ 手搓兜底，带上 headers，鉴权由共享 AuthStorage 提供。
       return {
-        ...runtimeModelForProviderConfig(cfg, modelId),
+        ...runtimeModelForProviderConfig(cfg, upstreamModelId),
         api: cfg.api ?? "openai-completions",
         provider: cfg.id,
         baseUrl: cfg.baseUrl ?? "",
@@ -150,7 +152,8 @@ export class AgentProviderRuntime {
     context: PiContext,
     opts: CloudInferenceOptions = {},
   ): Promise<AssistantMessageEventStream | null> {
-    const cfg = this.deps.providers.findByModel(modelId);
+    const ref = this.deps.providers.resolveModelRef(modelId);
+    const cfg = ref?.config;
     if (!cfg) return null;
     if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
     const model = this.resolveModel(modelId);
@@ -164,7 +167,8 @@ export class AgentProviderRuntime {
     context: PiContext,
     opts: CloudInferenceOptions = {},
   ): Promise<AssistantMessage | null> {
-    const cfg = this.deps.providers.findByModel(modelId);
+    const ref = this.deps.providers.resolveModelRef(modelId);
+    const cfg = ref?.config;
     if (!cfg) return null;
     if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
     const model = this.resolveModel(modelId);

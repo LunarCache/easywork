@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage, ThinkLevel } from "@ew/shared";
-import type { WsEntry } from "@ew/sdk";
+import type { ModelSourceInfo, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { autoGrowComposer, focusComposerEnd, resetComposer } from "../lib/composer.js";
 import {
@@ -22,7 +22,6 @@ import { THINK_LABEL, nextThink } from "../lib/slash.js";
 import {
   applyAgentEvent,
   messageText,
-  modelLabel,
   storedToUiMsgs,
   type StoredMsg,
   type PendingApproval,
@@ -30,13 +29,9 @@ import {
   type UiMsg,
 } from "../lib/agent-stream.js";
 import {
-  loadSampling,
-  saveSampling,
-  samplingToRequest,
   loadDisabledSkills,
   loadThink,
   saveThink,
-  type Sampling,
 } from "../lib/prefs.js";
 import { useAvailableModel } from "../hooks/useAvailableModel.js";
 import { useComposerImages } from "../hooks/useComposerImages.js";
@@ -78,6 +73,7 @@ const DEMO = !!new URLSearchParams(location.search).get("demo");
 
 export function Chat({
   models,
+  modelSources,
   contexts,
   threadId,
   onSaved,
@@ -85,6 +81,7 @@ export function Chat({
   setDockOpen,
 }: {
   models: string[];
+  modelSources?: ModelSourceInfo[];
   contexts: Record<string, number>;
   threadId: string;
   onSaved: () => void;
@@ -100,8 +97,6 @@ export function Chat({
   const [web, setWeb] = useState(true);
   const [kb, setKb] = useState(false);
   const [kbId] = useState<string | undefined>(undefined); // undefined = 全部集合
-  const [paramsOpen, setParamsOpen] = useState(false);
-  const [sampling, setSampling] = useState<Sampling>({});
   const [usage, setUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(
     null,
   );
@@ -231,9 +226,8 @@ export function Chat({
     };
   }, [threadId]);
 
-  // 切换模型 → 载入该模型的采样覆盖。
+  // 切换模型 → 载入该模型的思考档位。
   useEffect(() => {
-    setSampling(loadSampling(model));
     setThinkLevel(loadThink(model));
   }, [model]);
 
@@ -266,6 +260,7 @@ export function Chat({
 
   const slash = useSlashPalette(input, setInput, {
     models,
+    modelSources,
     currentModel: model,
     currentThink: thinkLevel,
     usagePct: contextPct,
@@ -273,15 +268,6 @@ export function Chat({
     onModel: setModel,
     onCompact: doCompact,
   });
-
-  const setParam = (key: keyof Sampling, raw: string) => {
-    const v = raw.trim() === "" ? undefined : Number(raw);
-    const next = { ...sampling };
-    if (v === undefined || Number.isNaN(v)) delete next[key];
-    else next[key] = v;
-    setSampling(next);
-    saveSampling(model, next);
-  };
 
   const send = async (over?: { text: string; images: UiImage[]; regenerate?: boolean }) => {
     const text = (over?.text ?? input).trim();
@@ -310,7 +296,6 @@ export function Chat({
     const apply = (fn: (m: UiMsg) => UiMsg) => setMsgs((current) => updateLastAssistant(current, fn));
 
     const excludeTools = web ? [] : ["web_search", "http_get"];
-    const sampling = samplingToRequest(loadSampling(model));
     const excludeSkills = loadDisabledSkills();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -326,7 +311,6 @@ export function Chat({
           ...(over?.regenerate ? { regenerate: true } : {}),
           kb,
           ...(kb && kbId ? { kbId } : {}),
-          ...(Object.keys(sampling).length ? { sampling } : {}),
           ...(excludeSkills.length ? { excludeSkills } : {}),
         },
         { signal: ac.signal },
@@ -446,18 +430,17 @@ export function Chat({
             onEdit={editRetry}
           />
         </div>
-        {showJump && (
-          <button className="jump-bottom" title="跳到最新" onClick={jumpToBottom}>
-            <ChevronDownIcon size={18} />
-          </button>
-        )}
         {approval && (
           <ApprovalCard toolName={approval.toolName} args={approval.args} onRespond={(v) => void respondApproval(v)} />
         )}
         <footer className="composer">
+          {showJump && (
+            <button className="jump-bottom" title="跳到最新" onClick={jumpToBottom}>
+              <ChevronDownIcon size={18} />
+            </button>
+          )}
           <div className="composer-box">
             <ComposerContextStrip>
-              <ModelSelect models={models} value={model} onChange={setModel} up variant="strip" />
               <ComposerContextPill
                 tone={thinkLevel !== "off" ? "on" : "default"}
                 onClick={cycleThink}
@@ -479,7 +462,6 @@ export function Chat({
                 <BoxIcon size={14} />
                 <span>{kb ? `知识库·${kbId ?? "全部"}` : "知识库已关"}</span>
               </ComposerContextPill>
-              {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
             </ComposerContextStrip>
             {images.length > 0 && (
               <div className="composer-images" data-testid="chat-image-strip">
@@ -540,57 +522,8 @@ export function Chat({
                 )}
               </div>
               <div className="composer-bar-right">
-                <div className="params-wrap">
-                  <button
-                    className={`params-btn ${Object.keys(sampling).length ? "on" : ""}`}
-                    onClick={() => setParamsOpen((v) => !v)}
-                    disabled={!model}
-                    title="生成参数（按当前模型）"
-                  >
-                    <SlidersIcon size={16} />
-                  </button>
-                  {paramsOpen && (
-                    <>
-                      <div className="menu-backdrop" onClick={() => setParamsOpen(false)} />
-                      <div className="params-pop up">
-                        <div className="pp-head">
-                          <span>生成参数 · {modelLabel(model)}</span>
-                          <button
-                            className="pp-reset"
-                            onClick={() => {
-                              setSampling({});
-                              saveSampling(model, {});
-                            }}
-                          >
-                            重置
-                          </button>
-                        </div>
-                        {(
-                          [
-                            ["temperature", "温度", "0.7", "0.05"],
-                            ["topP", "top_p", "0.9", "0.05"],
-                            ["topK", "top_k", "40", "1"],
-                            ["minP", "min_p", "0", "0.01"],
-                            ["repeatPenalty", "重复惩罚", "1.0", "0.05"],
-                            ["maxTokens", "max_tokens", "无上限", "64"],
-                          ] as const
-                        ).map(([key, label, ph, step]) => (
-                          <label key={key} className="pp-row">
-                            <span>{label}</span>
-                            <input
-                              type="number"
-                              step={step}
-                              placeholder={`默认 ${ph}`}
-                              value={sampling[key] ?? ""}
-                              onChange={(e) => setParam(key, e.target.value)}
-                            />
-                          </label>
-                        ))}
-                        <div className="pp-note">仅对「{modelLabel(model)}」生效，自动保存。</div>
-                      </div>
-                    </>
-                  )}
-                </div>
+                <ModelSelect models={models} sources={modelSources} value={model} onChange={setModel} up align="right" variant="strip" />
+                {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
                 {busy ? (
                   <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
                     <StopIcon size={15} fill="currentColor" />

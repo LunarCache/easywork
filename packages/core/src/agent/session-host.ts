@@ -40,6 +40,10 @@ export interface SessionHostDeps {
   mcp?: McpClientManager;
   /** R5：内置工具（时间/计算器/HTTP/web_search）桥成 customTools。 */
   builtins?: Tool[];
+  /** 本地模型默认运行设置：调用方未显式传 sampling 时使用。 */
+  localModelSettings?: {
+    samplingFor(modelId: string): SamplingParams | undefined;
+  };
 }
 
 /** 单轮运行输入。 */
@@ -341,10 +345,12 @@ export class SessionHost {
       input.excludeSkills ?? [],
     );
     const session = hosted.session;
+    const isLocal = this.providerRuntime.isLocalModel(input.modelId);
+    const sampling = input.sampling ?? (isLocal ? this.deps.localModelSettings?.samplingFor(input.modelId) : undefined);
     // R4：写入本轮权限上下文（工作区模式下 tool_call 扩展据此审批）。
     hosted.runtime.mode = input.approvalMode ?? "approve-each";
     hosted.runtime.approval = input.approval;
-    hosted.runtime.sampling = input.sampling; // 采样参数（streamFn 包装读取）
+    hosted.runtime.sampling = sampling; // 采样参数（streamFn 包装读取）
     hosted.runtime.thinkingLevel = input.thinkingLevel ?? "off"; // 思考档位（本地 streamFn 注入读取）
     hosted.runtime.aborted = false; // 本轮是否被用户取消（取消则跳过记忆抽取 + 回滚上下文）
     // 云端真分级思考：pi setThinkingLevel 驱动 thinkingBudgets（自动 clamp 到模型能力；本地 reasoning=false
@@ -358,7 +364,6 @@ export class SessionHost {
     // 思考：云端经 setThinkingLevel，本地经 streamFn 注入 payload（enable_thinking/thinking_budget_tokens）。
     // 本地额外补 /think·/no_think 文本兜底——若 llama.cpp 构建不认 payload 字段，文本指令仍能可靠开/关
     // （Qwen3 约定；与 payload 同向不冲突）。云端不注入文本。
-    const isLocal = this.providerRuntime.isLocalModel(input.modelId);
     const directive = isLocal ? (hosted.runtime.thinkingLevel === "off" ? " /no_think" : " /think") : "";
     const promptText = directive ? `${input.text}${directive}` : input.text;
     yield* runAgentTurn({

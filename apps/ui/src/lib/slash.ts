@@ -9,7 +9,7 @@ export interface SlashCmd {
 }
 
 export const SLASH_CMDS: SlashCmd[] = [
-  { name: "model", arg: "模型名", desc: "切换当前会话模型" },
+  { name: "model", arg: "来源 / 模型", desc: "先选模型来源，再切换当前会话模型" },
   { name: "think", arg: "off|low|medium|high", desc: "调整思考强度" },
   { name: "compact", desc: "压缩上下文" },
 ];

@@ -46,6 +46,8 @@ export const ProviderModelProbeSchema = z.object({
 export type ProviderModelProbeInput = z.infer<typeof ProviderModelProbeSchema>;
 export type NormalizedCloudProviderConfig = CloudProviderConfig & { kind: CloudProviderKind };
 
+const PROVIDER_MODEL_ROUTE_PREFIX = "provider:";
+
 export interface ProviderApiFamily {
   id: string;
   label: string;
@@ -295,6 +297,30 @@ export function normalizeProviderConfig(cfg: CloudProviderConfig): NormalizedClo
 
 export function modelIdsForProvider(cfg: CloudProviderConfig): string[] {
   return cfg.modelConfigs.map((m) => m.id);
+}
+
+/** Provider 模型在 EasyWork 内部使用 provider-scoped route id，避免不同 provider 的同名模型互相覆盖。 */
+export function providerModelRouteId(providerId: string, modelId: string): string {
+  return `${PROVIDER_MODEL_ROUTE_PREFIX}${encodeURIComponent(providerId)}:${encodeURIComponent(modelId)}`;
+}
+
+export function parseProviderModelRouteId(id: string): { providerId: string; modelId: string } | undefined {
+  if (!id.startsWith(PROVIDER_MODEL_ROUTE_PREFIX)) return undefined;
+  const rest = id.slice(PROVIDER_MODEL_ROUTE_PREFIX.length);
+  const sep = rest.indexOf(":");
+  if (sep <= 0 || sep >= rest.length - 1) return undefined;
+  try {
+    return {
+      providerId: decodeURIComponent(rest.slice(0, sep)),
+      modelId: decodeURIComponent(rest.slice(sep + 1)),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function routeIdsForProvider(cfg: CloudProviderConfig): string[] {
+  return modelIdsForProvider(cfg).map((modelId) => providerModelRouteId(cfg.id, modelId));
 }
 
 export function modelConfigForModel(cfg: CloudProviderConfig, modelId: string): CloudProviderModelConfig | undefined {

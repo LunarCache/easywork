@@ -6,15 +6,26 @@ import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { AgentProviderRuntime } from "../src/agent/provider-runtime.js";
 import { SessionHost } from "../src/agent/session-host.js";
 import type { LocalBackend } from "../src/engine/local-backend.js";
+import { parseProviderModelRouteId, providerModelRouteId } from "../src/providers/catalog.js";
 import type { ProviderManager, CloudProviderConfig } from "../src/providers/manager.js";
 
 // R2：把 EasyWork 云端 provider 同步进 pi 的共享、落盘 AuthStorage，并能全量对账（增/删）。
 function makeDeps(configs: CloudProviderConfig[]) {
   const local = { baseUrlFor: () => undefined, contexts: () => ({}) } as unknown as LocalBackend;
   let dump = configs;
+  const resolveModelRef = (id: string) => {
+    const scoped = parseProviderModelRouteId(id);
+    if (scoped) {
+      const config = dump.find((c) => c.id === scoped.providerId && c.modelConfigs.some((m) => m.id === scoped.modelId));
+      return config ? { config, routeId: id, modelId: scoped.modelId } : undefined;
+    }
+    const config = dump.find((c) => c.modelConfigs.some((m) => m.id === id));
+    return config ? { config, routeId: providerModelRouteId(config.id, id), modelId: id } : undefined;
+  };
   const providers = {
     dump: () => dump,
-    findByModel: (id: string) => dump.find((c) => c.modelConfigs.some((m) => m.id === id)),
+    findByModel: (id: string) => resolveModelRef(id)?.config,
+    resolveModelRef,
     setDump: (next: CloudProviderConfig[]) => {
       dump = next;
     },
@@ -115,6 +126,27 @@ describe("AgentProviderRuntime", () => {
     const resolve = runtime.resolveModel.bind(runtime);
     expect(resolve("text-only")).toMatchObject({ contextWindow: 32768, input: ["text"] });
     expect(resolve("vision-model")).toMatchObject({ contextWindow: 131072, input: ["text", "image"] });
+
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  it("resolves provider-scoped route ids without leaking them to pi model ids", () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-scoped-models-")));
+    const { runtime } = makeRuntime([{
+      id: "custom-deepseek",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://example.test/v1",
+      apiKey: "sk-test",
+      modelConfigs: [{ id: "deepseek-v4", contextWindow: 32768, inputModalities: ["text"] }],
+    }], agentDir);
+
+    const resolved = runtime.resolveModel("provider:custom-deepseek:deepseek-v4");
+    expect(resolved).toMatchObject({
+      id: "deepseek-v4",
+      provider: "custom-deepseek",
+      contextWindow: 32768,
+    });
 
     fs.rmSync(agentDir, { recursive: true, force: true });
   });

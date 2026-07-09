@@ -26,6 +26,7 @@ import { LocalMemoryProvider } from "@ew/memory";
 import { z } from "zod";
 import { EngineRegistry } from "../engine/registry.js";
 import { ModelManager } from "../models/manager.js";
+import { LocalModelSettingsStore } from "../models/local-model-settings.js";
 import { ProviderManager, type CloudProviderConfig } from "../providers/manager.js";
 import { registerOpenAICompat } from "../openai-compat/router.js";
 import { SessionHost } from "../agent/session-host.js";
@@ -231,6 +232,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   // search_knowledge_base 工具按请求所选集合注入（见 /agent/run），不再全局常驻。
 
   const repo = new SqliteConversationRepo(opts.dbPath ?? defaultDbPath());
+  const localModelSettings = new LocalModelSettingsStore(repo);
 
   // 宿主：pi-coding-agent 内核托管 /agent/run。
   // R3：注入记忆/会话检索/知识库/MCP，使托管会话具备 EasyWork 专有能力。
@@ -244,6 +246,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     kb,
     mcp,
     builtins: builtinTools,
+    localModelSettings,
   });
 
   // ---- 持久化 provider / MCP 配置（重启后恢复）----
@@ -433,6 +436,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     registry,
     local,
     models,
+    localModelSettings,
     providers,
     sessionHost,
     skills,

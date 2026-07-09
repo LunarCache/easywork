@@ -10,6 +10,7 @@ import type {
   InboxEvent,
   LocalLoadOptions,
   LocalModel,
+  LocalModelRuntimeSettings,
   ChannelKind,
   ChannelAdapterMeta,
   ChannelConfig,
@@ -92,12 +93,25 @@ export interface LocalEndpoint {
 
 export interface ModelsInfo {
   routed: string[];
+  /** 每个可选模型的来源，用于 UI 按本地/Provider 分组展示；routed 仍是运行时真模型 id。 */
+  modelSources?: ModelSourceInfo[];
   context?: Record<string, number>;
   engines: { id: string; capabilities: EngineCapabilities }[];
   /** 本地 router 对外端点（发现/外部直连）。 */
   endpoints?: LocalEndpoint[];
   /** 当前 router 绑定 host。 */
   bindHost?: string;
+}
+
+export interface ModelSourceInfo {
+  /** EasyWork runtime route id；UI/agent 请求使用这个值。 */
+  id: string;
+  kind: "local" | "provider" | "engine";
+  label: string;
+  /** Provider 上游真实模型 id；provider-scoped route id 需要用它做展示与上游调用映射。 */
+  modelId?: string;
+  providerId?: string;
+  providerKind?: "openai-compatible" | "pi-native";
 }
 
 export interface LocalNetInfo {
@@ -387,6 +401,21 @@ export class EasyWorkClient {
   async localModels(): Promise<LocalModel[]> {
     const { models } = await this.getJSON<{ models: LocalModel[] }>("/models/local");
     return models;
+  }
+
+  async localModelSettings(id: string): Promise<LocalModelRuntimeSettings> {
+    const { settings } = await this.getJSON<{ settings: LocalModelRuntimeSettings }>(
+      `/models/local/settings?id=${encodeURIComponent(id)}`,
+    );
+    return settings;
+  }
+
+  async saveLocalModelSettings(id: string, settings: LocalModelRuntimeSettings): Promise<LocalModelRuntimeSettings> {
+    const res = await this.postJSON<{ settings: LocalModelRuntimeSettings }>("/models/local/settings", {
+      id,
+      settings,
+    });
+    return res.settings;
   }
 
   /** 删除本地模型（id = gguf 全路径）：daemon 先卸载再删文件。 */

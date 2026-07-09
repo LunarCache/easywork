@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SamplingParamsSchema } from "./events.js";
 
 /** HuggingFace 模型摘要（搜索结果）。 */
 export const HFModelSummarySchema = z.object({
@@ -25,6 +26,12 @@ export type GGUFVariant = z.infer<typeof GGUFVariantSchema>;
 
 export const ModelSourceSchema = z.enum(["downloaded", "scanned", "imported"]);
 
+/** 本地模型运行设置（daemon 持久化；应用内聊天/工作区/渠道共用）。 */
+export const LocalModelRuntimeSettingsSchema = z.object({
+  sampling: SamplingParamsSchema.optional(),
+});
+export type LocalModelRuntimeSettings = z.infer<typeof LocalModelRuntimeSettingsSchema>;
+
 /** 本地已就绪模型。 */
 export const LocalModelSchema = z.object({
   id: z.string(),
@@ -40,6 +47,7 @@ export const LocalModelSchema = z.object({
   hasVision: z.boolean(),
   source: ModelSourceSchema,
   addedAt: z.string(),
+  settings: LocalModelRuntimeSettingsSchema.optional(),
 });
 export type LocalModel = z.infer<typeof LocalModelSchema>;
 

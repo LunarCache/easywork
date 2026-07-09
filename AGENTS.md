@@ -14,9 +14,10 @@
 
 ## 关键文件（改宿主层从这里找）
 
-- `packages/core/src/agent/session-host.ts` — pi `createAgentSession` 封装；按 threadId 复用 `AgentSession` + **串行化 run**；`mapSessionEvent`(pi→SSE)；`resolveModel` + 采样注入；SessionManager 落盘 resume；`lastUsage`（上下文用量）。
+- `packages/core/src/agent/session-host.ts` — pi `createAgentSession` 封装；按 threadId 复用 `AgentSession` + **串行化 run**；`mapSessionEvent`(pi→SSE)；`resolveModel` + 本地模型默认采样注入；SessionManager 落盘 resume；`lastUsage`（上下文用量）。
 - `packages/core/src/agent/ew-extensions.ts` — 记忆注入(`before_agent_start`)/抽取钩子；`toPiTool`(我们的 `Tool` → pi customTool)；`permissionExtensionFactory` + `escapesCwd`（工作区路径限定）。
 - `packages/core/src/server/app.ts` — Fastify 应用装配入口（`/agent/run`、`/v1`、`/models`、`/workspace/*`、`/threads/*`、`/providers`、`/local/runtime` …）；跨路由生命周期对象在这里创建并在 `stop()` 中统一收尾。
+- `packages/core/src/models/local-model-settings.ts` — 本地模型运行设置存储；`models.local.settings` 按模型保存默认采样参数，供聊天 / 工作区 / 渠道在未显式传参时共用。
 - `packages/core/src/channels/operations.ts` — Channel Operations 应用层模块：包住 `ChannelGateway` + `ConnectorHost`，集中连接器生命周期、Feishu/WeChat 扫码 setup session、inbox read model 与 SSE invalidation；HTTP routes 只做请求/响应适配。
 - `packages/core/src/engine/{router-server-manager,resolve-llama,net,local-backend}.ts` — `RouterServerManager`（起 1 个 `llama serve --models-dir` router，按 model 路由 + 按需加载 + `--models-max` LRU，实现 `LocalBackend`）+ 运行时解析（优先统一 `llama`，router 只认 kind=llama）。模型 id = 子目录名（routerId）。嵌入模型不走 router（独立 `LlamaServerEngine -m --embedding`）。
 - `packages/core/src/openai-compat/router.ts` + `pi-adapt.ts` — `/v1` 网关与 pi↔OpenAI/Anthropic 边界翻译。
@@ -42,15 +43,16 @@
 2. **事件映射唯一边界**：`mapSessionEvent`（pi→SSE）+ `pi-adapt.ts`（pi↔OpenAI/Anthropic）是仅有的边界翻译。协议翻译器必须处理 `error` 事件并正确终止（OpenAI error 帧 / Anthropic `event: error`，**不可伪装成 `end_turn`**）。
 3. **工作区路径限定**：pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。`escapesCwd`（`ew-extensions.ts`）经 `realpath` 解软链后硬拦 read/edit/write/ls/grep/find 越界（所有审批档位）；bash 靠审批把守。锁定测试：`workspace-confinement.test` + `permission.test`。
 4. **0.0.0.0 暴露强制 api-key**：`RouterServerManager` 绑 0.0.0.0 时必须设 `--api-key`（`/settings/local-net` 校验，切换重启 router）；内部回环调用（pi/proxy/fact-extractor）一并带 Bearer；自连接恒走 127.0.0.1。
-5. **SSE 健壮性**：所有 SSE 写口（`/agent/run`、`/v1` 透传、云端分支）须 `raw.on("error")` + `writableEnded/destroyed` 守卫，避免客户端断开后 write-after-end 崩 async handler。
-6. **记忆召回**：相关度下限 + topK 上限防 context 稀释；markdown 为真相源、embedding 为派生缓存（变更才重嵌）；召回缓存挂 `RunRuntime`，每轮 `run()` 重置。
-7. **sqlite-vec**：`vec0` 表 rowid 须 `BigInt`；`distance_metric=cosine`；扩展为可选依赖，无二进制时降级纯词法（勿让其抛错中断启动）。
-8. **个人微信路线**：个人微信只走腾讯 iLink Bot API 的 bot 身份（扫码登录 + long-poll），不要回到 Web 微信/逆向普通号；群聊能力取决于 iLink 是否投递事件，默认关闭。企业微信仍走 WeCom。
+5. **Provider 模型身份必须带作用域**：云端 provider 模型在 EasyWork 内部使用 `provider:<providerId>:<modelId>` route id，`/models.modelSources[].modelId` 才是展示/上游真实模型名；进入 pi `ModelRegistry` 或 OpenAI-compatible 上游前必须还原为裸 `modelId`，避免自定义 provider 与内置 provider 的同名模型互相覆盖。
+6. **SSE 健壮性**：所有 SSE 写口（`/agent/run`、`/v1` 透传、云端分支）须 `raw.on("error")` + `writableEnded/destroyed` 守卫，避免客户端断开后 write-after-end 崩 async handler。
+7. **记忆召回**：相关度下限 + topK 上限防 context 稀释；markdown 为真相源、embedding 为派生缓存（变更才重嵌）；召回缓存挂 `RunRuntime`，每轮 `run()` 重置。
+8. **sqlite-vec**：`vec0` 表 rowid 须 `BigInt`；`distance_metric=cosine`；扩展为可选依赖，无二进制时降级纯词法（勿让其抛错中断启动）。
+9. **个人微信路线**：个人微信只走腾讯 iLink Bot API 的 bot 身份（扫码登录 + long-poll），不要回到 Web 微信/逆向普通号；群聊能力取决于 iLink 是否投递事件，默认关闭。企业微信仍走 WeCom。
 
 ## 约定
 
 - **统一 npm**（环境无 pnpm）。
-- **测试 273 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 16 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir）。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
+- **测试 276 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 16 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir）。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
 - **已移除 node-llama-cpp + 经典 `llama-server`**：本地推理走外部统一 `llama`（llama.app）的 router 模式（`resolveLlamaBin` 只解析 `llama`；嵌入子进程也跑 `llama serve`）。**勿重新引入** node-llama-cpp，也**勿回退每模型一进程的经典 `llama-server`**（含 brew llama.cpp，已完全移除）。
 - **打包**：daemon → Node SEA **单文件二进制**（`scripts/build-daemon-sea.mjs`，运行免 Node）；llama 运行时缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime` + `install.sh`）；`v*` tag → GitHub Actions 出 macOS dmg。
 - **改 Tauri Rust（`apps/desktop/src-tauri`）**：本环境有 `cargo`，可 `cargo check` 验证。
@@ -60,7 +62,7 @@
 ```bash
 npm install            # 装依赖
 npm run build          # turbo 构建全部包（含 ui/daemon dist）
-npm test               # vitest（273 通过；另 1 个真机 e2e 默认 skip）
+npm test               # vitest（276 通过；另 1 个真机 e2e 默认 skip）
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
 npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 16 条）

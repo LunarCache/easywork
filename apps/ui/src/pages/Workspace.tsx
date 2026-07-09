@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApprovalMode, ChatMessage, Project, ThinkLevel } from "@ew/shared";
-import type { GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
+import type { GitRemoteInfo, GitStatus, ModelSourceInfo, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { autoGrowComposer, focusComposerEnd, resetComposer } from "../lib/composer.js";
 import {
@@ -70,6 +70,7 @@ export function Workspace({
   project,
   projects,
   models,
+  modelSources,
   contexts,
   threadId,
   onChanged,
@@ -84,6 +85,7 @@ export function Workspace({
   /** 全部工作区（供 composer 上下文条切换）。 */
   projects: Project[];
   models: string[];
+  modelSources?: ModelSourceInfo[];
   contexts: Record<string, number>;
   /** 当前会话（由 App/会话列表 控制）。 */
   threadId: string;
@@ -151,6 +153,7 @@ export function Workspace({
         : `上下文窗口 ${contextLimit} tokens`;
   const slash = useSlashPalette(input, setInput, {
     models,
+    modelSources,
     currentModel: model,
     currentThink: thinkLevel,
     usagePct: contextPct,
@@ -366,30 +369,35 @@ export function Workspace({
 
   const composer = (
     <footer className="composer">
-          <ContextBar
-            project={project}
-            projects={projects}
-            branch={branch}
-            branches={branches}
-            uncommitted={git.files.length}
-            onSelectProject={onSelectProject}
-            onOpenFolder={onOpenFolder}
-            onSwitchBranch={switchBranch}
-            onOpenGitGraph={() => setDockOpen(true)}
-          >
-            <ModelSelect models={models} value={model} onChange={setModel} up variant="strip" />
-            <ComposerContextPill
-              tone={thinkLevel !== "off" ? "on" : "default"}
-              onClick={cycleThink}
-              title="思考档位（点击循环：低/中/高/关）"
-              testId="workspace-think-pill"
-            >
-              <ThinkIcon size={14} />
-              <span>思考 {THINK_LABEL[thinkLevel]}</span>
-            </ComposerContextPill>
-            {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
-          </ContextBar>
-          <div className="composer-box">
+      {showJump && !empty && (
+        <button className="jump-bottom" title="跳到最新" onClick={jumpToBottom}>
+          <ChevronDownIcon size={18} />
+        </button>
+      )}
+      <ContextBar
+        project={project}
+        projects={projects}
+        branch={branch}
+        branches={branches}
+        uncommitted={git.files.length}
+        onSelectProject={onSelectProject}
+        onOpenFolder={onOpenFolder}
+        onSwitchBranch={switchBranch}
+        onOpenGitGraph={() => setDockOpen(true)}
+      >
+        <ModelSelect models={models} sources={modelSources} value={model} onChange={setModel} up align="right" variant="strip" />
+        <ComposerContextPill
+          tone={thinkLevel !== "off" ? "on" : "default"}
+          onClick={cycleThink}
+          title="思考档位（点击循环：低/中/高/关）"
+          testId="workspace-think-pill"
+        >
+          <ThinkIcon size={14} />
+          <span>思考 {THINK_LABEL[thinkLevel]}</span>
+        </ComposerContextPill>
+        {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
+      </ContextBar>
+      <div className="composer-box">
             {images.length > 0 && (
               <div className="composer-images" data-testid="workspace-image-strip">
                 {images.map((im, j) => (
@@ -540,12 +548,6 @@ export function Workspace({
                 onEdit={editRetry}
               />
             </div>
-            {showJump && (
-              <button className="jump-bottom" title="跳到最新" onClick={jumpToBottom}>
-                <ChevronDownIcon size={18} />
-              </button>
-            )}
-
             {approval && (
               <ApprovalCard toolName={approval.toolName} args={approval.args} onRespond={(v) => void respondApproval(v)} />
             )}

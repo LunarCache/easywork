@@ -90,6 +90,12 @@ describe("daemon end-to-end (SDK → core → engine)", () => {
     const fake = new FakeEngine();
     core.registry.register(fake);
     core.registry.routeModel("fake-model", fake);
+    core.providers.add({
+      id: "deepseek",
+      kind: "pi-native",
+      api: "openai-completions",
+      modelConfigs: [{ id: "deepseek-v4", contextWindow: 128_000, inputModalities: ["text"] }],
+    });
 
     const { port, host } = await core.start({ port: 0, host: "127.0.0.1" });
     const baseUrl = `http://${host}:${port}`;
@@ -100,10 +106,43 @@ describe("daemon end-to-end (SDK → core → engine)", () => {
 
     const models = await client.listModels();
     expect(models.routed).toContain("fake-model");
+    expect(models.modelSources).toEqual(expect.arrayContaining([
+      { id: "fake-model", kind: "engine", label: "其它模型" },
+      { id: "provider:deepseek:deepseek-v4", kind: "provider", label: "deepseek", providerId: "deepseek", providerKind: "pi-native", modelId: "deepseek-v4" },
+    ]));
 
     const { text, done } = await streamV1(baseUrl, "test-token", "fake-model");
     expect(text).toBe("Hello, world!");
     expect(done).toBe(true);
+  });
+
+  it("keeps provider models distinct when different providers use the same upstream model id", async () => {
+    core = createCore({ token: "test-token" });
+    core.providers.add({
+      id: "deepseek",
+      kind: "pi-native",
+      api: "openai-completions",
+      modelConfigs: [{ id: "deepseek-v4", contextWindow: 128_000, inputModalities: ["text"] }],
+    });
+    core.providers.add({
+      id: "my-deepseek",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://custom-deepseek.example/v1",
+      modelConfigs: [{ id: "deepseek-v4", contextWindow: 32_768, inputModalities: ["text"] }],
+    });
+
+    const { port, host } = await core.start({ port: 0, host: "127.0.0.1" });
+    const client = new EasyWorkClient({ baseUrl: `http://${host}:${port}`, token: "test-token" });
+
+    const models = await client.listModels();
+    const deepseekSources = models.modelSources?.filter((source) => source.providerId?.includes("deepseek")) ?? [];
+    expect(deepseekSources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ providerId: "deepseek", modelId: "deepseek-v4" }),
+      expect.objectContaining({ providerId: "my-deepseek", modelId: "deepseek-v4" }),
+    ]));
+    expect(new Set(deepseekSources.map((source) => source.id)).size).toBe(2);
+    expect(Object.keys(models.context ?? {}).filter((id) => id.includes("deepseek-v4"))).toHaveLength(2);
   });
 
   it("rejects unauthorized requests", async () => {

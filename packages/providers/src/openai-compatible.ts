@@ -23,6 +23,8 @@ export interface OpenAICompatibleConfig {
   headers?: Record<string, string>;
   capabilities?: Partial<EngineCapabilities>;
   fetch?: typeof fetch;
+  /** 将 EasyWork 内部 route id 映射为上游真实 model id。 */
+  mapModelId?: (modelId: string) => string;
 }
 
 const DEFAULT_CAPS: EngineCapabilities = {
@@ -112,6 +114,7 @@ export class OpenAICompatibleEngine implements InferenceEngine {
   private readonly apiKey?: string;
   private readonly extraHeaders: Record<string, string>;
   private readonly fetchImpl: typeof fetch;
+  private readonly mapModelId: (modelId: string) => string;
 
   constructor(cfg: OpenAICompatibleConfig) {
     this.id = cfg.id;
@@ -120,6 +123,7 @@ export class OpenAICompatibleEngine implements InferenceEngine {
     this.extraHeaders = cfg.headers ?? {};
     this.capabilities = { ...DEFAULT_CAPS, ...cfg.capabilities };
     this.fetchImpl = cfg.fetch ?? fetch;
+    this.mapModelId = cfg.mapModelId ?? ((modelId) => modelId);
   }
 
   private headers(): Record<string, string> {
@@ -132,7 +136,7 @@ export class OpenAICompatibleEngine implements InferenceEngine {
 
   private buildBody(req: ChatRequest, stream: boolean): Record<string, unknown> {
     const body: Record<string, unknown> = {
-      model: req.model,
+      model: this.mapModelId(req.model),
       messages: toOpenAIMessages(req.messages),
       stream,
     };
@@ -302,7 +306,7 @@ export class OpenAICompatibleEngine implements InferenceEngine {
     const res = await this.fetchImpl(`${this.baseUrl}/embeddings`, {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify({ model: req.model, input: req.input }),
+      body: JSON.stringify({ model: this.mapModelId(req.model), input: req.input }),
     });
     if (!res.ok) throw new Error(`${this.id} embed failed: ${res.status}`);
     const json = (await res.json()) as OpenAIEmbeddingShape;

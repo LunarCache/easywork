@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ChannelKind, Project } from "@ew/shared";
+import type { ModelSourceInfo } from "@ew/sdk";
 import { currentConfig, getClient, initRuntimeConfig } from "./lib/client.js";
 import { applyTheme, loadThemePrefs, saveThemePrefs, type ThemePrefs } from "./lib/prefs.js";
 import { pickWorkspaceDir, isDesktop } from "./lib/desktop.js";
@@ -35,6 +36,7 @@ export function App() {
   const settingsHost = useSettingsPageHost();
   const [mode, setMode] = useState<Mode>("chat");
   const [models, setModels] = useState<string[]>([]);
+  const [modelSources, setModelSources] = useState<ModelSourceInfo[]>([]);
   const [status, setStatus] = useState<Status>("connecting");
 
   const [threadId, setThreadId] = useState<string>(() => crypto.randomUUID());
@@ -148,6 +150,7 @@ export function App() {
     try {
       const info = await getClient().listModels();
       setModels(info.routed);
+      setModelSources(info.modelSources ?? []);
       setContexts(info.context ?? {});
       setStatus("ok");
       void refreshThreads();
@@ -368,6 +371,7 @@ export function App() {
             <Chat
               key={threadId}
               models={models}
+              modelSources={modelSources}
               contexts={contexts}
               threadId={threadId}
               onSaved={refreshThreads}
@@ -384,6 +388,7 @@ export function App() {
                 project={project}
                 projects={projects}
                 models={models}
+                modelSources={modelSources}
                 contexts={contexts}
                 threadId={workThreadId || latestWorkThread(project.id)}
                 onChanged={refreshProjects}

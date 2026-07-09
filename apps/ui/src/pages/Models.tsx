@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GGUFVariant, HFModelSummary, LocalModel } from "@ew/shared";
+import type { GGUFVariant, HFModelSummary, LocalModel, SamplingParams } from "@ew/shared";
 import type {
   ProviderCatalogItem,
   ProviderCatalogModel,
@@ -63,6 +63,24 @@ interface ProviderFormModel {
   context: string;
   inputModalities: ProviderModelModality[];
 }
+
+type SamplingKey = "temperature" | "topP" | "topK" | "minP" | "repeatPenalty" | "maxTokens";
+type SamplingDraft = Record<SamplingKey, string>;
+
+const SAMPLING_FIELDS: { key: SamplingKey; label: string; placeholder: string; step: string; hint: string }[] = [
+  { key: "temperature", label: "温度", placeholder: "默认", step: "0.05", hint: "越低越稳定" },
+  { key: "topP", label: "top_p", placeholder: "默认", step: "0.05", hint: "核心采样概率" },
+  { key: "topK", label: "top_k", placeholder: "默认", step: "1", hint: "本地 llama" },
+  { key: "minP", label: "min_p", placeholder: "默认", step: "0.01", hint: "本地 llama" },
+  { key: "repeatPenalty", label: "重复惩罚", placeholder: "默认", step: "0.05", hint: "本地 llama" },
+  { key: "maxTokens", label: "最大输出", placeholder: "不限", step: "64", hint: "单轮上限" },
+];
+
+const SAMPLING_PRESETS: { label: string; values: Partial<Record<SamplingKey, number>> }[] = [
+  { label: "严谨", values: { temperature: 0.2, topP: 0.8, repeatPenalty: 1.08 } },
+  { label: "均衡", values: { temperature: 0.7, topP: 0.9, topK: 40, repeatPenalty: 1.05 } },
+  { label: "发散", values: { temperature: 1, topP: 0.95, topK: 80, minP: 0.02 } },
+];
 
 function resetScrollContainers(node: HTMLElement | null) {
   if (!node) return;
@@ -159,6 +177,41 @@ function displayName(m: LocalModel, quant: string | null): string {
   return name;
 }
 
+function localModelKey(m: LocalModel): string {
+  return m.routerId ?? m.path;
+}
+
+function samplingToDraft(sampling: SamplingParams | undefined): SamplingDraft {
+  return Object.fromEntries(
+    SAMPLING_FIELDS.map(({ key }) => [key, sampling?.[key] == null ? "" : String(sampling[key])]),
+  ) as SamplingDraft;
+}
+
+function draftToSampling(draft: SamplingDraft): SamplingParams {
+  const out: SamplingParams = {};
+  for (const { key } of SAMPLING_FIELDS) {
+    const raw = draft[key].trim();
+    if (!raw) continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) throw new Error(`${key} 不是有效数字`);
+    if ((key === "topK" || key === "maxTokens") && !Number.isInteger(value)) throw new Error(`${key} 需要整数`);
+    out[key] = value;
+  }
+  return out;
+}
+
+function samplingSummary(sampling: SamplingParams | undefined): string {
+  if (!sampling || Object.keys(sampling).length === 0) return "使用默认采样";
+  const parts: string[] = [];
+  if (sampling.temperature != null) parts.push(`temp ${sampling.temperature}`);
+  if (sampling.topP != null) parts.push(`top_p ${sampling.topP}`);
+  if (sampling.topK != null) parts.push(`top_k ${sampling.topK}`);
+  if (sampling.minP != null) parts.push(`min_p ${sampling.minP}`);
+  if (sampling.repeatPenalty != null) parts.push(`repeat ${sampling.repeatPenalty}`);
+  if (sampling.maxTokens != null) parts.push(`max ${sampling.maxTokens}`);
+  return parts.join(" · ");
+}
+
 export function Models({ onChange }: { onChange: () => void }) {
   const [tab, setTabRaw] = useState<ModelsTab>("local");
   const [view, setView] = useState<View>("list");
@@ -183,6 +236,9 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [local, setLocal] = useState<LocalModel[]>([]);
   const [loaded, setLoaded] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [tuningModelId, setTuningModelId] = useState<string | null>(null);
+  const [samplingDraft, setSamplingDraft] = useState<SamplingDraft>(() => samplingToDraft(undefined));
+  const [samplingSaving, setSamplingSaving] = useState(false);
   // 嵌入（向量记忆）模型独立进程，状态与 router 分离。
   const [embed, setEmbed] = useState<{ ready: boolean; modelId?: string; dim: number } | null>(null);
   const [embedBusy, setEmbedBusy] = useState(false);
@@ -435,6 +491,38 @@ export function Models({ onChange }: { onChange: () => void }) {
       setProgress(`启用失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setEmbedBusy(false);
+    }
+  };
+
+  const openSampling = (m: LocalModel) => {
+    const id = localModelKey(m);
+    if (tuningModelId === id) {
+      setTuningModelId(null);
+      return;
+    }
+    setTuningModelId(id);
+    setSamplingDraft(samplingToDraft(m.settings?.sampling));
+  };
+
+  const applySamplingPreset = (values: Partial<Record<SamplingKey, number>>) => {
+    const next = Object.fromEntries(
+      SAMPLING_FIELDS.map(({ key }) => [key, values[key] == null ? "" : String(values[key])]),
+    ) as Partial<SamplingDraft>;
+    setSamplingDraft((cur) => ({ ...cur, ...next }));
+  };
+
+  const saveLocalSampling = async (modelId: string) => {
+    setSamplingSaving(true);
+    try {
+      const sampling = draftToSampling(samplingDraft);
+      const settings = await getClient().saveLocalModelSettings(modelId, { sampling });
+      setLocal((cur) => cur.map((m) => (localModelKey(m) === modelId ? { ...m, settings } : m)));
+      setProgress(Object.keys(settings.sampling ?? {}).length ? "已保存模型运行参数" : "已恢复模型默认采样");
+      setTuningModelId(null);
+    } catch (e) {
+      setProgress(`保存运行参数失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSamplingSaving(false);
     }
   };
 
@@ -1009,9 +1097,12 @@ export function Models({ onChange }: { onChange: () => void }) {
                 const isLoaded = isEmbed ? embedReady : loaded.includes(m.routerId ?? m.path);
                 const isBusy = busy === m.path;
                 const quant = quantOf(m);
+                const modelId = localModelKey(m);
+                const isTuning = tuningModelId === modelId;
                 return (
                   <ConfigResourceCard
                     key={m.id}
+                    className={`local-model-card ${isTuning ? "tuning" : ""}`}
                     icon={<BrandIcon brand={brandKeyForModel(m.repoId, m.fileName, m.arch)} size="lg" />}
                     actions={(
                       <>
@@ -1032,6 +1123,12 @@ export function Models({ onChange }: { onChange: () => void }) {
                         ) : (
                           <button className="set-btn secondary" disabled={isBusy} onClick={() => void load(m)}>
                             {isBusy ? "加载中…" : "加载"}
+                          </button>
+                        )}
+                        {!isEmbed && (
+                          <button className={`set-btn secondary ${isTuning ? "soft" : ""}`} onClick={() => openSampling(m)}>
+                            <EditIcon size={14} />
+                            运行参数
                           </button>
                         )}
                         <button
@@ -1062,7 +1159,51 @@ export function Models({ onChange }: { onChange: () => void }) {
                         <span>ctx {fmtCtx(m.contextDefault)}</span>
                         {quant && <span>{quant}</span>}
                         <span>{fmtSize(m.sizeBytes)}</span>
+                        {!isEmbed && <span>{samplingSummary(m.settings?.sampling)}</span>}
                       </div>
+                      {isTuning && (
+                        <div className="local-sampling-panel">
+                          <div className="local-sampling-head">
+                            <div>
+                              <strong>默认运行参数</strong>
+                              <span>保存后，聊天、工作区和外部渠道下一轮都会使用；留空表示使用引擎默认值。</span>
+                            </div>
+                            <div className="local-sampling-presets">
+                              {SAMPLING_PRESETS.map((preset) => (
+                                <button key={preset.label} className="set-btn tiny" onClick={() => applySamplingPreset(preset.values)}>
+                                  {preset.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="local-sampling-grid">
+                            {SAMPLING_FIELDS.map((field) => (
+                              <label key={field.key} className="local-sampling-field">
+                                <span>{field.label}</span>
+                                <input
+                                  type="number"
+                                  step={field.step}
+                                  placeholder={field.placeholder}
+                                  value={samplingDraft[field.key]}
+                                  onChange={(e) => setSamplingDraft((cur) => ({ ...cur, [field.key]: e.target.value }))}
+                                />
+                                <em>{field.hint}</em>
+                              </label>
+                            ))}
+                          </div>
+                          <div className="local-sampling-actions">
+                            <button className="set-btn ghost" onClick={() => setSamplingDraft(samplingToDraft(undefined))}>
+                              清空
+                            </button>
+                            <button className="set-btn secondary" onClick={() => setTuningModelId(null)}>
+                              取消
+                            </button>
+                            <button className="set-btn primary" disabled={samplingSaving} onClick={() => void saveLocalSampling(modelId)}>
+                              {samplingSaving ? "保存中…" : "保存参数"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </ConfigResourceCard>
                 );

@@ -79,7 +79,7 @@ flowchart LR
 
 ### 模型与网关
 
-- 本地模型：HuggingFace 搜索、断点续传下载、GGUF 元数据解析、统一 llama router 运行。
+- 本地模型：HuggingFace 搜索、断点续传下载、GGUF 元数据解析、统一 llama router 运行，并可在模型页按模型配置默认运行采样参数。
 - 云端 provider：支持常见 OpenAI-compatible 端点，内置 provider 配置契约和模型目录。
 - 多协议 API：OpenAI `/v1/chat/completions`、`/v1/embeddings`、`/v1/models`，以及 Anthropic `/v1/messages`。
 
@@ -169,7 +169,7 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 273 passed / 1 skipped
+npm test               # vitest: 276 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
@@ -193,7 +193,7 @@ npm run app:build --workspace @ew/desktop
 
 ## 测试覆盖
 
-- Vitest：273 passed / 1 skipped。
+- Vitest：276 passed / 1 skipped。
 - Playwright UI e2e：16 条，覆盖设置页、模型/渠道/知识库/Skills/MCP/记忆入口、Chat / Workspace composer、图片上传与粘贴、搜索导航、文件页、记忆 CRUD、知识库、Skills 模板与详情。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
 

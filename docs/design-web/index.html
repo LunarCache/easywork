@@ -257,10 +257,10 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 ### 4.6 模型解析 + 采样注入 + 图片能力
 
-`resolveModel`（`session-host.ts`）：**先本地**（`local.baseUrlFor(modelId)` 命中 → `provider:"local"`, `input:["text","image"]`, ctx 来自 `local.contexts()`），**再云端**（`providers.findByModel` → pi `ModelRegistry`）。本地 server 设了 `--api-key`（0.0.0.0 暴露）时把 key 注入 pi auth，连回环也带 Bearer。
+`resolveModel`（`session-host.ts`）：**先本地**（`local.baseUrlFor(modelId)` 命中 → `provider:"local"`, `input:["text","image"]`, ctx 来自 `local.contexts()`），**再云端**（`providers.resolveModelRef` → pi `ModelRegistry`）。云端 provider 模型在 EasyWork 内部使用 `provider:&lt;providerId&gt;:&lt;modelId&gt;` route id，避免不同 provider 的同名模型互相覆盖；进入 pi / 上游 OpenAI-compatible 请求前再还原为真实 `modelId`。本地 server 设了 `--api-key`（0.0.0.0 暴露）时把 key 注入 pi auth，连回环也带 Bearer。
 
 **streamFn 包装（采样 + 思考 + 缓存）**：pi 不在 `createAgentSession` 暴露这些，故统一包装 `session.agent.streamFn`：
-- **采样**：`temperature/maxTokens` 走 StreamOptions，其余经 `onPayload` 注入请求体；`top_k/min_p/repeat_penalty` 是 llama.cpp 扩展，**仅 `provider==="local"` 注入**。
+- **采样**：本轮显式 `input.sampling` 优先；未显式传入且模型为本地模型时，`SessionHost` 从 `LocalModelSettingsStore` 读取模型页保存的默认运行参数。`temperature/maxTokens` 走 StreamOptions，其余经 `onPayload` 注入请求体；`top_k/min_p/repeat_penalty` 是 llama.cpp 扩展，**仅 `provider==="local"` 注入**。云端 provider 默认采样不由本地模型页管理。
 - **思考（分级，off/low/medium/high）**：每轮 `session.setThinkingLevel(level)`（pi 已登记的推理模型据此真分级）+ `onPayload` 注入 provider 实际识别的参数：
   - **云端** `injectCloudThinking`：`thinking:{type:"enabled"/"disabled"}`（off→真关，省 reasoning token）+ `reasoning_effort:<档位>`（DeepSeek-V4 等 OpenAI-SDK 思考模型扩展，经请求体顶层透传 = 其 SDK 的 extra_body）。
   - **本地** `injectLocalThinking`：`chat_template_kwargs.enable_thinking`（llama.cpp 思考开关）+ `thinking_budget_tokens`（off=0/low=1024/medium=4096/high=16384）。取代旧 `/think` 文本 hack。
@@ -304,7 +304,7 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 ### 5.4 云端 provider
 
-`ProviderManager`（`providers/manager.ts`）统一处理所有云端，无每厂商代码。`CloudProviderConfig = {id, baseUrl, apiKey?, headers?, models[], contextWindow?}`，每个 declared model 路由到一个 `OpenAICompatibleEngine`。"预设"（OpenAI/OpenRouter/DeepSeek/硅基流动…）只是 `baseUrl/headers` 不同的配置对象。**上下文窗口必须手填**（远端不可靠探测；缺省 32768），用于 compaction 阈值 + 进度环。配置序列化进 SQLite `providers` 键，开机恢复。
+`ProviderManager`（`providers/manager.ts`）统一处理所有云端，无每厂商代码。`CloudProviderConfig = {id, kind, baseUrl?, api?, apiKey?, headers?, modelConfigs[]}`，每个 declared model 暴露为 provider-scoped route id（例如 `provider:my-deepseek:deepseek-v4`），但 `OpenAICompatibleEngine.mapModelId` 会把请求体里的 `model` 还原成上游真实模型名。`modelSources` 额外带 `modelId` 供 UI 显示。内置 provider 与自定义 provider 即使声明同名模型，也不会覆盖上下文窗口或路由。配置序列化进 SQLite `providers` 键，开机恢复。
 
 ### 5.5 模型管理（HF / 下载 / 扫描 / GGUF / 删除）
 
@@ -456,17 +456,17 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 ### 13.3 Chat vs Workspace + SSE
 
 共用 MessageStream / SideDock / ModelSelect / composer / 审批卡 / **斜杠命令面板** / **运行态上下文 pill**。
-- **Chat**：composer 输入卡顶部用 `ComposerContextStrip` 前置本轮生效的 **模型 / 思考 / 联网 / 知识库 / 上下文压力**；底栏左侧 `+` 仅做**上传图片**，右侧保留生成参数与发送。历史工件仍走 SideDock（fs 工具后刷新、首件自动开 dock）。
+- **Chat**：composer 输入卡顶部用 `ComposerContextStrip` 前置本轮能力开关 **思考 / 联网 / 知识库**；**模型 / 上下文压力**移到底栏发送按钮左侧，作为发送前确认区。模型下拉消费 `/models.modelSources`，按 **本地模型 / provider id** 分组展示；provider 分组已经表达来源，条目只显示模型名，避免重复铺开 raw id。底栏左侧 `+` 仅做**上传图片**，右侧保留模型 / 上下文 / 发送或停止。默认采样参数从输入框移出，统一在模型页按本地模型配置。历史工件仍走 SideDock（fs 工具后刷新、首件自动开 dock）。
 - **Workspace**：`ContextBar` 除项目 / 分支下拉外，还接收 children，把 **模型 / 思考 / 上下文压力**注入到同一行；底栏左侧 `+` 同样只做**上传图片**，右侧保留**审批策略 pill**（中文档位 只读/逐项确认/自动编辑/完全访问，full-auto 橙色警示；改档 PATCH `project.approvalMode`，`send()` 前 await 在途 PATCH 防"切档即发"）与发送。**空态居中**（`msgs.length===0` 渲染 `.ws-hero`：品牌标 + 时段问候语 + 居中限宽 composer，否则消息流在上、composer 在底）。SideDock 带 git 上下文；mutating 工具后刷 git + ws 文件 + 上报分支给标题栏。
 - **审批卡**（`.approval-wrap`）：危险工具挂起时在 **composer 正上方内嵌弹出**（与输入框同宽、从下滑入），非遮罩弹层——不挡对话；含工具名 + 命令 JSON + 拒绝/本会话总是允许/允许。Chat 与 Workspace 一致。
-- **斜杠命令**（`lib/slash.ts` + `components/SlashPalette.tsx` 的 `useSlashPalette` hook，两 composer 共用）：输入「/」弹两阶段自动补全（命令名→参数），面板头显示当前阶段，列表右侧直接带**当前值 / 当前项**；`/compact` 还会显示当前上下文占比。`onKeyDown` 优先消费 ↑↓/Enter/Tab/Esc。支持 `/think <档位>` 设思考、`/model <名>` 切模型（下一轮 run 带新 modelId，复用 getOrCreate 重建保上下文）、`/compact` 调 `POST /threads/:id/compact`。
+- **斜杠命令**（`lib/slash.ts` + `components/SlashPalette.tsx` 的 `useSlashPalette` hook，两 composer 共用）：输入「/」弹两阶段自动补全（命令名→参数），面板头显示当前阶段，列表右侧直接带**当前值 / 当前项**；`/compact` 还会显示当前上下文占比。`onKeyDown` 优先消费 ↑↓/Enter/Tab/Esc。支持 `/think <档位>` 设思考、`/model` 先选本地/provider 来源再选该来源下模型（下一轮 run 带 provider-scoped modelId，复用 getOrCreate 重建保上下文）、`/compact` 调 `POST /threads/:id/compact`。
 - **思考分级**：思考状态统一以前置 pill 呈现（关/低/中/高，点击循环）+ `/think`；`thinkingLevel` **按模型持久化**（`prefs.ts`，默认 off），run 时随 `runAgent` 下发。
-- **SSE 处理**：`runAgent` 流 → `usage`(驱动环)/`approval-request`(审批卡)/`retry`·`compaction`(状态条瞬态提示，有新 text 即清)/`final`/`error`/其余→`applyAgentEvent` reducer。`AbortController` 卸载或停止时取消（后端回滚 + 不落库，UI 标"已停止·本轮不计入上下文")。**图片**经 FileReader→base64→`{type:"image",mimeType,data}` 内容片段。采样参数**按模型**存。
+- **SSE 处理**：`runAgent` 流 → `usage`(驱动环)/`approval-request`(审批卡)/`retry`·`compaction`(状态条瞬态提示，有新 text 即清)/`final`/`error`/其余→`applyAgentEvent` reducer。`AbortController` 卸载或停止时取消（后端回滚 + 不落库，UI 标"已停止·本轮不计入上下文")。**图片**经 FileReader→base64→`{type:"image",mimeType,data}` 内容片段。本地模型默认采样由 daemon 侧模型设置注入，前端普通发送不再带采样参数。
 - **ContextRing / Usage pill**：20px SVG 环包进 `ComposerUsagePill`，统一显示 `promptTokens/contexts[model]`；accent → 琥珀 >65% → 红 >85%，聊天与工作区复用同一视觉语义。
 
 ### 13.4 MessageStream
 
-用户右对齐气泡；**助手无逐行头像、纯 prose**（react-markdown + remark-gfm + rehype-highlight，外链改路由到 dock 内嵌预览而非跳走 webview）。按有序 `blocks`（reasoning|tool|text）保留真实交织。**行内工具调用（Codex Flat：`<details>` 扁平左竖线、过去式动词、零卡片零暗井、默认折叠运行中展开）**：`groupExplore()` 把连续只读勘探（`isExploreTool`：读/搜/列/找，不含 web_search/编辑/运行）**聚合成「探索 · N」组**，过去式步骤（已读取〔徽标+文件名+目录〕/已搜索/已列出/已查找）挂左竖线；思考左竖线换 accent；编辑（已编辑〔徽标 + 文件名亮/目录灰 + `+/-`〕）展开 `editPreview`→`DiffLines`（**`highlight.js/lib/common` 逐行语法高亮**复用 `.hljs-*` + 双栏行号〔`@@` 解析真实行号、合成 diff 从 1 起〕+ 改动行红/绿竖条；diff 载荷缺失时从 args 合成 patch / old+new / 仅 content）；运行（`SquareTerminal` + 已执行 + 折叠态命令预览单行省略）展开浅底圆角卡〔`$ 命令`悬挂缩进换行 + 灰输出同卡〕；web_search 走 favicon 来源 chips。**diff 统计**：`lineDiffStat`（滚动 Int32Array LCS，`n*m>250_000` 退化行数差防流式卡顿）、`diffStat`（优先 unified、否则 before/after）、`editStat`（str_replace 行级 diff 防虚高）、`aggregateEdits`（按路径合并、过滤 `+0 −0` 幽灵）。**文件改动汇总卡**（`<details>` 默认折叠）点击跳 dock 对应文件 diff。**工作日志**：渲染时按「最后一个过程项（探索/思考/非文本工具）」下标把本轮拆成 过程 + 最终答复——过程包进 `<details className="cv-worklog" open={live}>`（`fmtWork` 算「已工作 N 分 M 秒」，`m.start`/`m.end` 由 run 收尾盖时），最终文本留在容器外；纯文本答复（无过程）不套壳。助手操作行带**时间戳**（`m.end ?? m.start`）。**滚动到底浮钮**（`.jump-bottom`，`onScroll` 算离底 >80px 则现；自动滚动改为仅 `atBottomRef` 为真时跟随，尊重上滚位置；Chat/Workspace 各自接，锚定到 `position:relative` 的 `.chat`/`.ws-main`）。**审批卡**抽成共享 `ApprovalCard`（简洁单头行 + 单行参数预览，`argPreview` 取 command/path/紧凑 JSON）。
+用户右对齐气泡；**助手无逐行头像、纯 prose**（react-markdown + remark-gfm + rehype-highlight，外链改路由到 dock 内嵌预览而非跳走 webview）。按有序 `blocks`（reasoning|tool|text）保留真实交织。**行内工具调用（Codex Flat：`<details>` 扁平左竖线、过去式动词、零卡片零暗井、默认折叠运行中展开）**：`groupExplore()` 把连续只读勘探（`isExploreTool`：读/搜/列/找，不含 web_search/编辑/运行）**聚合成「探索 · N」组**，过去式步骤（已读取〔徽标+文件名+目录〕/已搜索/已列出/已查找）挂左竖线；思考左竖线换 accent；编辑（已编辑〔徽标 + 文件名亮/目录灰 + `+/-`〕）展开 `editPreview`→`DiffLines`（**`highlight.js/lib/common` 逐行语法高亮**复用 `.hljs-*` + 双栏行号〔`@@` 解析真实行号、合成 diff 从 1 起〕+ 改动行红/绿竖条；diff 载荷缺失时从 args 合成 patch / old+new / 仅 content）；运行（`SquareTerminal` + 已执行 + 折叠态命令预览单行省略）展开浅底圆角卡〔`$ 命令`悬挂缩进换行 + 灰输出同卡〕；web_search 走 favicon 来源 chips。**diff 统计**：`lineDiffStat`（滚动 Int32Array LCS，`n*m>250_000` 退化行数差防流式卡顿）、`diffStat`（优先 unified、否则 before/after）、`editStat`（str_replace 行级 diff 防虚高）、`aggregateEdits`（按路径合并、过滤 `+0 −0` 幽灵）。**文件改动汇总卡**（`<details>` 默认折叠）点击跳 dock 对应文件 diff。**工作日志**：渲染时按「最后一个过程项（探索/思考/非文本工具）」下标把本轮拆成 过程 + 最终答复——过程包进 `<details className="cv-worklog" open={live}>`（`fmtWork` 算「已工作 N 分 M 秒」，`m.start`/`m.end` 由 run 收尾盖时），最终文本留在容器外；纯文本答复（无过程）不套壳。助手操作行带**时间戳**（`m.end ?? m.start`）。**滚动到底浮钮**（`.jump-bottom`，`onScroll` 算离底 >80px 则现；自动滚动改为仅 `atBottomRef` 为真时跟随，尊重上滚位置；Chat/Workspace 各自接，按钮挂在 composer 内并锚定输入框右上方）。**审批卡**抽成共享 `ApprovalCard`（简洁单头行 + 单行参数预览，`argPreview` 取 command/path/紧凑 JSON）。
 - **代码块**（`pre` 覆写 `CodeBlock`）：顶栏语言标签 + 复制（`codeText` 递归取高亮 span 树纯文本作复制源）；内联代码不受影响。
 - **消息操作行**（移到消息下方，取代右上角悬浮）：助手下方「复制」整条；用户**最后一条**下方「编辑」+「重试」。
 - **重新生成**（重试 / 编辑共用 `regenerate`）：UI 替换旧答案（非追加）、composer 不动；`history` 始终带本轮用户原文（后端据 `history` 末条取 text/images）；编辑则更新末条用户气泡文本。后端 `SessionHost.rollbackLastUserTurn` 用 pi `navigateTree` 回滚到上一轮用户消息的父节点 → 旧问答另起分支、不再进上下文（含 JSONL/resume 正确），失败兜底内存截断。
@@ -486,7 +486,7 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 - **两类区**：通用是**卡片行**（`.set-group`/`.set-row`，标题+说明左、控件右，ZCode 式对齐）——目前仅界面主题，为**自绘下拉**（`AppearanceSelect`：按钮 + `.set-select-menu` 深色弹层 + `menu-backdrop`——原生 `<select>` 的选项菜单是 OS 浅色绘制、无法随主题着色，故自绘）；模型 / 知识库 / Skills / MCP / 记忆 五管理页以 **lazy keep-alive 内嵌**（访问过的 `.set-pane` `display:none` 保活，避免 KB 上传/索引轮询中断）。**网络访问**（暴露到局域网 `.set-toggle` 开关 开=0.0.0.0/关=127.0.0.1 · API Key · 已加载端点 · 0.0.0.0 警告）放在**模型页（本地 tab）顶部**——它暴露的是模型服务（llama router + `/v1` 网关），故归模型而非通用（`changeBind`/`endpointUrl` 随之迁入 `Models.tsx`）。**向量召回**控件原独立「向量记忆」页已删除——记忆页（`MemoryOverlay`）工具栏本就自带状态点 + `向量召回·N维` / `未启用 + 启用`。取代旧「插件页」+ 弹窗。
 - **知识库（卡片网格）**：左集合栏（主导文件类型图标 + 计数 + 处理中脉冲点）+ 中文档卡片网格 + 右滑出预览（统一 `FileViewer`，`docReqRef` 时序保护）；顶部两步上传（先选/建目标集合，kbId 规范化）；900ms job 轮询。
 - **记忆（卡片信息流，`MemoryOverlay`）**：顶部搜索 + 向量召回状态（含一键启用 nomic）+ 添加；下方**筛选 chips**——作用域单选（`scopeFilter`：`all` / `global` / `ws:<id>`，带计数），选中具体作用域时分隔线后再现该作用域的**分类层 chips**（`layerFilter`，语义色点；「全部」视图不按层筛避免跨作用域层语义混淆）。**单列卡片流** `feed`（按作用域/分类/搜索过滤、时间倒序）：每卡 = 文本 + 元信息行〔作用域 pill（👤全局/你 或 📁工作区名）· 分类色点+标签 · **来源徽章（手动 / 自动，按 `sessionId` 区分）** · 相对时间〕+ hover 编辑/删除（行内）。`添加` 智能定向：具体作用域+层已筛则直达，否则弹层自选 scope/层。空态居中提示。
-- **模型**：本地/云端分页；本地按 kind（文本/嵌入/视觉）显示，load/unload 或"启用向量"，**hover 显形删除钮**（删的若是当前向量记忆引擎模型→后端 `/models/local/delete` 一并停嵌入进程 + 清持久化设置）；嵌入模型删除分级提示；无 llama 二进制时一键安装 banner；HF 搜索下载（流式 %）；云端 provider 预设 + 手填上下文窗口。
+- **模型**：本地/云端分页；本地按 kind（文本/嵌入/视觉）显示，load/unload 或"启用向量"，文本/视觉模型卡片可展开**运行参数**面板（预设 + `temperature/top_p/top_k/min_p/repeat_penalty/max_tokens`，空值=引擎默认；保存到 `models.local.settings` 并由 `SessionHost` 注入聊天/工作区/渠道默认采样），**hover 显形删除钮**（删的若是当前向量记忆引擎模型→后端 `/models/local/delete` 一并停嵌入进程 + 清持久化设置）；嵌入模型删除分级提示；无 llama 二进制时一键安装 banner；HF 搜索下载（流式 %）；云端 provider 预设 + 手填上下文窗口。
 - **Skills/MCP**：SKILL.md frontmatter 卡 + 启停；MCP server 列表自动探测 + 增删改导入。
 
 ### 13.7 统一弹层 + 文件类型体系 + Tauri 规避

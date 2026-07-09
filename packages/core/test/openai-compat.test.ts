@@ -62,7 +62,7 @@ describe("/v1 OpenAI 兼容端点（经云端 provider）", () => {
 
     const modelsRes = await fetch(`${base}/v1/models`, { headers: { authorization: "Bearer t" } });
     const modelsJson = (await modelsRes.json()) as ModelsResponseShape;
-    expect(modelsJson.data.map((m) => m.id)).toContain("cloud-model");
+    expect(modelsJson.data.map((m) => m.id)).toContain("provider:cloud:cloud-model");
   });
 
   it("/v1/chat/completions 未知模型返回 404", async () => {
@@ -89,10 +89,10 @@ describe("/v1 OpenAI 兼容端点（经云端 provider）", () => {
     const base = `http://${host}:${port}`;
 
     const models = await fetch(`${base}/models`, { headers: { authorization: "Bearer t" } }).then((r) => r.json() as Promise<{ routed: string[]; context: Record<string, number> }>);
-    expect(models.routed).toContain("claude-haiku-4-5");
-    expect(models.context["claude-haiku-4-5"]).toBe(200000);
+    expect(models.routed).toContain("provider:anthropic:claude-haiku-4-5");
+    expect(models.context["provider:anthropic:claude-haiku-4-5"]).toBe(200000);
 
     const v1 = await fetch(`${base}/v1/models`, { headers: { authorization: "Bearer t" } }).then((r) => r.json() as Promise<ModelsResponseShape>);
-    expect(v1.data.map((m) => m.id)).toContain("claude-haiku-4-5");
+    expect(v1.data.map((m) => m.id)).toContain("provider:anthropic:claude-haiku-4-5");
   });
 });

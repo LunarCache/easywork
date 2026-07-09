@@ -1,7 +1,13 @@
 import os from "node:os";
 import { z } from "zod";
-import { GGUFVariantSchema, LocalLoadOptionsSchema, type DownloadEvent } from "@ew/shared";
+import {
+  GGUFVariantSchema,
+  LocalLoadOptionsSchema,
+  LocalModelRuntimeSettingsSchema,
+  type DownloadEvent,
+} from "@ew/shared";
 import { resolveLlamaBin, LLAMA_INSTALL } from "../../engine/resolve-llama.js";
+import { providerModelRouteId } from "../../providers/catalog.js";
 import type { CoreHttpContext } from "../context.js";
 
 export interface ModelRouteOptions {
@@ -15,6 +21,11 @@ const LocalNetSchema = z.object({
   apiKey: z.string().optional(),
 });
 
+const LocalModelSettingsBodySchema = z.object({
+  id: z.string().min(1),
+  settings: LocalModelRuntimeSettingsSchema.default({}),
+});
+
 function lanIPv4(): string | undefined {
   for (const list of Object.values(os.networkInterfaces())) {
     for (const ni of list ?? []) {
@@ -25,12 +36,43 @@ function lanIPv4(): string | undefined {
 }
 
 export function registerModelRoutes(ctx: CoreHttpContext, opts: ModelRouteOptions): void {
-  const { app, registry, local, models, providers, sessionHost, embeddings } = ctx;
+  const { app, registry, local, models, localModelSettings, providers, sessionHost, embeddings } = ctx;
   const availableModelIds = (): string[] => [...new Set([...registry.routedModels(), ...providers.modelIds()])];
+  const modelSources = () => {
+    const byProvider = new Map<string, {
+      id: string;
+      kind: "provider";
+      label: string;
+      providerId: string;
+      providerKind: "openai-compatible" | "pi-native";
+      modelId: string;
+    }>();
+    for (const provider of providers.list()) {
+      for (const id of provider.models) {
+        const routeId = providerModelRouteId(provider.id, id);
+        byProvider.set(routeId, {
+          id: routeId,
+          kind: "provider",
+          label: provider.id,
+          providerId: provider.id,
+          providerKind: provider.kind,
+          modelId: id,
+        });
+      }
+    }
+    const localIds = new Set([...local.loadedIds(), ...Object.keys(local.contexts()), ...local.endpoints().map((ep) => ep.id)]);
+    return availableModelIds().map((id) => {
+      const provider = byProvider.get(id);
+      if (provider) return provider;
+      if (localIds.has(id)) return { id, kind: "local" as const, label: "本地模型" };
+      return { id, kind: "engine" as const, label: "其它模型" };
+    });
+  };
 
   // ---- 引擎 / 已加载模型 ----
   app.get("/models", async () => ({
     routed: availableModelIds(),
+    modelSources: modelSources(),
     // 本地模型窗口（router n_ctx）+ 云端 provider 手动配置的窗口 → UI 进度环分母。
     context: { ...providers.contexts(), ...local.contexts() },
     engines: registry.list().map((e) => ({ id: e.id, capabilities: e.capabilities })),
@@ -137,13 +179,33 @@ export function registerModelRoutes(ctx: CoreHttpContext, opts: ModelRouteOption
     return { variants: await models.listVariants(repoId) };
   });
 
-  app.get("/models/local", async () => ({ models: await models.scanInventory() }));
+  app.get("/models/local", async () => ({
+    models: (await models.scanInventory()).map((model) => ({
+      ...model,
+      settings: localModelSettings.get(model.routerId ?? model.path),
+    })),
+  }));
+
+  app.get("/models/local/settings", async (req, reply) => {
+    const id = (req.query as { id?: string }).id;
+    if (!id) return reply.code(400).send({ error: "missing_id" });
+    return { settings: localModelSettings.get(id) };
+  });
+
+  app.post("/models/local/settings", async (req, reply) => {
+    const parsed = LocalModelSettingsBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request", detail: parsed.error.format() });
+    }
+    return { settings: localModelSettings.set(parsed.data.id, parsed.data.settings) };
+  });
 
   // 删除本地模型（id = gguf 全路径）：先卸载（若在跑），再删文件。
   app.post("/models/local/delete", async (req, reply) => {
     const id = (req.body as { id?: string })?.id;
     if (!id) return reply.code(400).send({ error: "missing_id" });
     try {
+      const target = (await models.scanInventory()).find((m) => m.path === id || m.routerId === id || m.id === id);
       await local.unload(id);
       // 若删的是当前向量记忆引擎的模型：停掉独立 `--embedding` 进程 + 清持久化设置，
       // 否则 EmbeddingService 仍在跑（不归 router 管），状态会一直显示「运行中/已启用」。
@@ -152,6 +214,7 @@ export function registerModelRoutes(ctx: CoreHttpContext, opts: ModelRouteOption
         opts.clearEmbedSetting();
       }
       const res = await models.deleteLocal(id);
+      localModelSettings.deleteMany([id, target?.path, target?.routerId, target?.id]);
       return { ok: true, removed: res.removed };
     } catch (e) {
       return reply.code(400).send({ ok: false, error: (e as Error).message });

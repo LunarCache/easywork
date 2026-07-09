@@ -7,6 +7,7 @@ import type { ChannelOperations } from "../channels/operations.js";
 import type { EngineRegistry } from "../engine/registry.js";
 import type { LocalBackend } from "../engine/local-backend.js";
 import type { ModelManager } from "../models/manager.js";
+import type { LocalModelSettingsStore } from "../models/local-model-settings.js";
 import type { ProviderManager } from "../providers/manager.js";
 import type { SessionHost } from "../agent/session-host.js";
 import type { SqliteConversationRepo } from "../store/conversation.js";
@@ -18,6 +19,7 @@ export interface CoreHttpContext {
   registry: EngineRegistry;
   local: LocalBackend;
   models: ModelManager;
+  localModelSettings: LocalModelSettingsStore;
   providers: ProviderManager;
   sessionHost: SessionHost;
   skills: SkillManager;
