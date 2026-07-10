@@ -5,7 +5,7 @@ export {
   getTimeTool,
   calculatorTool,
   httpGetTool,
-  webSearchTool,
+  exploreWebTool,
   renderHtmlTool,
 } from "./builtins.js";
 export { assertUrlAllowed, safeFetch, type SafeFetchOptions } from "./ssrf.js";

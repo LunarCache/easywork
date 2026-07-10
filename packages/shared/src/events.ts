@@ -99,7 +99,7 @@ export interface AgentRunInput {
   model: string;
   /** 已有历史（不含本轮新消息时由 caller 负责拼装）。 */
   history: z.infer<typeof ChatMessageSchema>[];
-  /** 排除（不提供给模型）的工具名，例如未开「联网」时排除 web_search。 */
+  /** 排除（不提供给模型）的工具名，例如未开「联网」时排除 explore_web。 */
   excludeTools?: string[];
   /** 采样参数（透传给引擎）。 */
   sampling?: SamplingParams;

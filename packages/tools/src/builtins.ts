@@ -81,19 +81,20 @@ function stripHtml(html: string): string {
 }
 
 /**
- * Web 搜索 + 取页（仿 Unsloth：query 搜 DuckDuckGo；url 直接取页正文）。
+ * Web 探索 + 取页（仿 Unsloth：query 搜 DuckDuckGo；url 直接取页正文）。
  * 由 UI 的「联网」开关门控。
  */
-export const webSearchTool = defineTool({
-  name: "web_search",
+export const exploreWebTool = defineTool({
+  name: "explore_web",
   description:
     "搜索网络并获取页面内容。给 query 返回搜索结果摘要；给 url 则抓取该页正文（用于读取搜索结果里的某个页面）。",
   schema: z.object({
     query: z.string().optional().describe("搜索查询"),
     url: z.string().optional().describe("要抓取正文的 URL（替代搜索）"),
+    max_results: z.number().int().min(1).max(10).default(5).describe("最多返回的搜索结果数，1-10，默认 5"),
   }),
   requiresApproval: "never",
-  async run({ query, url }, ctx) {
+  async run({ query, url, max_results }, ctx) {
     const ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36";
     // 取页模式
     if (url && url.trim()) {
@@ -114,7 +115,7 @@ export const webSearchTool = defineTool({
       const html = await res.text();
       const titles = [...html.matchAll(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
       const snips = [...html.matchAll(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g)];
-      const results = titles.slice(0, 5).map((t, i) => {
+      const results = titles.slice(0, max_results).map((t, i) => {
         let href = t[1]!;
         const uddg = /[?&]uddg=([^&]+)/.exec(href);
         if (uddg) href = decodeURIComponent(uddg[1]!);
@@ -123,7 +124,7 @@ export const webSearchTool = defineTool({
       if (results.length === 0) return { content: "没有搜索结果。" };
       const text = results.map((r) => `标题: ${r.title}\nURL: ${r.url}\n摘要: ${r.snippet}`).join("\n\n---\n\n");
       return {
-        content: `${text}\n\n---\n\n注意：以上仅为摘要。要读取完整页面，用 url 参数再次调用 web_search。`,
+        content: `${text}\n\n---\n\n注意：以上仅为摘要。要读取完整页面，用 url 参数再次调用 explore_web。`,
         display: results,
       };
     } catch (e) {
@@ -157,6 +158,6 @@ export const builtinTools: Tool[] = [
   getTimeTool,
   calculatorTool,
   httpGetTool,
-  webSearchTool,
+  exploreWebTool,
   renderHtmlTool,
 ];

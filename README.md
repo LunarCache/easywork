@@ -169,11 +169,11 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 276 passed / 1 skipped
+npm test               # vitest: 294 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
-npm run test:e2e       # Playwright UI e2e: 16 条，真 daemon + 真 Vite + 隔离 data dir
+npm run test:e2e       # Playwright UI e2e: 20 条，真 daemon + 真 Vite + 隔离 data dir
 
 npm run dev:daemon     # 仅启动 daemon，首行输出 {baseUrl, token, pid}
 npm run dev:ui         # 仅启动 Vite
@@ -193,8 +193,8 @@ npm run app:build --workspace @ew/desktop
 
 ## 测试覆盖
 
-- Vitest：276 passed / 1 skipped。
-- Playwright UI e2e：16 条，覆盖设置页、模型/渠道/知识库/Skills/MCP/记忆入口、Chat / Workspace composer、图片上传与粘贴、搜索导航、文件页、记忆 CRUD、知识库、Skills 模板与详情。
+- Vitest：294 passed / 1 skipped。
+- Playwright UI e2e：20 条，覆盖设置页、模型/渠道/知识库/Skills/MCP/记忆入口、Chat / Workspace composer、联网工具门控、图片上传与粘贴、搜索导航、文件页、记忆 CRUD、知识库、Skills 模板与详情。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
 
 ---

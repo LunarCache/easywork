@@ -38,7 +38,7 @@ export interface SessionHostDeps {
   kb?: KnowledgeBaseStore;
   /** R3：MCP 工具（桥成 customTools）。 */
   mcp?: McpClientManager;
-  /** R5：内置工具（时间/计算器/HTTP/web_search）桥成 customTools。 */
+  /** R5：内置工具（时间/计算器/HTTP/explore_web）桥成 customTools。 */
   builtins?: Tool[];
   /** 本地模型默认运行设置：调用方未显式传 sampling 时使用。 */
   localModelSettings?: {
@@ -74,6 +74,8 @@ export interface EwAgentRunInput {
   regenerate?: boolean;
   /** 禁用的 Skill 名称：按名从 pi resourceLoader 的 skills 里过滤掉（改变即重建会话）。 */
   excludeSkills?: string[];
+  /** 禁用的 customTool 名称（改变即重建会话）。 */
+  excludeTools?: string[];
 }
 
 interface HostedSession {
@@ -83,6 +85,7 @@ interface HostedSession {
   workspace: boolean;
   memoryScope: string;
   excludeSkillsKey: string;
+  excludeToolsKey: string;
   modelRevision: number;
   runtime: RunRuntime;
   dispose: () => void;
@@ -169,8 +172,10 @@ export class SessionHost {
     workspace: boolean,
     memoryScope: string,
     excludeSkills: string[],
+    excludeTools: string[],
   ): Promise<HostedSession> {
     const excludeSkillsKey = agentSessionResourceKey(excludeSkills);
+    const excludeToolsKey = agentSessionResourceKey(excludeTools);
     const modelRevision = this.providerRuntime.modelRevision(modelId);
     const existing = this.sessions.get(threadId);
     if (
@@ -180,6 +185,7 @@ export class SessionHost {
       existing.workspace === workspace &&
       existing.memoryScope === memoryScope &&
       existing.excludeSkillsKey === excludeSkillsKey &&
+      existing.excludeToolsKey === excludeToolsKey &&
       existing.modelRevision === modelRevision
     ) {
       return existing;
@@ -206,6 +212,7 @@ export class SessionHost {
       cwd,
       memoryScope,
       excludeSkills,
+      excludeTools,
     });
     const { runtime, resourceLoader, customTools } = resources;
     const { session } = await createAgentSession({
@@ -260,6 +267,7 @@ export class SessionHost {
       workspace,
       memoryScope,
       excludeSkillsKey,
+      excludeToolsKey,
       modelRevision,
       runtime,
       dispose: () => session.dispose(),
@@ -347,6 +355,7 @@ export class SessionHost {
       workspace,
       memoryScope,
       input.excludeSkills ?? [],
+      input.excludeTools ?? [],
     );
     const session = hosted.session;
     const isLocal = this.providerRuntime.isLocalModel(input.modelId);

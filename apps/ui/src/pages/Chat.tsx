@@ -190,7 +190,7 @@ export function Chat({
               kind: "tool",
               tool: {
                 id: "s",
-                name: "web_search",
+                name: "explore_web",
                 args: '{"query":"node stream ndjson cursor pagination"}',
                 status: "done",
                 sources: [
@@ -294,7 +294,7 @@ export function Chat({
 
     const apply = (fn: (m: UiMsg) => UiMsg) => setMsgs((current) => updateLastAssistant(current, fn));
 
-    const excludeTools = web ? [] : ["web_search", "http_get"];
+    const excludeTools = web ? [] : ["explore_web", "http_get"];
     const excludeSkills = loadDisabledSkills();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -452,7 +452,12 @@ export function Chat({
                 <ThinkIcon size={14} />
                 <span>思考 {THINK_LABEL[thinkLevel]}</span>
               </ComposerContextPill>
-              <ComposerContextPill tone={web ? "on" : "default"} onClick={() => setWeb((v) => !v)} title="联网搜索">
+              <ComposerContextPill
+                tone={web ? "on" : "default"}
+                onClick={() => setWeb((v) => !v)}
+                title="联网搜索"
+                testId="chat-web-pill"
+              >
                 <GlobeIcon size={14} />
                 <span>{web ? "联网已开" : "联网已关"}</span>
               </ComposerContextPill>

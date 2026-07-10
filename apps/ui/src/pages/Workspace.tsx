@@ -411,7 +411,6 @@ export function Workspace({
         onSwitchBranch={switchBranch}
         onOpenGitGraph={() => setDockOpen(true)}
       >
-        <ModelSelect models={models} sources={modelSources} value={model} onChange={setModel} up align="right" variant="strip" />
         <ComposerContextPill
           tone={thinkLevel !== "off" ? "on" : "default"}
           onClick={cycleThink}
@@ -421,7 +420,6 @@ export function Workspace({
           <ThinkIcon size={14} />
           <span>思考 {THINK_LABEL[thinkLevel]}</span>
         </ComposerContextPill>
-        {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
       </ContextBar>
       <div className="composer-box">
             {images.length > 0 && (
@@ -475,14 +473,6 @@ export function Workspace({
                 <button className="cbtn" data-testid="workspace-upload-button" title="上传图片" onClick={() => fileRef.current?.click()}>
                   <PlusBtnIcon size={18} />
                 </button>
-                {images.length > 0 && (
-                  <span className="cmini-chip" data-testid="workspace-image-chip" title={`已附加 ${images.length} 张图片`}>
-                    <FileImageIcon size={14} />
-                    <span>{images.length} 张图</span>
-                  </span>
-                )}
-              </div>
-              <div className="composer-bar-right">
                 <div className="perm-wrap">
                   <button
                     className={`perm-pill ${approvalMode === "full-auto" ? "warn" : ""}`}
@@ -519,6 +509,16 @@ export function Workspace({
                     </>
                   )}
                 </div>
+                {images.length > 0 && (
+                  <span className="cmini-chip" data-testid="workspace-image-chip" title={`已附加 ${images.length} 张图片`}>
+                    <FileImageIcon size={14} />
+                    <span>{images.length} 张图</span>
+                  </span>
+                )}
+              </div>
+              <div className="composer-bar-right">
+                <ModelSelect models={models} sources={modelSources} value={model} onChange={setModel} up align="right" variant="strip" />
+                {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
                 {busy ? (
                   <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
                     <StopIcon size={15} fill="currentColor" />

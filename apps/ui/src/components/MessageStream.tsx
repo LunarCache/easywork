@@ -293,7 +293,7 @@ function isCodeSearchTool(name: string): boolean {
 function isListTool(name: string): boolean {
   return /^(fs_)?(ls|list|list_dir|list_files)$/i.test(name);
 }
-/** 「探索」类工具：本地只读勘探（读 / 搜 / 列 / 找），可聚合成一组；不含 web_search / 编辑 / 运行。 */
+/** 「探索」类工具：本地只读勘探（读 / 搜 / 列 / 找），可聚合成一组；不含 explore_web / 编辑 / 运行。 */
 function isExploreTool(name: string): boolean {
   return isReadTool(name) || isCodeSearchTool(name) || isListTool(name);
 }
@@ -446,7 +446,7 @@ export function ToolView({ t, onOpenUrl }: { t: UiTool; onOpenUrl?: (url: string
       <span className="cv-tline-meta">运行中…</span>
     );
 
-  if (t.name === "web_search") {
+  if (t.name === "explore_web") {
     const q = toolQuery(t.args);
     const hasSrc = !!(t.sources && t.sources.length);
     return (
@@ -723,7 +723,7 @@ export function MessageStream({
               </div>
               {(() => {
                 const items = groupExplore(blocks);
-                // 一条「过程」项 = 探索组 / 思考 / 非文本工具（编辑·运行·web_search）；末尾的文本块是最终答复。
+                // 一条「过程」项 = 探索组 / 思考 / 非文本工具（编辑·运行·explore_web）；末尾的文本块是最终答复。
                 let lastProc = -1;
                 items.forEach((it, idx) => {
                   if (it.kind === "explore" || (it.kind === "block" && it.block.kind !== "text")) lastProc = idx;

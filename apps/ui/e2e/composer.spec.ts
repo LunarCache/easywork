@@ -23,6 +23,40 @@ async function pasteImage(page: Page, testId: string): Promise<void> {
 }
 
 test.describe("composer e2e", () => {
+  test("聊天页关闭联网后从请求中排除 explore_web 和 http_get", async ({ page, openApp, info }) => {
+    let requestBody: { excludeTools?: string[] } | null = null;
+    await page.route(`${info.baseUrl}/models`, async (route) => {
+      await route.fulfill({
+        json: {
+          routed: ["test-model"],
+          modelSources: [{ id: "test-model", kind: "engine", label: "Test", modelId: "test-model" }],
+          context: { "test-model": 32768 },
+          engines: [],
+        },
+      });
+    });
+    await page.route(`${info.baseUrl}/agent/run`, async (route) => {
+      requestBody = route.request().postDataJSON() as { excludeTools?: string[] };
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify({ type: "final", message: { role: "assistant", content: "ok" } })}\n\n`,
+      });
+    });
+
+    await openApp();
+    await expect(page.getByTestId("chat-web-pill")).toContainText("联网已开");
+    await page.getByTestId("chat-web-pill").click();
+    await expect(page.getByTestId("chat-web-pill")).toContainText("联网已关");
+
+    const input = page.getByTestId("chat-composer-input");
+    await input.fill("不要联网");
+    await input.press("Enter");
+
+    await expect.poll(() => requestBody).not.toBeNull();
+    expect(requestBody?.excludeTools).toEqual(["explore_web", "http_get"]);
+  });
+
   test("聊天与工作区的 + 入口都能上传图片，并显示已附加图片", async ({ page, openApp, client, workspaceDir, sampleImagePath }) => {
     const project = await client.createProject({ name: "Upload Workspace", workspaceDir });
 

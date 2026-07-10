@@ -35,6 +35,7 @@ interface AgentSessionResourceInput {
   cwd: string;
   memoryScope: string;
   excludeSkills: string[];
+  excludeTools: string[];
 }
 
 export interface AgentSessionResources {
@@ -42,6 +43,7 @@ export interface AgentSessionResources {
   resourceLoader: DefaultResourceLoader;
   customTools: PiToolDefinition[];
   excludeSkillsKey: string;
+  excludeToolsKey: string;
 }
 
 export function agentSessionResourceKey(excludeSkills: string[]): string {
@@ -84,7 +86,8 @@ export async function buildAgentSessionResources(
   });
   await resourceLoader.reload();
 
-  const customTools = await buildEwCustomTools({
+  const excludedTools = new Set(input.excludeTools);
+  const customTools = (await buildEwCustomTools({
     sessionId: input.threadId,
     cwd: input.cwd,
     memoryScope: input.memoryScope,
@@ -93,12 +96,13 @@ export async function buildAgentSessionResources(
     ...(deps.kb ? { kb: deps.kb } : {}),
     ...(deps.mcp ? { mcp: deps.mcp } : {}),
     ...(deps.builtins ? { builtins: deps.builtins } : {}),
-  });
+  })).filter((tool) => !excludedTools.has(tool.name));
 
   return {
     runtime,
     resourceLoader,
     customTools,
     excludeSkillsKey: agentSessionResourceKey(input.excludeSkills),
+    excludeToolsKey: agentSessionResourceKey(input.excludeTools),
   };
 }

@@ -188,7 +188,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   });
   const providers = new ProviderManager(registry, opts.fetch ? { fetch: opts.fetch } : {});
 
-  // Agent 运行时：内置工具（时间/计算器/HTTP/web_search）由宿主桥成 pi customTools；
+  // Agent 运行时：内置工具（时间/计算器/HTTP/explore_web）由宿主桥成 pi customTools；
   // Skills 由 pi 自身发现（resourceLoader）；MCP 由宿主桥成 customTools。
   const agentDir = fsPath.join(defaultDataDir(), "pi-agent");
   const skillSources = opts.skillsDirs ? skillSourcesFromDirs(opts.skillsDirs) : defaultSkillSources(agentDir);

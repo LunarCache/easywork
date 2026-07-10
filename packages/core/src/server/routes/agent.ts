@@ -156,6 +156,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
         ...(parsed.data.thinkingLevel !== undefined ? { thinkingLevel: parsed.data.thinkingLevel } : {}),
         ...(parsed.data.regenerate ? { regenerate: true } : {}),
         ...(parsed.data.excludeSkills?.length ? { excludeSkills: parsed.data.excludeSkills } : {}),
+        ...(parsed.data.excludeTools?.length ? { excludeTools: parsed.data.excludeTools } : {}),
       })) {
         recorded.push(...recorder.push(ev));
         if (ev.type === "final") {

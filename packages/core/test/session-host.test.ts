@@ -69,7 +69,7 @@ describe("mapSessionEvent", () => {
     const ev = {
       type: "tool_execution_end",
       toolCallId: "c1",
-      toolName: "web_search",
+      toolName: "explore_web",
       isError: false,
       result: {
         content: [{ type: "text", text: "结果" }],
@@ -79,7 +79,7 @@ describe("mapSessionEvent", () => {
     expect(mapSessionEvent(ev)).toEqual([
       {
         type: "tool-end",
-        call: { id: "c1", name: "web_search", arguments: "" },
+        call: { id: "c1", name: "explore_web", arguments: "" },
         result: { content: "结果", isError: false, display: [{ title: "T", url: "https://x" }] },
       },
     ]);

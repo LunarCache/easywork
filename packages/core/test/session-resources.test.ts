@@ -19,6 +19,10 @@ describe("agent session resources", () => {
     expect(agentSessionResourceKey(["beta", "alpha"])).toBe("alpha,beta");
   });
 
+  it("uses the same stable key for excluded tools", () => {
+    expect(agentSessionResourceKey(["http_get", "explore_web"])).toBe("explore_web,http_get");
+  });
+
   it("builds runtime, resource loader, and EasyWork custom tools behind one seam", async () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-session-res-")));
     const cwd = path.join(root, "workspace");
@@ -28,7 +32,7 @@ describe("agent session resources", () => {
     try {
       const resources = await buildAgentSessionResources({
         agentDir,
-        builtins: [fakeTool("clock")],
+        builtins: [fakeTool("clock"), fakeTool("explore_web")],
         noteMemoryTurn: () => {},
       }, {
         threadId: "thread-1",
@@ -36,9 +40,11 @@ describe("agent session resources", () => {
         cwd,
         memoryScope: "global",
         excludeSkills: ["beta", "alpha"],
+        excludeTools: ["explore_web"],
       });
 
       expect(resources.excludeSkillsKey).toBe("alpha,beta");
+      expect(resources.excludeToolsKey).toBe("explore_web");
       expect(resources.runtime.mode).toBe("approve-each");
       expect(resources.runtime.alwaysApproved.size).toBe(0);
       expect(resources.customTools.map((tool) => tool.name)).toEqual(["clock"]);

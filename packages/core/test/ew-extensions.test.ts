@@ -86,9 +86,9 @@ describe("buildEwCustomTools", () => {
   });
 
   it("bridges builtin tools (R5: web/util tools preserved)", async () => {
-    const builtins = [fakeTool("web_search", async () => ({ content: "" })), fakeTool("calculator", async () => ({ content: "" }))];
+    const builtins = [fakeTool("explore_web", async () => ({ content: "" })), fakeTool("calculator", async () => ({ content: "" }))];
     const tools = await buildEwCustomTools({ sessionId: "s", cwd: "/tmp", builtins });
-    expect(tools.map((t) => t.name).sort()).toEqual(["calculator", "web_search"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["calculator", "explore_web"]);
   });
 });
 
