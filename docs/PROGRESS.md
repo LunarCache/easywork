@@ -38,7 +38,7 @@
 - **工具契约收口**：自定义联网工具从 `web_search` 重命名为 `explore_web`；`query` 模式新增 `max_results`（1–10，默认 5），`url` 模式继续经 SSRF 安全取页并截断正文。
 - **真实门控**：修通 `excludeTools` 从聊天 UI → `/agent/run` → `SessionHost` → pi customTools；排除列表加入会话资源缓存键，联网开关变化会重建工具集，不再出现“UI 已关但模型仍可调用”。
 - **工作区 composer 对齐**：空态问候与输入框整体垂直居中；审批策略移到 `+` 右侧，模型 / 上下文压力与聊天页一致放到发送按钮左侧。
-- **验证**：`npm run lint`、`npm run typecheck`、`npm run build`、`npm test` = **294 passed / 1 skipped**；`composer.spec.ts` = **8 passed**，Playwright UI e2e 总计 **20 条**。
+- **验证**：`npm run lint`、`npm run typecheck`、`npm run build`、`npm test` = **295 passed / 1 skipped**；`composer.spec.ts` = **8 passed**，Playwright UI e2e 总计 **21 条**。
 
 ## 2026-07-09 — 本地模型运行参数迁移到模型页
 

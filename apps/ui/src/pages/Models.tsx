@@ -180,10 +180,22 @@ function suggestedCatalogMatch(matches: CatalogModelMatch[], modelId: string): C
     ?? (matches.length === 1 ? matches[0] : undefined);
 }
 
+function catalogModelPatch(
+  match: CatalogModelMatch | undefined,
+): Partial<Omit<ProviderFormModel, "rowId">> {
+  if (!match) return { catalogRef: undefined };
+  return {
+    catalogRef: match.ref,
+    context: String(match.model.contextWindow),
+    inputModalities: match.model.inputModalities.includes("image") ? ["text", "image"] : ["text"],
+  };
+}
+
 function modelConfigsToForm(
   models: ProviderModelConfig[],
   catalog: ProviderCatalogItem[] = [],
   api = "",
+  inheritCatalogMetadata = false,
 ): ProviderFormModel[] {
   const rows = models.map((model) => {
     const compatibilityMode = model.compatibilityMode ?? "auto";
@@ -200,6 +212,7 @@ function modelConfigsToForm(
       compatibilityMode,
       ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
       ...(catalogRef ? { catalogRef } : {}),
+      ...(inheritCatalogMetadata ? catalogModelPatch(match) : {}),
     });
   });
   return rows.length > 0 ? rows : [newProviderModelRow()];
@@ -732,7 +745,7 @@ export function Models({ onChange }: { onChange: () => void }) {
       : undefined;
     updateProviderModel(model.rowId, {
       id,
-      ...(model.compatibilityMode === "auto" ? { catalogRef: match?.ref } : {}),
+      ...(model.compatibilityMode === "auto" ? catalogModelPatch(match) : {}),
     });
   };
   const selectProviderApi = (api: string) => {
@@ -747,7 +760,7 @@ export function Models({ onChange }: { onChange: () => void }) {
         return {
           ...model,
           compatibilityMode: "auto",
-          catalogRef: match?.ref,
+          ...catalogModelPatch(match),
         };
       }));
     }
@@ -774,7 +787,7 @@ export function Models({ onChange }: { onChange: () => void }) {
       if (result.modelConfigs.length === 0) {
         setProvNote("未获取到模型列表，请手动填入模型 ID。");
       } else {
-        setProviderModels(modelConfigsToForm(result.modelConfigs, providerCatalog, prov.api));
+        setProviderModels(modelConfigsToForm(result.modelConfigs, providerCatalog, prov.api, true));
         setProvNote(`已获取 ${result.modelConfigs.length} 个模型。`);
       }
     } catch (e) {
@@ -1073,7 +1086,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                               const match = suggestedCatalogMatch(exactMatches, model.id);
                               updateProviderModel(model.rowId, {
                                 compatibilityMode: "auto",
-                                catalogRef: match?.ref,
+                                ...catalogModelPatch(match),
                               });
                               setTemplateMenuRowId(null);
                             }}
@@ -1112,7 +1125,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                                 onClick={() => {
                                   updateProviderModel(model.rowId, {
                                     compatibilityMode: "catalog",
-                                    catalogRef: match.ref,
+                                    ...catalogModelPatch(match),
                                   });
                                   setTemplateMenuRowId(null);
                                 }}

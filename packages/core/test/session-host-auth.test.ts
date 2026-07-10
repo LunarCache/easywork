@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { streamSimple } from "@earendil-works/pi-ai";
 import { AgentProviderRuntime } from "../src/agent/provider-runtime.js";
 import { SessionHost } from "../src/agent/session-host.js";
 import type { LocalBackend } from "../src/engine/local-backend.js";
@@ -174,11 +175,46 @@ describe("AgentProviderRuntime", () => {
       baseUrl: "https://cloudprime.example/v1",
       reasoning: true,
       compat: {
+        supportsDeveloperRole: false,
         requiresReasoningContentOnAssistantMessages: true,
         thinkingFormat: "deepseek",
       },
     });
     expect(runtime.authStorage.get("cloudprime")).toEqual({ type: "api_key", key: "sk-cloudprime" });
+
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  it("serializes catalog-backed custom DeepSeek prompts with a system role", async () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-deepseek-role-")));
+    const { runtime } = makeRuntime([{
+      id: "cloudprime",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://cloudprime.example/v1",
+      apiKey: "sk-cloudprime",
+      modelConfigs: [{
+        id: "deepseek-v4-pro",
+        contextWindow: 977000,
+        inputModalities: ["text"],
+        catalogRef: { providerId: "deepseek", modelId: "deepseek-v4-pro" },
+      }],
+    }], agentDir);
+    let payload: { messages?: Array<{ role?: string }> } | undefined;
+    const stream = streamSimple(runtime.resolveModel("provider:cloudprime:deepseek-v4-pro"), {
+      systemPrompt: "You are EasyWork.",
+      messages: [{ role: "user", content: "hello", timestamp: 0 }],
+    }, {
+      apiKey: "sk-cloudprime",
+      onPayload: (value) => {
+        payload = value as typeof payload;
+        throw new Error("payload captured");
+      },
+    });
+
+    const result = await stream.result();
+    expect(result).toMatchObject({ stopReason: "error", errorMessage: "payload captured" });
+    expect(payload?.messages?.[0]?.role).toBe("system");
 
     fs.rmSync(agentDir, { recursive: true, force: true });
   });

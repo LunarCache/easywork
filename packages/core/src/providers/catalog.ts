@@ -3,7 +3,7 @@ import {
   getModels as defaultGetPiModels,
   getProviders as defaultGetPiProviders,
 } from "@earendil-works/pi-ai";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, OpenAICompletionsCompat } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import type {
   CloudProviderConfig,
@@ -357,6 +357,7 @@ export function runtimeModelsForProviderConfig(cfg: CloudProviderConfig): Provid
 export function runtimeModelForProviderConfig(cfg: CloudProviderConfig, modelId: string): ProviderRuntimeModel {
   const modelConfig = modelConfigForModel(cfg, modelId);
   const template = catalogTemplateForModel(cfg, modelConfig);
+  const compat = template ? materializeCatalogCompat(template) : undefined;
   return {
     id: modelId,
     name: template?.name ?? modelId,
@@ -367,7 +368,7 @@ export function runtimeModelForProviderConfig(cfg: CloudProviderConfig, modelId:
     contextWindow: contextWindowForModel(cfg, modelId) ?? DEFAULT_COMPATIBLE_CONTEXT_WINDOW,
     maxTokens: template?.maxTokens ?? 4096,
     ...(cfg.headers ? { headers: cfg.headers } : {}),
-    ...(template?.compat ? { compat: template.compat } : {}),
+    ...(compat ? { compat } : {}),
   };
 }
 
@@ -381,6 +382,45 @@ function catalogTemplateForModel(
   if (!template) return undefined;
   const api = cfg.api ?? "openai-completions";
   return template.api === api ? template : undefined;
+}
+
+/**
+ * pi-ai normally derives part of OpenAI Chat Completions compatibility from the
+ * canonical provider and base URL. Custom endpoints replace both, so preserve
+ * the canonical role capability before registering the model under custom auth.
+ */
+function materializeCatalogCompat(template: Model<Api>): Model<Api>["compat"] {
+  if (template.api !== "openai-completions") return template.compat;
+  const compat = { ...template.compat } as OpenAICompletionsCompat;
+  if (compat.supportsDeveloperRole === undefined) {
+    compat.supportsDeveloperRole = catalogTemplateSupportsDeveloperRole(template);
+  }
+  return compat;
+}
+
+const CATALOG_PROVIDERS_WITHOUT_DEVELOPER_ROLE = new Set([
+  "ant-ling",
+  "cerebras",
+  "chutes",
+  "cloudflare-ai-gateway",
+  "cloudflare-workers-ai",
+  "deepseek",
+  "moonshotai",
+  "moonshotai-cn",
+  "nvidia",
+  "opencode",
+  "opencode-go",
+  "together",
+  "xai",
+  "zai",
+  "zai-coding-cn",
+]);
+
+function catalogTemplateSupportsDeveloperRole(template: Model<Api>): boolean {
+  if (template.provider === "openrouter") {
+    return template.id.startsWith("anthropic/") || template.id.startsWith("openai/");
+  }
+  return !CATALOG_PROVIDERS_WITHOUT_DEVELOPER_ROLE.has(template.provider);
 }
 
 function modelConfigsFromResponse(payload: unknown): CloudProviderModelConfig[] {

@@ -43,6 +43,49 @@ test.describe("settings e2e", () => {
     await expect(page.getByTestId("models-tab-local")).toHaveAttribute("data-active", "1");
   });
 
+  test("自定义模型匹配目录模板时继承上下文和模态", async ({ page, openApp }) => {
+    await page.route("**/providers", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({ json: { providers: [] } });
+    });
+    await page.route("**/providers/catalog", async (route) => {
+      await route.fulfill({
+        json: {
+          providers: [{
+            id: "deepseek",
+            label: "DeepSeek",
+            apiFamilies: ["openai-completions"],
+            apiOptions: [{ id: "openai-completions", label: "OpenAI Chat Completions" }],
+            modelCount: 1,
+            sampleModels: ["deepseek-v4-pro"],
+            models: [{
+              id: "deepseek-v4-pro",
+              name: "DeepSeek V4 Pro",
+              api: "openai-completions",
+              reasoning: true,
+              contextWindow: 1_000_000,
+              inputModalities: ["text", "image"],
+            }],
+          }],
+          apiFamilies: [{ id: "openai-completions", label: "OpenAI Chat Completions" }],
+        },
+      });
+    });
+
+    await openApp();
+    await page.getByTestId("sidebar-settings").click();
+    await page.getByTestId("settings-nav-models").click();
+    await page.getByTestId("models-tab-cloud").click();
+    await page.getByRole("button", { name: "添加 Provider" }).click();
+    await page.getByTitle("自定义兼容端点").click();
+
+    const row = page.locator(".provider-model-row").first();
+    await row.locator('input[placeholder="model-id"]').fill("deepseek-v4-pro");
+
+    await expect(row.locator('input[type="number"]')).toHaveValue("1000000");
+    await expect(row.locator('input[type="checkbox"]')).toBeChecked();
+  });
+
   test("渠道页可打开并记住上次分区", async ({ page, openApp }) => {
     await openApp();
 
