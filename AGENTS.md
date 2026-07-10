@@ -91,3 +91,17 @@ node scripts/smoke-vision.mjs   # 视觉模型多模态问答
   > 若本机另有 pi 源码 clone（路径因机器而异，自行定位），可读其 `packages/coding-agent/src/{core,index.ts}` 看实现；无则以上面 `node_modules` 的 `.d.ts` 为准。
 
 > 注：agent loop / tool_healing / tool-registry 已由 pi 内核取代（自研实现已删除），**勿重新引入**。
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked as local Markdown under `.scratch/`; external PRs are not a triage surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five canonical triage labels plus the repository-specific `done` completion label. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout: `CONTEXT.md` at the repository root and architectural decisions under `docs/adr/`. See `docs/agents/domain.md`.
