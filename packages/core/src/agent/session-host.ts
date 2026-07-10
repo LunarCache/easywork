@@ -83,6 +83,7 @@ interface HostedSession {
   workspace: boolean;
   memoryScope: string;
   excludeSkillsKey: string;
+  modelRevision: number;
   runtime: RunRuntime;
   dispose: () => void;
 }
@@ -170,6 +171,7 @@ export class SessionHost {
     excludeSkills: string[],
   ): Promise<HostedSession> {
     const excludeSkillsKey = agentSessionResourceKey(excludeSkills);
+    const modelRevision = this.providerRuntime.modelRevision(modelId);
     const existing = this.sessions.get(threadId);
     if (
       existing &&
@@ -177,7 +179,8 @@ export class SessionHost {
       existing.cwd === cwd &&
       existing.workspace === workspace &&
       existing.memoryScope === memoryScope &&
-      existing.excludeSkillsKey === excludeSkillsKey
+      existing.excludeSkillsKey === excludeSkillsKey &&
+      existing.modelRevision === modelRevision
     ) {
       return existing;
     }
@@ -257,6 +260,7 @@ export class SessionHost {
       workspace,
       memoryScope,
       excludeSkillsKey,
+      modelRevision,
       runtime,
       dispose: () => session.dispose(),
     };

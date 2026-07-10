@@ -111,7 +111,13 @@ describe("ProviderCatalog", () => {
       baseUrl: "https://api.example.test/v1/",
       headers: { "x-provider": "custom" },
       modelConfigs: [
-        { id: " model-a ", contextWindow: 131072.9, inputModalities: ["image"] },
+        {
+          id: " model-a ",
+          contextWindow: 131072.9,
+          inputModalities: ["image"],
+          reasoning: true,
+          catalogRef: { providerId: "deepseek", modelId: "deepseek-v4-flash" },
+        },
         { id: "model-b", contextWindow: 0, inputModalities: ["text"] },
         { id: "model-a", contextWindow: 32768, inputModalities: ["text"] },
       ],
@@ -128,5 +134,88 @@ describe("ProviderCatalog", () => {
       headers: { "x-provider": "custom" },
     });
     expect(runtimeModelsForProviderConfig(cfg)).toHaveLength(1);
+  });
+
+  it("inherits pi model behavior for custom endpoints without changing their model identity", () => {
+    const cfg = normalizeProviderConfig({
+      id: "cloudprime",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://cloudprime.example/v1",
+      modelConfigs: [{
+        id: "deepseek-v4-flash",
+        contextWindow: 977000,
+        inputModalities: ["text"],
+        catalogRef: { providerId: "deepseek", modelId: "deepseek-v4-flash" },
+      }],
+    });
+
+    expect(runtimeModelForProviderConfig(cfg, "deepseek-v4-flash")).toMatchObject({
+      id: "deepseek-v4-flash",
+      name: "DeepSeek V4 Flash",
+      reasoning: true,
+      contextWindow: 977000,
+      maxTokens: 384000,
+      compat: {
+        requiresReasoningContentOnAssistantMessages: true,
+        thinkingFormat: "deepseek",
+      },
+      thinkingLevelMap: {
+        high: "high",
+        xhigh: "max",
+      },
+    });
+  });
+
+  it("supports explicit generic mode and reasoning overrides independently", () => {
+    const generic = normalizeProviderConfig({
+      id: "custom",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://custom.example/v1",
+      modelConfigs: [{
+        id: "aliased-model",
+        contextWindow: 32768,
+        inputModalities: ["text"],
+        reasoning: false,
+        compatibilityMode: "generic",
+        catalogRef: { providerId: "deepseek", modelId: "deepseek-v4-flash" },
+      }],
+    });
+
+    expect(runtimeModelForProviderConfig(generic, "aliased-model")).toMatchObject({
+      id: "aliased-model",
+      name: "aliased-model",
+      reasoning: false,
+      maxTokens: 4096,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
+    expect(runtimeModelForProviderConfig(generic, "aliased-model").compat).toBeUndefined();
+
+    const catalogAlias = normalizeProviderConfig({
+      id: "custom",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://custom.example/v1",
+      modelConfigs: [{
+        id: "provider-specific-alias",
+        contextWindow: 64000,
+        inputModalities: ["text"],
+        compatibilityMode: "catalog",
+        catalogRef: { providerId: "deepseek", modelId: "deepseek-v4-pro" },
+      }],
+    });
+
+    expect(runtimeModelForProviderConfig(catalogAlias, "provider-specific-alias")).toMatchObject({
+      id: "provider-specific-alias",
+      name: "DeepSeek V4 Pro",
+      reasoning: true,
+      contextWindow: 64000,
+      compat: {
+        requiresReasoningContentOnAssistantMessages: true,
+        thinkingFormat: "deepseek",
+      },
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
   });
 });

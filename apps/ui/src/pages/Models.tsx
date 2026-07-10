@@ -3,6 +3,8 @@ import type { GGUFVariant, HFModelSummary, LocalModel, SamplingParams } from "@e
 import type {
   ProviderCatalogItem,
   ProviderCatalogModel,
+  ProviderCatalogRef,
+  ProviderCompatibilityMode,
   ProviderApiFamily,
   ProviderInfo,
   ProviderModelConfig,
@@ -62,6 +64,15 @@ interface ProviderFormModel {
   id: string;
   context: string;
   inputModalities: ProviderModelModality[];
+  reasoning?: boolean;
+  compatibilityMode: ProviderCompatibilityMode;
+  catalogRef?: ProviderCatalogRef;
+}
+
+interface CatalogModelMatch {
+  provider: ProviderCatalogItem;
+  model: ProviderCatalogModel;
+  ref: ProviderCatalogRef;
 }
 
 type SamplingKey = "temperature" | "topP" | "topK" | "minP" | "repeatPenalty" | "maxTokens";
@@ -98,6 +109,7 @@ function newProviderModelRow(input: Omit<ProviderFormModel, "rowId"> = {
   id: "",
   context: "32768",
   inputModalities: ["text"],
+  compatibilityMode: "auto",
 }): ProviderFormModel {
   return { ...input, rowId: crypto.randomUUID() };
 }
@@ -107,15 +119,89 @@ function catalogModelsToForm(models: ProviderCatalogModel[]): ProviderFormModel[
     id: m.id,
     context: String(m.contextWindow),
     inputModalities: m.inputModalities.includes("image") ? ["text", "image"] : ["text"],
+    compatibilityMode: "auto",
   }));
 }
 
-function modelConfigsToForm(models: ProviderModelConfig[]): ProviderFormModel[] {
-  const rows = models.map((m) => newProviderModelRow({
-    id: m.id,
-    context: String(m.contextWindow),
-    inputModalities: m.inputModalities.includes("image") ? ["text", "image"] : ["text"],
-  }));
+function catalogMatches(
+  catalog: ProviderCatalogItem[],
+  modelId: string,
+  api: string,
+): CatalogModelMatch[] {
+  const id = modelId.trim();
+  if (!id) return [];
+  return catalog.flatMap((provider) => provider.models
+    .filter((model) => model.id === id && (!api || model.api === api))
+    .map((model) => ({
+      provider,
+      model,
+      ref: { providerId: provider.id, modelId: model.id },
+    })));
+}
+
+function sameCatalogRef(a: ProviderCatalogRef | undefined, b: ProviderCatalogRef): boolean {
+  return a?.providerId === b.providerId && a.modelId === b.modelId;
+}
+
+function catalogMatchForRef(
+  catalog: ProviderCatalogItem[],
+  ref: ProviderCatalogRef | undefined,
+): CatalogModelMatch | undefined {
+  if (!ref) return undefined;
+  const provider = catalog.find((item) => item.id === ref.providerId);
+  const model = provider?.models.find((item) => item.id === ref.modelId);
+  return provider && model ? { provider, model, ref } : undefined;
+}
+
+function searchCatalogMatches(
+  catalog: ProviderCatalogItem[],
+  query: string,
+  api: string,
+): CatalogModelMatch[] {
+  const needle = query.trim().toLowerCase();
+  return catalog.flatMap((provider) => provider.models
+    .filter((model) => {
+      if (api && model.api !== api) return false;
+      if (!needle) return false;
+      return `${provider.id} ${provider.label} ${model.id} ${model.name}`.toLowerCase().includes(needle);
+    })
+    .map((model) => ({ provider, model, ref: { providerId: provider.id, modelId: model.id } })))
+    .sort((a, b) => {
+      const aExact = a.model.id.toLowerCase() === needle ? 0 : 1;
+      const bExact = b.model.id.toLowerCase() === needle ? 0 : 1;
+      return aExact - bExact || a.provider.label.localeCompare(b.provider.label);
+    })
+    .slice(0, 24);
+}
+
+function suggestedCatalogMatch(matches: CatalogModelMatch[], modelId: string): CatalogModelMatch | undefined {
+  const lowerId = modelId.trim().toLowerCase();
+  return matches.find(({ provider }) => lowerId.startsWith(provider.id.toLowerCase()))
+    ?? (matches.length === 1 ? matches[0] : undefined);
+}
+
+function modelConfigsToForm(
+  models: ProviderModelConfig[],
+  catalog: ProviderCatalogItem[] = [],
+  api = "",
+): ProviderFormModel[] {
+  const rows = models.map((model) => {
+    const compatibilityMode = model.compatibilityMode ?? "auto";
+    const pinnedMatch = catalogMatchForRef(catalog, model.catalogRef);
+    const suggestedMatch = compatibilityMode === "auto"
+      ? suggestedCatalogMatch(catalogMatches(catalog, model.id, api), model.id)
+      : undefined;
+    const match = compatibilityMode === "generic" ? undefined : pinnedMatch ?? suggestedMatch;
+    const catalogRef = catalog.length > 0 ? match?.ref : model.catalogRef;
+    return newProviderModelRow({
+      id: model.id,
+      context: String(model.contextWindow),
+      inputModalities: model.inputModalities.includes("image") ? ["text", "image"] : ["text"],
+      compatibilityMode,
+      ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
+      ...(catalogRef ? { catalogRef } : {}),
+    });
+  });
   return rows.length > 0 ? rows : [newProviderModelRow()];
 }
 
@@ -130,6 +216,9 @@ function formModelsToConfig(models: ProviderFormModel[]): ProviderModelConfig[] 
       id,
       inputModalities,
       contextWindow: Number.isFinite(ctx) && ctx > 0 ? Math.floor(ctx) : 32768,
+      compatibilityMode: model.compatibilityMode,
+      ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
+      ...(model.catalogRef ? { catalogRef: model.catalogRef } : {}),
     });
   }
   return [...out.values()];
@@ -269,12 +358,18 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [providerConfigOpen, setProviderConfigOpen] = useState(false);
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
   const [apiMenuOpen, setApiMenuOpen] = useState(false);
+  const [templateMenuRowId, setTemplateMenuRowId] = useState<string | null>(null);
+  const [templateSearch, setTemplateSearch] = useState("");
   const [providerModels, setProviderModels] = useState<ProviderFormModel[]>([]);
   const [modelProbeBusy, setModelProbeBusy] = useState(false);
   const [provNote, setProvNote] = useState("");
 
   useEffect(() => {
-    if (!providerConfigOpen) setApiMenuOpen(false);
+    if (!providerConfigOpen) {
+      setApiMenuOpen(false);
+      setTemplateMenuRowId(null);
+      setTemplateSearch("");
+    }
   }, [providerConfigOpen]);
 
   const openAddProvider = () => {
@@ -608,7 +703,11 @@ export function Models({ onChange }: { onChange: () => void }) {
       models: p.models.join(", "),
       context: "",
     });
-    setProviderModels(modelConfigsToForm(p.modelConfigs));
+    setProviderModels(modelConfigsToForm(
+      p.modelConfigs,
+      kind === "openai-compatible" ? providerCatalog : [],
+      p.api ?? (kind === "openai-compatible" ? "openai-completions" : ""),
+    ));
     setProviderConfigOpen(true);
     setProvNote("");
     setView("add-provider");
@@ -626,6 +725,32 @@ export function Models({ onChange }: { onChange: () => void }) {
   };
   const updateProviderModel = (rowId: string, patch: Partial<Omit<ProviderFormModel, "rowId">>) => {
     setProviderModels((cur) => cur.map((m) => (m.rowId === rowId ? { ...m, ...patch } : m)));
+  };
+  const updateProviderModelId = (model: ProviderFormModel, id: string) => {
+    const match = model.compatibilityMode === "auto"
+      ? suggestedCatalogMatch(catalogMatches(providerCatalog, id, prov.api), id)
+      : undefined;
+    updateProviderModel(model.rowId, {
+      id,
+      ...(model.compatibilityMode === "auto" ? { catalogRef: match?.ref } : {}),
+    });
+  };
+  const selectProviderApi = (api: string) => {
+    setProv({ ...prov, api });
+    setTemplateMenuRowId(null);
+    if (prov.kind === "openai-compatible") {
+      setProviderModels((current) => current.map((model) => {
+        if (model.compatibilityMode === "generic") return model;
+        const pinned = catalogMatchForRef(providerCatalog, model.catalogRef);
+        if (model.compatibilityMode === "catalog" && pinned?.model.api === api) return model;
+        const match = suggestedCatalogMatch(catalogMatches(providerCatalog, model.id, api), model.id);
+        return {
+          ...model,
+          compatibilityMode: "auto",
+          catalogRef: match?.ref,
+        };
+      }));
+    }
   };
   const availableProviderApiFamilies = providerApiFamilies.length > 0 ? providerApiFamilies : DEFAULT_PROVIDER_API_FAMILIES;
   const apiProtocolIds = [
@@ -649,7 +774,7 @@ export function Models({ onChange }: { onChange: () => void }) {
       if (result.modelConfigs.length === 0) {
         setProvNote("未获取到模型列表，请手动填入模型 ID。");
       } else {
-        setProviderModels(modelConfigsToForm(result.modelConfigs));
+        setProviderModels(modelConfigsToForm(result.modelConfigs, providerCatalog, prov.api));
         setProvNote(`已获取 ${result.modelConfigs.length} 个模型。`);
       }
     } catch (e) {
@@ -808,7 +933,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                               type="button"
                               className={`set-select-opt ${api === prov.api ? "on" : ""}`}
                               onClick={() => {
-                                setProv({ ...prov, api });
+                                selectProviderApi(api);
                                 setApiMenuOpen(false);
                               }}
                             >
@@ -851,22 +976,38 @@ export function Models({ onChange }: { onChange: () => void }) {
                     <span className="set-pill ghost">{providerModelIds.length} models</span>
                   </div>
                   <div className="provider-model-table">
-                    <div className="provider-model-table-head">
+                    <div className={`provider-model-table-head ${prov.kind === "openai-compatible" ? "compatible" : ""}`}>
                       <span>Model ID</span>
                       <span>Context</span>
                       <span>模态</span>
+                      {prov.kind === "openai-compatible" && <span>兼容模板</span>}
+                      {prov.kind === "openai-compatible" && <span>推理</span>}
                       <button type="button" className="mcp-icon-btn" title="添加模型行" onClick={addProviderModelRow}>
                         <PlusIcon size={14} />
                       </button>
                     </div>
-                    {providerModels.map((model) => (
-                      <div className="provider-model-row" key={model.rowId}>
+                    {providerModels.map((model) => {
+                      const exactMatches = catalogMatches(providerCatalog, model.id, prov.api);
+                      const selectedMatch = catalogMatchForRef(providerCatalog, model.catalogRef);
+                      const templateMenuOpen = templateMenuRowId === model.rowId;
+                      const templateOptions = templateMenuOpen
+                        ? searchCatalogMatches(providerCatalog, templateSearch, prov.api)
+                        : [];
+                      const inheritedReasoning = selectedMatch?.model.reasoning ?? false;
+                      const templateLabel = model.compatibilityMode === "generic"
+                        ? "通用兼容"
+                        : model.compatibilityMode === "auto"
+                          ? selectedMatch ? `${selectedMatch.provider.label} · 自动` : "自动匹配"
+                          : selectedMatch?.provider.label ?? model.catalogRef?.providerId ?? "选择模板";
+                      return (
+                      <div className="provider-model-entry" key={model.rowId}>
+                      <div className={`provider-model-row ${prov.kind === "openai-compatible" ? "compatible" : ""}`}>
                         <input
                           className="mono"
                           value={model.id}
                           placeholder="model-id"
                           title={model.id}
-                          onChange={(e) => updateProviderModel(model.rowId, { id: e.target.value })}
+                          onChange={(e) => updateProviderModelId(model, e.target.value)}
                         />
                         <input
                           type="number"
@@ -883,11 +1024,110 @@ export function Models({ onChange }: { onChange: () => void }) {
                           />
                           视觉
                         </label>
+                        {prov.kind === "openai-compatible" && (
+                          <button
+                            type="button"
+                            className={`provider-model-template-trigger ${templateMenuOpen ? "open" : ""}`}
+                            title="选择模型兼容模板"
+                            onClick={() => {
+                              setTemplateMenuRowId(templateMenuOpen ? null : model.rowId);
+                              setTemplateSearch(model.catalogRef?.modelId ?? model.id);
+                            }}
+                          >
+                            <span>{templateLabel}</span>
+                            <ChevronDownIcon size={12} />
+                          </button>
+                        )}
+                        {prov.kind === "openai-compatible" && (
+                          <div className="provider-reasoning-seg" role="group" aria-label="推理能力">
+                            <button
+                              type="button"
+                              className={model.reasoning === undefined ? "on" : ""}
+                              title={`继承模板（当前${inheritedReasoning ? "开启" : "关闭"}）`}
+                              onClick={() => updateProviderModel(model.rowId, { reasoning: undefined })}
+                            >随</button>
+                            <button
+                              type="button"
+                              className={model.reasoning === true ? "on" : ""}
+                              title="强制开启推理"
+                              onClick={() => updateProviderModel(model.rowId, { reasoning: true })}
+                            >开</button>
+                            <button
+                              type="button"
+                              className={model.reasoning === false ? "on" : ""}
+                              title="强制关闭推理"
+                              onClick={() => updateProviderModel(model.rowId, { reasoning: false })}
+                            >关</button>
+                          </div>
+                        )}
                         <button type="button" className="mcp-icon-btn danger" title="移除" onClick={() => removeProviderModel(model.rowId)}>
                           <TrashIcon size={13} />
                         </button>
                       </div>
-                    ))}
+                      {prov.kind === "openai-compatible" && templateMenuOpen && (
+                        <div className="provider-model-template-menu">
+                          <button
+                            type="button"
+                            className={model.compatibilityMode === "auto" ? "on" : ""}
+                            onClick={() => {
+                              const match = suggestedCatalogMatch(exactMatches, model.id);
+                              updateProviderModel(model.rowId, {
+                                compatibilityMode: "auto",
+                                catalogRef: match?.ref,
+                              });
+                              setTemplateMenuRowId(null);
+                            }}
+                          >
+                            <span>自动匹配</span>
+                            {model.compatibilityMode === "auto" && <CheckIcon size={13} />}
+                          </button>
+                          <button
+                            type="button"
+                            className={model.compatibilityMode === "generic" ? "on" : ""}
+                            onClick={() => {
+                              updateProviderModel(model.rowId, {
+                                compatibilityMode: "generic",
+                                catalogRef: undefined,
+                              });
+                              setTemplateMenuRowId(null);
+                            }}
+                          >
+                            <span>通用兼容</span>
+                            {model.compatibilityMode === "generic" && <CheckIcon size={13} />}
+                          </button>
+                          <input
+                            className="provider-model-template-search"
+                            value={templateSearch}
+                            placeholder="搜索目录模型"
+                            onChange={(event) => setTemplateSearch(event.target.value)}
+                          />
+                          {templateOptions.map((match) => {
+                            const selected = model.compatibilityMode === "catalog"
+                              && sameCatalogRef(model.catalogRef, match.ref);
+                            return (
+                              <button
+                                type="button"
+                                className={selected ? "on" : ""}
+                                key={`${match.ref.providerId}:${match.ref.modelId}`}
+                                onClick={() => {
+                                  updateProviderModel(model.rowId, {
+                                    compatibilityMode: "catalog",
+                                    catalogRef: match.ref,
+                                  });
+                                  setTemplateMenuRowId(null);
+                                }}
+                              >
+                                <span>{match.provider.label}</span>
+                                <small>{match.model.name}</small>
+                                {selected && <CheckIcon size={13} />}
+                              </button>
+                            );
+                          })}
+                          {templateOptions.length === 0 && <span className="provider-model-template-empty">没有找到同协议的目录模型</span>}
+                        </div>
+                      )}
+                      </div>
+                    );})}
                   </div>
                 </div>
               </div>

@@ -123,11 +123,20 @@ export interface LocalNetInfo {
 }
 
 export type ProviderModelModality = "text" | "image";
+export type ProviderCompatibilityMode = "auto" | "generic" | "catalog";
+
+export interface ProviderCatalogRef {
+  providerId: string;
+  modelId: string;
+}
 
 export interface ProviderModelConfig {
   id: string;
   contextWindow: number;
   inputModalities: ProviderModelModality[];
+  reasoning?: boolean;
+  compatibilityMode?: ProviderCompatibilityMode;
+  catalogRef?: ProviderCatalogRef;
 }
 
 export interface ProviderInfo {
@@ -144,6 +153,7 @@ export interface ProviderCatalogModel {
   id: string;
   name: string;
   api: string;
+  reasoning: boolean;
   contextWindow: number;
   inputModalities: ProviderModelModality[];
 }

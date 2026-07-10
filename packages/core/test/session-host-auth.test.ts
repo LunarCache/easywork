@@ -151,6 +151,57 @@ describe("AgentProviderRuntime", () => {
     fs.rmSync(agentDir, { recursive: true, force: true });
   });
 
+  it("keeps custom provider auth scope while applying pi catalog model compatibility", () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-catalog-model-")));
+    const { runtime } = makeRuntime([{
+      id: "cloudprime",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://cloudprime.example/v1",
+      apiKey: "sk-cloudprime",
+      modelConfigs: [{
+        id: "deepseek-v4-pro",
+        contextWindow: 977000,
+        inputModalities: ["text"],
+        catalogRef: { providerId: "deepseek", modelId: "deepseek-v4-pro" },
+      }],
+    }], agentDir);
+
+    const resolved = runtime.resolveModel("provider:cloudprime:deepseek-v4-pro");
+    expect(resolved).toMatchObject({
+      id: "deepseek-v4-pro",
+      provider: "cloudprime",
+      baseUrl: "https://cloudprime.example/v1",
+      reasoning: true,
+      compat: {
+        requiresReasoningContentOnAssistantMessages: true,
+        thinkingFormat: "deepseek",
+      },
+    });
+    expect(runtime.authStorage.get("cloudprime")).toEqual({ type: "api_key", key: "sk-cloudprime" });
+
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
+  it("advances only cloud model revisions when provider registrations are refreshed", () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-provider-revision-")));
+    const { runtime } = makeRuntime([{
+      id: "cloud",
+      kind: "openai-compatible",
+      baseUrl: "https://cloud.example/v1",
+      apiKey: "sk-cloud",
+      modelConfigs: [{ id: "model-a", contextWindow: 32768, inputModalities: ["text"] }],
+    }], agentDir);
+    const routeId = providerModelRouteId("cloud", "model-a");
+    const before = runtime.modelRevision(routeId);
+
+    runtime.syncCloudProviders();
+
+    expect(runtime.modelRevision(routeId)).toBe(before + 1);
+    expect(runtime.modelRevision("local-model")).toBe(0);
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
   it("throws on unresolvable model", () => {
     const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-r2-")));
     const { runtime } = makeRuntime([], agentDir);

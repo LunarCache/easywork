@@ -18,7 +18,13 @@ describe("provider / MCP 配置持久化", () => {
       id: "openrouter",
       baseUrl: "https://example.com/v1",
       apiKey: "secret-key",
-      modelConfigs: [{ id: "foo-model", contextWindow: 65536, inputModalities: ["text", "image"] }],
+      modelConfigs: [{
+        id: "foo-model",
+        contextWindow: 65536,
+        inputModalities: ["text", "image"],
+        reasoning: true,
+        catalogRef: { providerId: "deepseek", modelId: "deepseek-v4-flash" },
+      }],
     });
     // 路由侧持久化由 HTTP 路由触发；这里直接写 setting 模拟（与路由一致）。
     core1.repo.setSetting("providers", JSON.stringify(core1.providers.dump()));
@@ -31,7 +37,13 @@ describe("provider / MCP 配置持久化", () => {
       id: "openrouter",
       baseUrl: "https://example.com/v1",
       apiKey: "secret-key",
-      modelConfigs: [{ id: "foo-model", contextWindow: 65536, inputModalities: ["text", "image"] }],
+      modelConfigs: [{
+        id: "foo-model",
+        contextWindow: 65536,
+        inputModalities: ["text", "image"],
+        reasoning: true,
+        catalogRef: { providerId: "deepseek", modelId: "deepseek-v4-flash" },
+      }],
     });
     expect(restored[0]).not.toHaveProperty("models");
     await core2.stop();

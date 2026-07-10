@@ -3,6 +3,7 @@ import {
   getModels as defaultGetPiModels,
   getProviders as defaultGetPiProviders,
 } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import type {
   CloudProviderConfig,
@@ -17,6 +18,12 @@ export const ProviderModelConfigSchema = z.object({
   id: z.string().min(1),
   contextWindow: z.number().int().positive(),
   inputModalities: z.array(z.enum(["text", "image"])).min(1),
+  reasoning: z.boolean().optional(),
+  compatibilityMode: z.enum(["auto", "generic", "catalog"]).default("auto"),
+  catalogRef: z.object({
+    providerId: z.string().min(1),
+    modelId: z.string().min(1),
+  }).optional(),
 });
 
 export const ProviderConfigSchema = z.object({
@@ -57,6 +64,7 @@ export interface ProviderCatalogModel {
   id: string;
   name: string;
   api: string;
+  reasoning: boolean;
   contextWindow: number;
   inputModalities: CloudProviderModelModality[];
 }
@@ -84,18 +92,21 @@ export interface ProviderModelProbeResult {
 export interface ProviderRuntimeModel {
   id: string;
   name: string;
-  reasoning: false;
+  reasoning: boolean;
+  thinkingLevelMap?: Model<Api>["thinkingLevelMap"];
   input: CloudProviderModelModality[];
-  cost: { input: 0; output: 0; cacheRead: 0; cacheWrite: 0 };
+  cost: Model<Api>["cost"];
   contextWindow: number;
-  maxTokens: 4096;
+  maxTokens: number;
   headers?: Record<string, string>;
+  compat?: Model<Api>["compat"];
 }
 
 interface PiCatalogModel {
   id: string;
   name: string;
   api: string;
+  reasoning?: boolean;
   contextWindow: number;
   input: CloudProviderModelModality[];
 }
@@ -222,6 +233,7 @@ export class ProviderCatalog {
             id: m.id,
             name: m.name,
             api: m.api,
+            reasoning: m.reasoning ?? false,
             contextWindow: m.contextWindow,
             inputModalities: normalizeModalities(m.input),
           })),
@@ -343,16 +355,32 @@ export function runtimeModelsForProviderConfig(cfg: CloudProviderConfig): Provid
 }
 
 export function runtimeModelForProviderConfig(cfg: CloudProviderConfig, modelId: string): ProviderRuntimeModel {
+  const modelConfig = modelConfigForModel(cfg, modelId);
+  const template = catalogTemplateForModel(cfg, modelConfig);
   return {
     id: modelId,
-    name: modelId,
-    reasoning: false,
+    name: template?.name ?? modelId,
+    reasoning: modelConfig?.reasoning ?? template?.reasoning ?? false,
+    ...(template?.thinkingLevelMap ? { thinkingLevelMap: template.thinkingLevelMap } : {}),
     input: inputModalitiesForModel(cfg, modelId),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: contextWindowForModel(cfg, modelId) ?? DEFAULT_COMPATIBLE_CONTEXT_WINDOW,
-    maxTokens: 4096,
+    maxTokens: template?.maxTokens ?? 4096,
     ...(cfg.headers ? { headers: cfg.headers } : {}),
+    ...(template?.compat ? { compat: template.compat } : {}),
   };
+}
+
+function catalogTemplateForModel(
+  cfg: CloudProviderConfig,
+  modelConfig: CloudProviderModelConfig | undefined,
+): Model<Api> | undefined {
+  const ref = modelConfig?.catalogRef;
+  if (!ref || modelConfig?.compatibilityMode === "generic") return undefined;
+  const template = defaultGetPiModel(ref.providerId as PiProvider, ref.modelId as never) as Model<Api> | undefined;
+  if (!template) return undefined;
+  const api = cfg.api ?? "openai-completions";
+  return template.api === api ? template : undefined;
 }
 
 function modelConfigsFromResponse(payload: unknown): CloudProviderModelConfig[] {
@@ -378,6 +406,14 @@ function normalizeModelConfigs(configs: CloudProviderModelConfig[]): CloudProvid
       id,
       contextWindow,
       inputModalities,
+      ...(cfg.reasoning !== undefined ? { reasoning: cfg.reasoning } : {}),
+      ...(cfg.compatibilityMode ? { compatibilityMode: cfg.compatibilityMode } : {}),
+      ...(cfg.catalogRef?.providerId.trim() && cfg.catalogRef.modelId.trim() ? {
+        catalogRef: {
+          providerId: cfg.catalogRef.providerId.trim(),
+          modelId: cfg.catalogRef.modelId.trim(),
+        },
+      } : {}),
     });
   }
   return [...out.values()];

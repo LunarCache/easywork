@@ -10,6 +10,12 @@ import {
 
 export type CloudProviderKind = "openai-compatible" | "pi-native";
 export type CloudProviderModelModality = "text" | "image";
+export type CloudProviderCompatibilityMode = "auto" | "generic" | "catalog";
+
+export interface CloudProviderCatalogRef {
+  providerId: string;
+  modelId: string;
+}
 
 export interface CloudProviderModelConfig {
   id: string;
@@ -17,6 +23,12 @@ export interface CloudProviderModelConfig {
   contextWindow: number;
   /** Per-model input modalities for custom compatible endpoints. */
   inputModalities: CloudProviderModelModality[];
+  /** Optional explicit reasoning override. Omitted values inherit from catalogRef. */
+  reasoning?: boolean;
+  /** auto suggests a catalog model, generic disables inheritance, catalog pins catalogRef. */
+  compatibilityMode?: CloudProviderCompatibilityMode;
+  /** Reuse pi catalog model behavior while keeping this provider's endpoint and auth scope. */
+  catalogRef?: CloudProviderCatalogRef;
 }
 
 export interface CloudProviderConfig {

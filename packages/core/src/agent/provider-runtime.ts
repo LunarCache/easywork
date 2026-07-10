@@ -38,6 +38,7 @@ export class AgentProviderRuntime {
 
   private readonly registeredProviders = new Set<string>();
   private readonly managedAuthProviders = new Set<string>();
+  private cloudRevision = 0;
 
   constructor(private readonly deps: AgentProviderRuntimeDeps) {
     this.authStorage = AuthStorage.create(path.join(deps.agentDir, "auth.json"));
@@ -88,6 +89,12 @@ export class AgentProviderRuntime {
       }
       this.registeredProviders.delete(id);
     }
+    this.cloudRevision += 1;
+  }
+
+  /** Cloud provider 配置版本；仅云端模型参与 SessionHost 的惰性会话重建。 */
+  modelRevision(modelId: string): number {
+    return this.deps.providers.resolveModelRef(modelId) ? this.cloudRevision : 0;
   }
 
   isLocalModel(modelId: string): boolean {
