@@ -231,8 +231,9 @@ export function Chat({
 
   // 切换模型 → 载入该模型的思考档位。
   useEffect(() => {
-    setThinkLevel(loadThink(model));
-  }, [model]);
+    const fallback = modelSources?.find((source) => source.id === model)?.reasoning ? "medium" : "off";
+    setThinkLevel(loadThink(model, fallback));
+  }, [model, modelSources]);
 
   // 改思考档位（按模型持久化）。
   const changeThink = useCallback(

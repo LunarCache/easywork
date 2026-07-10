@@ -108,7 +108,7 @@ describe("daemon end-to-end (SDK → core → engine)", () => {
     expect(models.routed).toContain("fake-model");
     expect(models.modelSources).toEqual(expect.arrayContaining([
       { id: "fake-model", kind: "engine", label: "其它模型" },
-      { id: "provider:deepseek:deepseek-v4", kind: "provider", label: "deepseek", providerId: "deepseek", providerKind: "pi-native", modelId: "deepseek-v4" },
+      { id: "provider:deepseek:deepseek-v4", kind: "provider", label: "deepseek", providerId: "deepseek", providerKind: "pi-native", modelId: "deepseek-v4", reasoning: false },
     ]));
 
     const { text, done } = await streamV1(baseUrl, "test-token", "fake-model");
@@ -122,14 +122,14 @@ describe("daemon end-to-end (SDK → core → engine)", () => {
       id: "deepseek",
       kind: "pi-native",
       api: "openai-completions",
-      modelConfigs: [{ id: "deepseek-v4", contextWindow: 128_000, inputModalities: ["text"] }],
+      modelConfigs: [{ id: "deepseek-v4-pro", contextWindow: 128_000, inputModalities: ["text"] }],
     });
     core.providers.add({
       id: "my-deepseek",
       kind: "openai-compatible",
-      api: "openai-completions",
+      api: "anthropic-messages",
       baseUrl: "https://custom-deepseek.example/v1",
-      modelConfigs: [{ id: "deepseek-v4", contextWindow: 32_768, inputModalities: ["text"] }],
+      modelConfigs: [{ id: "deepseek-v4-pro", contextWindow: 32_768, inputModalities: ["text"] }],
     });
 
     const { port, host } = await core.start({ port: 0, host: "127.0.0.1" });
@@ -138,11 +138,11 @@ describe("daemon end-to-end (SDK → core → engine)", () => {
     const models = await client.listModels();
     const deepseekSources = models.modelSources?.filter((source) => source.providerId?.includes("deepseek")) ?? [];
     expect(deepseekSources).toEqual(expect.arrayContaining([
-      expect.objectContaining({ providerId: "deepseek", modelId: "deepseek-v4" }),
-      expect.objectContaining({ providerId: "my-deepseek", modelId: "deepseek-v4" }),
+      expect.objectContaining({ providerId: "deepseek", modelId: "deepseek-v4-pro", reasoning: true }),
+      expect.objectContaining({ providerId: "my-deepseek", modelId: "deepseek-v4-pro", reasoning: true }),
     ]));
     expect(new Set(deepseekSources.map((source) => source.id)).size).toBe(2);
-    expect(Object.keys(models.context ?? {}).filter((id) => id.includes("deepseek-v4"))).toHaveLength(2);
+    expect(Object.keys(models.context ?? {}).filter((id) => id.includes("deepseek-v4-pro"))).toHaveLength(2);
   });
 
   it("rejects unauthorized requests", async () => {

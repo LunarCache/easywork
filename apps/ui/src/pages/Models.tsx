@@ -126,12 +126,11 @@ function catalogModelsToForm(models: ProviderCatalogModel[]): ProviderFormModel[
 function catalogMatches(
   catalog: ProviderCatalogItem[],
   modelId: string,
-  api: string,
 ): CatalogModelMatch[] {
   const id = modelId.trim();
   if (!id) return [];
   return catalog.flatMap((provider) => provider.models
-    .filter((model) => model.id === id && (!api || model.api === api))
+    .filter((model) => model.id === id)
     .map((model) => ({
       provider,
       model,
@@ -156,12 +155,10 @@ function catalogMatchForRef(
 function searchCatalogMatches(
   catalog: ProviderCatalogItem[],
   query: string,
-  api: string,
 ): CatalogModelMatch[] {
   const needle = query.trim().toLowerCase();
   return catalog.flatMap((provider) => provider.models
     .filter((model) => {
-      if (api && model.api !== api) return false;
       if (!needle) return false;
       return `${provider.id} ${provider.label} ${model.id} ${model.name}`.toLowerCase().includes(needle);
     })
@@ -194,14 +191,13 @@ function catalogModelPatch(
 function modelConfigsToForm(
   models: ProviderModelConfig[],
   catalog: ProviderCatalogItem[] = [],
-  api = "",
   inheritCatalogMetadata = false,
 ): ProviderFormModel[] {
   const rows = models.map((model) => {
     const compatibilityMode = model.compatibilityMode ?? "auto";
     const pinnedMatch = catalogMatchForRef(catalog, model.catalogRef);
     const suggestedMatch = compatibilityMode === "auto"
-      ? suggestedCatalogMatch(catalogMatches(catalog, model.id, api), model.id)
+      ? suggestedCatalogMatch(catalogMatches(catalog, model.id), model.id)
       : undefined;
     const match = compatibilityMode === "generic" ? undefined : pinnedMatch ?? suggestedMatch;
     const catalogRef = catalog.length > 0 ? match?.ref : model.catalogRef;
@@ -719,7 +715,6 @@ export function Models({ onChange }: { onChange: () => void }) {
     setProviderModels(modelConfigsToForm(
       p.modelConfigs,
       kind === "openai-compatible" ? providerCatalog : [],
-      p.api ?? (kind === "openai-compatible" ? "openai-completions" : ""),
     ));
     setProviderConfigOpen(true);
     setProvNote("");
@@ -741,7 +736,7 @@ export function Models({ onChange }: { onChange: () => void }) {
   };
   const updateProviderModelId = (model: ProviderFormModel, id: string) => {
     const match = model.compatibilityMode === "auto"
-      ? suggestedCatalogMatch(catalogMatches(providerCatalog, id, prov.api), id)
+      ? suggestedCatalogMatch(catalogMatches(providerCatalog, id), id)
       : undefined;
     updateProviderModel(model.rowId, {
       id,
@@ -755,8 +750,8 @@ export function Models({ onChange }: { onChange: () => void }) {
       setProviderModels((current) => current.map((model) => {
         if (model.compatibilityMode === "generic") return model;
         const pinned = catalogMatchForRef(providerCatalog, model.catalogRef);
-        if (model.compatibilityMode === "catalog" && pinned?.model.api === api) return model;
-        const match = suggestedCatalogMatch(catalogMatches(providerCatalog, model.id, api), model.id);
+        if (model.compatibilityMode === "catalog" && pinned) return model;
+        const match = suggestedCatalogMatch(catalogMatches(providerCatalog, model.id), model.id);
         return {
           ...model,
           compatibilityMode: "auto",
@@ -787,7 +782,7 @@ export function Models({ onChange }: { onChange: () => void }) {
       if (result.modelConfigs.length === 0) {
         setProvNote("未获取到模型列表，请手动填入模型 ID。");
       } else {
-        setProviderModels(modelConfigsToForm(result.modelConfigs, providerCatalog, prov.api, true));
+        setProviderModels(modelConfigsToForm(result.modelConfigs, providerCatalog, true));
         setProvNote(`已获取 ${result.modelConfigs.length} 个模型。`);
       }
     } catch (e) {
@@ -1000,11 +995,11 @@ export function Models({ onChange }: { onChange: () => void }) {
                       </button>
                     </div>
                     {providerModels.map((model) => {
-                      const exactMatches = catalogMatches(providerCatalog, model.id, prov.api);
+                      const exactMatches = catalogMatches(providerCatalog, model.id);
                       const selectedMatch = catalogMatchForRef(providerCatalog, model.catalogRef);
                       const templateMenuOpen = templateMenuRowId === model.rowId;
                       const templateOptions = templateMenuOpen
-                        ? searchCatalogMatches(providerCatalog, templateSearch, prov.api)
+                        ? searchCatalogMatches(providerCatalog, templateSearch)
                         : [];
                       const inheritedReasoning = selectedMatch?.model.reasoning ?? false;
                       const templateLabel = model.compatibilityMode === "generic"
@@ -1136,7 +1131,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                               </button>
                             );
                           })}
-                          {templateOptions.length === 0 && <span className="provider-model-template-empty">没有找到同协议的目录模型</span>}
+                          {templateOptions.length === 0 && <span className="provider-model-template-empty">没有找到目录模型</span>}
                         </div>
                       )}
                       </div>

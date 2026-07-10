@@ -112,6 +112,8 @@ export interface ModelSourceInfo {
   modelId?: string;
   providerId?: string;
   providerKind?: "openai-compatible" | "pi-native";
+  /** Whether this model supports configurable reasoning levels. */
+  reasoning?: boolean;
 }
 
 export interface LocalNetInfo {

@@ -57,6 +57,37 @@ test.describe("composer e2e", () => {
     expect(requestBody?.excludeTools).toEqual(["explore_web", "http_get"]);
   });
 
+  test("推理模型在没有个人偏好时继承默认思考档位，并记住显式关闭", async ({ page, openApp, info }) => {
+    await page.route(`${info.baseUrl}/models`, async (route) => {
+      await route.fulfill({
+        json: {
+          routed: ["provider:custom:deepseek-v4-pro"],
+          modelSources: [{
+            id: "provider:custom:deepseek-v4-pro",
+            kind: "provider",
+            label: "Custom",
+            providerId: "custom",
+            providerKind: "openai-compatible",
+            modelId: "deepseek-v4-pro",
+            reasoning: true,
+          }],
+          context: { "provider:custom:deepseek-v4-pro": 1_000_000 },
+          engines: [],
+        },
+      });
+    });
+
+    await openApp();
+    await expect(page.getByTestId("chat-think-pill")).toContainText("思考 中");
+
+    await page.getByTestId("chat-think-pill").click();
+    await page.getByTestId("chat-think-pill").click();
+    await expect(page.getByTestId("chat-think-pill")).toContainText("思考 关");
+
+    await page.reload();
+    await expect(page.getByTestId("chat-think-pill")).toContainText("思考 关");
+  });
+
   test("聊天与工作区的 + 入口都能上传图片，并显示已附加图片", async ({ page, openApp, client, workspaceDir, sampleImagePath }) => {
     const project = await client.createProject({ name: "Upload Workspace", workspaceDir });
 

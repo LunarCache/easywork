@@ -153,8 +153,9 @@ export function Workspace({
   }, [skills, projectSkills]);
 
   useEffect(() => {
-    setThinkLevel(loadThink(model));
-  }, [model]);
+    const fallback = modelSources?.find((source) => source.id === model)?.reasoning ? "medium" : "off";
+    setThinkLevel(loadThink(model, fallback));
+  }, [model, modelSources]);
   const changeThink = useCallback(
     (lv: ThinkLevel) => {
       setThinkLevel(lv);

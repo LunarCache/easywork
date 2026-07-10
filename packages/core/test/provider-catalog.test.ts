@@ -167,6 +167,33 @@ describe("ProviderCatalog", () => {
     });
   });
 
+  it("inherits model reasoning metadata across API families without reusing protocol compat", () => {
+    const cfg = normalizeProviderConfig({
+      id: "cloudprime",
+      kind: "openai-compatible",
+      api: "anthropic-messages",
+      baseUrl: "https://cloudprime.example/v1",
+      modelConfigs: [{
+        id: "deepseek-v4-pro",
+        contextWindow: 1_000_000,
+        inputModalities: ["text"],
+        compatibilityMode: "auto",
+      }],
+    });
+
+    const runtime = runtimeModelForProviderConfig(cfg, "deepseek-v4-pro");
+    expect(runtime).toMatchObject({
+      id: "deepseek-v4-pro",
+      name: "DeepSeek V4 Pro",
+      reasoning: true,
+      thinkingLevelMap: {
+        high: "high",
+        xhigh: "max",
+      },
+    });
+    expect(runtime.compat).toBeUndefined();
+  });
+
   it("supports explicit generic mode and reasoning overrides independently", () => {
     const generic = normalizeProviderConfig({
       id: "custom",

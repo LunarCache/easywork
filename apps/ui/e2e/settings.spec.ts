@@ -43,7 +43,7 @@ test.describe("settings e2e", () => {
     await expect(page.getByTestId("models-tab-local")).toHaveAttribute("data-active", "1");
   });
 
-  test("自定义模型匹配目录模板时继承上下文和模态", async ({ page, openApp }) => {
+  test("自定义模型跨 API 协议匹配目录模板时继承能力元数据", async ({ page, openApp }) => {
     await page.route("**/providers", async (route) => {
       if (route.request().method() !== "GET") return route.continue();
       await route.fulfill({ json: { providers: [] } });
@@ -67,7 +67,10 @@ test.describe("settings e2e", () => {
               inputModalities: ["text", "image"],
             }],
           }],
-          apiFamilies: [{ id: "openai-completions", label: "OpenAI Chat Completions" }],
+          apiFamilies: [
+            { id: "openai-completions", label: "OpenAI Chat Completions" },
+            { id: "anthropic-messages", label: "Anthropic Messages" },
+          ],
         },
       });
     });
@@ -79,11 +82,15 @@ test.describe("settings e2e", () => {
     await page.getByRole("button", { name: "添加 Provider" }).click();
     await page.getByTitle("自定义兼容端点").click();
 
+    await page.locator(".provider-api-select > button").click();
+    await page.getByRole("button", { name: "Anthropic Messages" }).click();
+
     const row = page.locator(".provider-model-row").first();
     await row.locator('input[placeholder="model-id"]').fill("deepseek-v4-pro");
 
     await expect(row.locator('input[type="number"]')).toHaveValue("1000000");
     await expect(row.locator('input[type="checkbox"]')).toBeChecked();
+    await expect(row.getByTitle("继承模板（当前开启）")).toBeVisible();
   });
 
   test("渠道页可打开并记住上次分区", async ({ page, openApp }) => {

@@ -2,16 +2,16 @@
 
 import type { ThinkLevel } from "@ew/shared";
 
-// 思考档位按「模型」保存（每模型独立；默认 off——云端思考更慢更贵，本地开一次即记住）。
+// 思考档位按「模型」保存。fallback 来自模型能力：推理模型对齐 pi 默认 medium，其余 off。
 const THINK_KEY = "ew.think"; // Record<modelId, ThinkLevel>
-export function loadThink(model: string): ThinkLevel {
-  if (!model) return "off";
+export function loadThink(model: string, fallback: ThinkLevel = "off"): ThinkLevel {
+  if (!model) return fallback;
   try {
     const raw = localStorage.getItem(THINK_KEY);
     const map = raw ? (JSON.parse(raw) as Record<string, ThinkLevel>) : {};
-    return map[model] ?? "off";
+    return map[model] ?? fallback;
   } catch {
-    return "off";
+    return fallback;
   }
 }
 export function saveThink(model: string, level: ThinkLevel): void {
@@ -19,8 +19,7 @@ export function saveThink(model: string, level: ThinkLevel): void {
   try {
     const raw = localStorage.getItem(THINK_KEY);
     const map = raw ? (JSON.parse(raw) as Record<string, ThinkLevel>) : {};
-    if (level === "off") delete map[model];
-    else map[model] = level;
+    map[model] = level;
     localStorage.setItem(THINK_KEY, JSON.stringify(map));
   } catch {
     /* ignore */

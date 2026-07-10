@@ -7,7 +7,7 @@ import {
   type DownloadEvent,
 } from "@ew/shared";
 import { resolveLlamaBin, LLAMA_INSTALL } from "../../engine/resolve-llama.js";
-import { providerModelRouteId } from "../../providers/catalog.js";
+import { providerModelRouteId, runtimeModelForProviderConfig } from "../../providers/catalog.js";
 import type { CoreHttpContext } from "../context.js";
 
 export interface ModelRouteOptions {
@@ -46,10 +46,12 @@ export function registerModelRoutes(ctx: CoreHttpContext, opts: ModelRouteOption
       providerId: string;
       providerKind: "openai-compatible" | "pi-native";
       modelId: string;
+      reasoning: boolean;
     }>();
     for (const provider of providers.list()) {
       for (const id of provider.models) {
         const routeId = providerModelRouteId(provider.id, id);
+        const config = providers.resolveModelRef(routeId)?.config;
         byProvider.set(routeId, {
           id: routeId,
           kind: "provider",
@@ -57,6 +59,7 @@ export function registerModelRoutes(ctx: CoreHttpContext, opts: ModelRouteOption
           providerId: provider.id,
           providerKind: provider.kind,
           modelId: id,
+          reasoning: config ? runtimeModelForProviderConfig(config, id).reasoning : false,
         });
       }
     }

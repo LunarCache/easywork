@@ -356,8 +356,10 @@ export function runtimeModelsForProviderConfig(cfg: CloudProviderConfig): Provid
 
 export function runtimeModelForProviderConfig(cfg: CloudProviderConfig, modelId: string): ProviderRuntimeModel {
   const modelConfig = modelConfigForModel(cfg, modelId);
-  const template = catalogTemplateForModel(cfg, modelConfig);
-  const compat = template ? materializeCatalogCompat(template) : undefined;
+  const template = catalogTemplateForModel(modelConfig);
+  const api = cfg.api ?? "openai-completions";
+  // Name/reasoning/token metadata is model-level and survives API adapters. compat is wire-protocol-specific.
+  const compat = template?.api === api ? materializeCatalogCompat(template) : undefined;
   return {
     id: modelId,
     name: template?.name ?? modelId,
@@ -373,15 +375,21 @@ export function runtimeModelForProviderConfig(cfg: CloudProviderConfig, modelId:
 }
 
 function catalogTemplateForModel(
-  cfg: CloudProviderConfig,
   modelConfig: CloudProviderModelConfig | undefined,
 ): Model<Api> | undefined {
-  const ref = modelConfig?.catalogRef;
-  if (!ref || modelConfig?.compatibilityMode === "generic") return undefined;
-  const template = defaultGetPiModel(ref.providerId as PiProvider, ref.modelId as never) as Model<Api> | undefined;
-  if (!template) return undefined;
-  const api = cfg.api ?? "openai-completions";
-  return template.api === api ? template : undefined;
+  if (!modelConfig || modelConfig.compatibilityMode === "generic") return undefined;
+  const ref = modelConfig.catalogRef;
+  if (ref) {
+    return defaultGetPiModel(ref.providerId as PiProvider, ref.modelId as never) as Model<Api> | undefined;
+  }
+  if (modelConfig.compatibilityMode === "catalog") return undefined;
+
+  const candidates = defaultGetPiProviders()
+    .map((provider) => defaultGetPiModel(provider, modelConfig.id as never) as Model<Api> | undefined)
+    .filter((model): model is Model<Api> => !!model);
+  const lowerId = modelConfig.id.toLowerCase();
+  return candidates.find((model) => lowerId.startsWith(model.provider.toLowerCase()))
+    ?? (candidates.length === 1 ? candidates[0] : undefined);
 }
 
 /**
