@@ -1,5 +1,7 @@
 # 知识库页面重设计 Implementation Plan
 
+> **历史快照（2026-06-24）**：本文保留当时的实施步骤与技术栈表述，不作为当前架构或进度的权威来源。当前状态请以 [`docs/FEATURES.md`](../../FEATURES.md)、[`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md) 与 [`docs/PROGRESS.md`](../../PROGRESS.md) 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把桌面端「插件 → 知识库」从「单列手风琴 + 滑出预览」重构为「左集合栏 + 右文档卡片网格 + 前端文件名搜索」。
