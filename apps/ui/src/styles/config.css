@@ -22,7 +22,6 @@
 .skill-desc { font-size: 12px; color: var(--text-2); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-actions { flex: none; display: inline-flex; align-items: center; gap: 10px; }
 .skill-state { min-width: 42px; text-align: right; color: var(--text-tertiary); font-size: 12px; font-weight: 650; }
-.skill-state.on { color: var(--accent); }
 .skill-detail-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .skill-detail-name { font-size: 15px; font-weight: 650; font-family: var(--font-mono); }
 .skill-detail-desc { font-size: 13px; color: var(--text-2); margin: 0 0 14px; line-height: 1.55; }

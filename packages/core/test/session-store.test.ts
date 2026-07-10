@@ -41,4 +41,54 @@ describe("AgentSessionStore", () => {
       fs.rmSync(agentDir, { recursive: true, force: true });
     }
   });
+
+  it("ignores aborted/error or zero-token assistant usage records", () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-session-usage-abort-")));
+    try {
+      const store = new AgentSessionStore(agentDir);
+      const file = path.join(agentDir, "sessions", "thread-abort.jsonl");
+      fs.writeFileSync(
+        file,
+        [
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              stopReason: "stop",
+              usage: { input: 12, output: 4, cacheRead: 1, cacheWrite: 0, totalTokens: 17 },
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              stopReason: "aborted",
+              usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              stopReason: "error",
+              usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+            },
+          }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              stopReason: "stop",
+              usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
+            },
+          }),
+        ].join("\n"),
+        "utf8",
+      );
+
+      expect(store.lastUsage("thread-abort")).toEqual({
+        promptTokens: 13,
+        completionTokens: 4,
+        totalTokens: 17,
+      });
+    } finally {
+      fs.rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
 });

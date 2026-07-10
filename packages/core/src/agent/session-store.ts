@@ -4,6 +4,32 @@ import path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { promptTokensOf, type AgentTokenUsage, type PiUsage } from "./agent-usage.js";
 
+type PersistedAssistantMessage = {
+  role?: string;
+  stopReason?: string;
+  usage?: Partial<PiUsage>;
+};
+
+function isCompleteUsage(usage: Partial<PiUsage> | undefined): usage is PiUsage {
+  if (!usage) return false;
+  return (
+    typeof usage.input === "number" &&
+    typeof usage.output === "number" &&
+    typeof usage.cacheRead === "number" &&
+    typeof usage.cacheWrite === "number" &&
+    typeof usage.totalTokens === "number"
+  );
+}
+
+function isContextUsageMessage(
+  message: PersistedAssistantMessage | undefined,
+): message is PersistedAssistantMessage & { usage: PiUsage } {
+  if (message?.role !== "assistant") return false;
+  if (message.stopReason === "aborted" || message.stopReason === "error") return false;
+  if (!isCompleteUsage(message.usage)) return false;
+  return promptTokensOf(message.usage) + message.usage.output + message.usage.totalTokens > 0;
+}
+
 /**
  * Agent Runtime 的 session persistence seam：拥有 pi agentDir/sessionsDir、settings 调校、
  * SessionManager 创建/恢复，以及历史 usage 读取。
@@ -42,9 +68,9 @@ export class AgentSessionStore {
     for (const line of fs.readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
       try {
-        const o = JSON.parse(line) as { message?: { role?: string; usage?: PiUsage } };
+        const o = JSON.parse(line) as { message?: PersistedAssistantMessage };
         const m = o.message;
-        if (m?.role === "assistant" && m.usage) {
+        if (isContextUsageMessage(m)) {
           last = {
             promptTokens: promptTokensOf(m.usage),
             completionTokens: m.usage.output,

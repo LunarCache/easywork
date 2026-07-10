@@ -227,9 +227,7 @@ export function Skills() {
                           </div>
                         </div>
                         <div className="skill-actions" onClick={(e) => e.stopPropagation()}>
-                          <span className={`skill-state ${on ? "on" : ""}`} data-testid={`skill-status-${s.id}`}>
-                            {on ? "已启用" : "已关闭"}
-                          </span>
+                          {!on && <span className="skill-state" data-testid={`skill-status-${s.id}`}>已关闭</span>}
                           <button
                             className={`set-toggle ${on ? "on" : ""}`}
                             data-testid={`skill-toggle-${s.id}`}

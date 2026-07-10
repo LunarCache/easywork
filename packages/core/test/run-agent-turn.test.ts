@@ -101,4 +101,65 @@ describe("runAgentTurn", () => {
     expect(markAbort).toBe(1);
     expect(fake.session.agent.state.messages).toEqual(initial);
   });
+
+  it("rolls back prompt failures so interrupted provider streams do not enter context", async () => {
+    let discarded = 0;
+    const initial = [{ role: "user", content: "before" }];
+    const fake = fakeSession({
+      initialMessages: initial,
+      prompt: async () => {
+        fake.session.agent.state.messages = [
+          ...initial,
+          { role: "user", content: "during" },
+          { role: "assistant", content: "partial" },
+        ] as typeof fake.session.agent.state.messages;
+        throw new Error("stream interrupted");
+      },
+    });
+
+    const events = await collect(runAgentTurn({
+      session: fake.session,
+      text: "hello",
+      mapEvent: () => [],
+      onDiscard: () => {
+        discarded++;
+      },
+    }));
+
+    expect(events).toEqual([{ type: "error", message: "stream interrupted" }]);
+    expect(discarded).toBe(1);
+    expect(fake.session.agent.state.messages).toEqual(initial);
+  });
+
+  it("rolls back terminal assistant errors", async () => {
+    let discarded = 0;
+    const initial = [{ role: "user", content: "before" }];
+    const fake = fakeSession({
+      initialMessages: initial,
+      prompt: async () => {
+        fake.session.agent.state.messages = [
+          ...initial,
+          { role: "user", content: "during" },
+          { role: "assistant", content: "partial" },
+        ] as typeof fake.session.agent.state.messages;
+        fake.emit({
+          type: "agent_end",
+          willRetry: false,
+          messages: [{ role: "assistant", stopReason: "error", errorMessage: "provider failed" }],
+        } as unknown as AgentSessionEvent);
+      },
+    });
+
+    await collect(runAgentTurn({
+      session: fake.session,
+      text: "hello",
+      mapEvent: (ev) => (ev.type === "agent_end" ? [{ type: "error", message: "provider failed" }] : []),
+      onDiscard: () => {
+        discarded++;
+      },
+    }));
+
+    expect(discarded).toBe(1);
+    expect(fake.session.agent.state.messages).toEqual(initial);
+  });
 });

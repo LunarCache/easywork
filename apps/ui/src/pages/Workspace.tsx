@@ -13,6 +13,7 @@ import {
   updateLastAssistant,
 } from "../lib/message-runtime.js";
 import { loadDisabledSkills, loadThink, saveThink } from "../lib/prefs.js";
+import { composerUsageState } from "../lib/context-usage.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
 import { ComposerContextPill, ComposerUsagePill } from "../components/ComposerContextStrip.js";
@@ -169,14 +170,9 @@ export function Workspace({
       .then((r) => setNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
       .catch(() => setNotice("压缩失败"));
   }, [threadId]);
-  const contextLimit = contexts[model];
-  const contextPct = contextLimit ? (((usage?.promptTokens ?? 0) / contextLimit) * 100) : null;
-  const contextTitle =
-    contextLimit == null
-      ? undefined
-      : usage
-        ? `上下文已用 ${Math.round(contextPct ?? 0)}% · ${usage.promptTokens}/${contextLimit} tokens`
-        : `上下文窗口 ${contextLimit} tokens`;
+  const contextUsage = composerUsageState(usage, contexts[model]);
+  const contextPct = contextUsage.pct;
+  const contextTitle = contextUsage.title;
   const slash = useSlashPalette(input, setInput, {
     models,
     modelSources,
@@ -297,6 +293,7 @@ export function Workspace({
     abortRef.current = ac;
     const excludeSkills = loadDisabledSkills();
     const MUTATING = new Set(["fs_write", "fs_edit", "run_command"]);
+    let pendingUsage: typeof usage = null;
     // 确保审批档位的在途 PATCH 已落库，再发起本轮（服务端按 project.approvalMode 把守危险工具）。
     if (pendingMode.current) await pendingMode.current.catch(() => {});
     try {
@@ -304,7 +301,7 @@ export function Workspace({
         { threadId, model, history, projectId: project.id, thinkingLevel: thinkLevel, ...(over?.regenerate ? { regenerate: true } : {}), ...(excludeSkills.length ? { excludeSkills } : {}) },
         { signal: ac.signal },
       )) {
-        if (ev.type === "usage") setUsage(ev.usage);
+        if (ev.type === "usage") pendingUsage = ev.usage;
         else if (ev.type === "approval-request") setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });
         else if (ev.type === "retry") setNotice(`重试中 (${ev.attempt}/${ev.maxAttempts})…`);
         else if (ev.type === "compaction")
@@ -312,8 +309,10 @@ export function Workspace({
         else if (ev.type === "text" || ev.type === "reasoning") {
           setNotice(null);
           apply((m) => applyAgentEvent(m, ev));
-        } else if (ev.type === "final") apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
-        else if (ev.type === "error") apply((m) => ({ ...m, raw: `${m.raw}\n\n[错误] ${ev.message}` }));
+        } else if (ev.type === "final") {
+          if (pendingUsage) setUsage(pendingUsage);
+          apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
+        } else if (ev.type === "error") apply((m) => ({ ...m, raw: `${m.raw}\n\n[错误] ${ev.message}` }));
         else if (ev.type === "tool-end") {
           apply((m) => applyAgentEvent(m, ev));
           if (MUTATING.has(ev.call.name)) {

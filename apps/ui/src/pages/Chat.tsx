@@ -33,6 +33,7 @@ import {
   loadThink,
   saveThink,
 } from "../lib/prefs.js";
+import { composerUsageState } from "../lib/context-usage.js";
 import { useAvailableModel } from "../hooks/useAvailableModel.js";
 import { useComposerImages } from "../hooks/useComposerImages.js";
 import { useMessageScroll } from "../hooks/useMessageScroll.js";
@@ -251,14 +252,9 @@ export function Chat({
       .then((r) => setNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
       .catch(() => setNotice("压缩失败"));
   }, [threadId]);
-  const contextLimit = contexts[model];
-  const contextPct = contextLimit ? (((usage?.promptTokens ?? 0) / contextLimit) * 100) : null;
-  const contextTitle =
-    contextLimit == null
-      ? undefined
-      : usage
-        ? `上下文已用 ${Math.round(contextPct ?? 0)}% · ${usage.promptTokens}/${contextLimit} tokens`
-        : `上下文窗口 ${contextLimit} tokens`;
+  const contextUsage = composerUsageState(usage, contexts[model]);
+  const contextPct = contextUsage.pct;
+  const contextTitle = contextUsage.title;
 
   const slash = useSlashPalette(input, setInput, {
     models,
@@ -303,6 +299,7 @@ export function Chat({
     const ac = new AbortController();
     abortRef.current = ac;
     const FS_TOOLS = new Set(["fs_write", "fs_edit", "run_command"]);
+    let pendingUsage: typeof usage = null;
     try {
       for await (const ev of getClient().runAgent(
         {
@@ -318,7 +315,7 @@ export function Chat({
         },
         { signal: ac.signal },
       )) {
-        if (ev.type === "usage") setUsage(ev.usage);
+        if (ev.type === "usage") pendingUsage = ev.usage;
         else if (ev.type === "approval-request")
           setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });
         else if (ev.type === "retry") setNotice(`重试中 (${ev.attempt}/${ev.maxAttempts})…`);
@@ -327,8 +324,10 @@ export function Chat({
         else if (ev.type === "text" || ev.type === "reasoning") {
           setNotice(null); // 有新输出即清掉瞬态提示（值未变时 React 自动跳过重渲染）
           apply((m) => applyAgentEvent(m, ev));
-        } else if (ev.type === "final") apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
-        else if (ev.type === "error") apply((m) => ({ ...m, raw: `${m.raw}\n\n[错误] ${ev.message}` }));
+        } else if (ev.type === "final") {
+          if (pendingUsage) setUsage(pendingUsage);
+          apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
+        } else if (ev.type === "error") apply((m) => ({ ...m, raw: `${m.raw}\n\n[错误] ${ev.message}` }));
         else if (ev.type === "tool-end") {
           apply((m) => applyAgentEvent(m, ev));
           if (FS_TOOLS.has(ev.call.name)) void refreshFiles(); // 文件类工具完成即刷新工件面板

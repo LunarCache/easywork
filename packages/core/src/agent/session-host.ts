@@ -379,6 +379,9 @@ export class SessionHost {
       onAbort: () => {
         hosted.runtime.aborted = true;
       },
+      onDiscard: () => {
+        hosted.runtime.aborted = true;
+      },
     });
   }
 

@@ -124,6 +124,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     // 从事件流重建工具往返（assistant tool_calls + tool results），缓冲到本轮成功结束再落库。
     const recorder = new ToolTurnRecorder();
     const recorded: ReturnType<ToolTurnRecorder["push"]> = [];
+    let sawFinal = false;
 
     const userText = lastUser?.role === "user" ? messageText(lastUser.content) : "";
     // 多模态：从本轮用户消息抽出图片片段（base64）→ 透传给 pi（视觉模型 mmproj）。
@@ -157,11 +158,14 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
         ...(parsed.data.excludeSkills?.length ? { excludeSkills: parsed.data.excludeSkills } : {}),
       })) {
         recorded.push(...recorder.push(ev));
-        if (ev.type === "final") finalContent = messageText(ev.message.content);
+        if (ev.type === "final") {
+          sawFinal = true;
+          finalContent = messageText(ev.message.content);
+        }
         send(ev);
       }
       // 仅在「未被取消」时落库：用户取消 → 整轮不计入历史（与 pi 上下文回滚一致）。
-      if (!ac.signal.aborted) {
+      if (sawFinal && !ac.signal.aborted) {
         if (lastUser?.role === "user") {
           repo.appendMessage({
             id: crypto.randomUUID(),
