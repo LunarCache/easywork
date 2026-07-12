@@ -100,6 +100,7 @@ export function ContextBar({
               <div className="ctx-sep" />
               <button
                 className="ctx-item"
+                data-testid="workspace-open-folder"
                 onClick={() => {
                   onOpenFolder();
                   close();

@@ -52,7 +52,7 @@
 ## 约定
 
 - **统一 npm**（环境无 pnpm）。
-- **测试 296 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 22 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir）。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
+- **测试 296 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 23 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir）。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
 - **已移除 node-llama-cpp + 经典 `llama-server`**：本地推理走外部统一 `llama`（llama.app）的 router 模式（`resolveLlamaBin` 只解析 `llama`；嵌入子进程也跑 `llama serve`）。**勿重新引入** node-llama-cpp，也**勿回退每模型一进程的经典 `llama-server`**（含 brew llama.cpp，已完全移除）。
 - **打包**：daemon → Node SEA **单文件二进制**（`scripts/build-daemon-sea.mjs`，运行免 Node）；llama 运行时缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime` + `install.sh`）；`v*` tag → GitHub Actions 出 macOS dmg。
 - **改 Tauri Rust（`apps/desktop/src-tauri`）**：本环境有 `cargo`，可 `cargo check` 验证。
@@ -65,7 +65,7 @@ npm run build          # turbo 构建全部包（含 ui/daemon dist）
 npm test               # vitest（296 通过；另 1 个真机 e2e 默认 skip）
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
-npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 22 条）
+npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 23 条）
 npm run typecheck      # 全量类型检查　·　npm run lint
 
 # 真机 smoke（需本地模型 + 统一 llama；router 模式；默认不进 CI）

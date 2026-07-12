@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChannelKind, Project, Skill } from "@ew/shared";
 import type { ModelSourceInfo } from "@ew/sdk";
 import { currentConfig, getClient, initRuntimeConfig } from "./lib/client.js";
@@ -52,6 +52,7 @@ export function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
   const [workBranch, setWorkBranch] = useState<string | undefined>(undefined);
+  const workspaceCreatePending = useRef(false);
   // 点项目「查看文件」→ 主区切到该项目的文件浏览页（替代对话，左上角「返回任务」回退）。
   const [filesProjectId, setFilesProjectId] = useState<string | null>(null);
 
@@ -95,31 +96,42 @@ export function App() {
     }
   }, []);
 
-  const newWorkspace = async () => {
-    const dir = await pickWorkspaceDir();
-    if (
-      !dir &&
-      !(await askConfirm({
-        title: "未选择目录，改为创建默认工作区？",
-        body: "将使用 EasyWork 的默认工作区目录创建一个新的本地工作区，你之后仍可再切换到任意项目文件夹。",
-        okLabel: "创建工作区",
-      }))
-    )
-      return;
+  const enterWorkspace = useCallback(async (workspaceDir?: string) => {
+    if (workspaceCreatePending.current) return;
+    workspaceCreatePending.current = true;
     try {
-      const p = dir
-        ? await getClient().createProject({ name: dir.split(/[/\\]/).filter(Boolean).pop() || "工作区", workspaceDir: dir })
+      const p = workspaceDir
+        ? await getClient().createProject({
+            name: workspaceDir.split(/[/\\]/).filter(Boolean).pop() || "工作区",
+            workspaceDir,
+          })
         : await getClient().createProject({});
       await refreshProjects();
+      setFilesProjectId(null);
       setProjectId(p.id);
+      setWorkThreadId(`ws-${p.id}`);
       setMode("work");
     } catch (e) {
       await showAlert({
         title: "创建工作区失败",
         body: e instanceof Error ? e.message : String(e),
       });
+    } finally {
+      workspaceCreatePending.current = false;
     }
-  };
+  }, [refreshProjects, showAlert]);
+
+  // 首页 / 侧栏的「新建工作区」直接进入默认工作区，不先打断用户要求选择目录。
+  const newWorkspace = useCallback(async () => {
+    await enterWorkspace();
+  }, [enterWorkspace]);
+
+  // 只有工作区上下文菜单里的「打开文件夹」才显式选择本地目录；取消后保持当前工作区。
+  const openWorkspaceFolder = useCallback(async () => {
+    const dir = await pickWorkspaceDir();
+    if (!dir) return;
+    await enterWorkspace(dir);
+  }, [enterWorkspace]);
 
   const delProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -177,7 +189,7 @@ export function App() {
     return () => {
       window.removeEventListener("ew:new-workspace", createWorkspace as EventListener);
     };
-  }, []);
+  }, [newWorkspace]);
 
   const newChat = () => {
     setFilesProjectId(null);
@@ -402,7 +414,7 @@ export function App() {
                 onThreadsChanged={refreshThreads}
                 onBranchChange={setWorkBranch}
                 onSelectProject={(id) => void selectProject(id)}
-                onOpenFolder={() => void newWorkspace()}
+                onOpenFolder={() => void openWorkspaceFolder()}
                 dockOpen={dockOpen}
                 setDockOpen={setDockOpen}
               />
@@ -412,7 +424,7 @@ export function App() {
                   <FolderTreeIcon size={28} />
                 </div>
                 <h2>还没有工作区</h2>
-                <p>选择一个本地项目目录，让 AI 围绕它读写文件、运行命令。</p>
+                <p>先创建一个默认工作区即可开始；之后可从项目菜单按需打开本地文件夹。</p>
                 <button className="set-btn primary" onClick={() => void newWorkspace()}>
                   <PlusIcon size={15} /> 新建工作区
                 </button>

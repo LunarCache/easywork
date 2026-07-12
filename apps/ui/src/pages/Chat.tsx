@@ -64,7 +64,7 @@ const STARTERS: { label: string; prompt: string; Icon: typeof CodeIcon }[] = [
 
 const QUICK_ACTIONS: { label: string; action: "search" | "workspace" | "settings"; Icon: typeof GlobeIcon }[] = [
   { label: "联网搜索", action: "search", Icon: GlobeIcon },
-  { label: "打开工作区", action: "workspace", Icon: FileIcon },
+  { label: "新建工作区", action: "workspace", Icon: FileIcon },
   { label: "配置模型", action: "settings", Icon: SlidersIcon },
 ];
 
@@ -408,7 +408,12 @@ export function Chat({
               </div>
               <div className="greet-quick">
                 {QUICK_ACTIONS.map(({ label, action, Icon }) => (
-                  <button key={label} className="greet-quick-card" onClick={() => openQuickAction(action)}>
+                  <button
+                    key={label}
+                    className="greet-quick-card"
+                    data-testid={action === "workspace" ? "home-new-workspace" : undefined}
+                    onClick={() => openQuickAction(action)}
+                  >
                     <span className="greet-quick-ico">
                       <Icon size={15} />
                     </span>

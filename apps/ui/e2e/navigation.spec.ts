@@ -1,6 +1,32 @@
 import { test, expect } from "./fixtures.js";
 
 test.describe("navigation e2e", () => {
+  test("首页新建工作区直接进入默认空白工作区，目录选择保留为后续显式动作", async ({ page, openApp, client }) => {
+    let dialogs = 0;
+    page.on("dialog", async (dialog) => {
+      dialogs += 1;
+      await dialog.dismiss();
+    });
+
+    await openApp();
+    await page.getByTestId("home-new-workspace").click();
+
+    await expect(page.locator(".ws-hero")).toBeVisible();
+    await expect(page.getByTestId("workspace-composer-input")).toBeVisible();
+    await expect(page.getByTestId("workspace-project-pill")).toContainText("NewProject1");
+    expect(dialogs).toBe(0);
+
+    const projects = await client.listProjects();
+    expect(projects).toHaveLength(1);
+    expect(projects[0]?.name).toBe("NewProject1");
+    expect(projects[0]?.workspaceDir).toMatch(/[\\/]workspace[\\/]NewProject1$/);
+
+    await page.getByTestId("workspace-project-pill").click();
+    await page.getByTestId("workspace-open-folder").click();
+    await expect.poll(() => dialogs).toBe(1);
+    await expect(page.getByTestId("workspace-project-pill")).toContainText("NewProject1");
+  });
+
   test("标题栏非交互区域都声明为 Tauri 拖拽区", async ({ page, openApp }) => {
     await openApp();
 
