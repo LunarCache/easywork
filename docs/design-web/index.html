@@ -476,9 +476,9 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 
 ### 13.3 Chat vs Workspace + SSE
 
-共用 MessageStream / SideDock / ModelSelect / composer / 审批卡 / **斜杠命令面板** / **运行态上下文 pill**。
-- **Chat**：composer 输入卡顶部用 `ComposerContextStrip` 前置本轮能力开关 **思考 / 联网 / 知识库**；**模型 / 上下文压力**移到底栏发送按钮左侧，作为发送前确认区。模型下拉消费 `/models.modelSources`，按 **本地模型 / provider id** 分组展示；provider 分组已经表达来源，条目只显示模型名，避免重复铺开 raw id。底栏左侧 `+` 仅做**上传图片**，右侧保留模型 / 上下文 / 发送或停止。默认采样参数从输入框移出，统一在模型页按本地模型配置。历史工件仍走 SideDock（fs 工具后刷新、首件自动开 dock）。
-- **Workspace**：`ContextBar` 显示项目 / 分支 / 思考；composer 底栏与 Chat 对齐——左侧 `+` 后紧跟**审批策略 pill**（中文档位 只读/逐项确认/自动编辑/完全访问，full-auto 橙色警示；改档 PATCH `project.approvalMode`，`send()` 前 await 在途 PATCH 防"切档即发"）与附件状态，右侧是**模型 / 上下文压力 / 发送或停止**。**空态居中**（`msgs.length===0` 渲染 `.ws-hero`：品牌标 + 时段问候语 + 居中限宽 composer，否则消息流在上、composer 在底）。SideDock 带 git 上下文；mutating 工具后刷 git + ws 文件 + 上报分支给标题栏。
+共用 MessageStream / SideDock / ModelSelect / composer / 审批卡 / **斜杠命令面板** / **运行态上下文圆环**。两侧 composer 的 pill、模型、审批与附件状态统一无边框，以填充色、图标和文字表达状态；输入卡外框仍负责聚合整个输入区域。
+- **Chat**：composer 输入卡顶部用 `ComposerContextStrip` 前置本轮能力开关 **思考 / 联网 / 知识库**；**模型 / 上下文压力**移到底栏发送按钮左侧，作为发送前确认区。上下文压力默认只呈现环形进度，不常驻显示数字；悬停或键盘聚焦后通过自绘 tooltip 展示百分比与 `prompt/context` token 明细。模型下拉消费 `/models.modelSources`，按 **本地模型 / provider id** 分组展示；provider 分组已经表达来源，条目只显示模型名，避免重复铺开 raw id。底栏左侧 `+` 仅做**上传图片**，右侧保留模型 / 上下文 / 发送或停止。默认采样参数从输入框移出，统一在模型页按本地模型配置。历史工件仍走 SideDock（fs 工具后刷新、首件自动开 dock）。
+- **Workspace**：`ContextBar` 显示项目 / 分支 / 思考；composer 底栏与 Chat 对齐——左侧 `+` 后紧跟**审批策略 pill**（中文档位 只读/逐项确认/自动编辑/完全访问，full-auto 橙色警示；改档 PATCH `project.approvalMode`，`send()` 前 await 在途 PATCH 防"切档即发"）与附件状态，右侧是**模型 / 上下文圆环 / 发送或停止**，复用同一悬停详情。**空态居中**（`msgs.length===0` 渲染 `.ws-hero`：品牌标 + 时段问候语 + 居中限宽 composer，否则消息流在上、composer 在底）。SideDock 带 git 上下文；mutating 工具后刷 git + ws 文件 + 上报分支给标题栏。
 - **审批卡**（`.approval-wrap`）：危险工具挂起时在 **composer 正上方内嵌弹出**（与输入框同宽、从下滑入），非遮罩弹层——不挡对话；含工具名 + 命令 JSON + 拒绝/本会话总是允许/允许。Chat 与 Workspace 一致。
 - **斜杠命令**（`lib/slash.ts` + `components/SlashPalette.tsx` 的 `useSlashPalette` hook，两 composer 共用）：输入「/」弹两阶段自动补全（命令名→参数），面板头显示当前阶段，列表右侧直接带**当前值 / 当前项**；`/compact` 还会显示当前上下文占比。`onKeyDown` 优先消费 ↑↓/Enter/Tab/Esc。支持 `/think <档位>` 设思考、`/model` 先选本地/provider 来源再选该来源下模型（下一轮 run 带 provider-scoped modelId，复用 getOrCreate 重建保上下文）、`/compact` 调 `POST /threads/:id/compact`。
 - **思考分级**：思考状态统一以前置 pill 呈现（关/低/中/高，点击循环）+ `/think`；`thinkingLevel` **按 provider-scoped route id 持久化**。无偏好时，`modelSources.reasoning=true` 的模型默认「中」，其它模型默认「关」；显式关闭同样保存，run 时随 `runAgent` 下发。
@@ -579,7 +579,7 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 
 ---
 
-*本文为学习向综述；如与代码不符以代码为准，并欢迎据实修订。最后同步：2026-07-10 当前 main 状态。*
+*本文为学习向综述；如与代码不符以代码为准，并欢迎据实修订。最后同步：2026-07-13 当前 main 状态。*
 
   </script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>

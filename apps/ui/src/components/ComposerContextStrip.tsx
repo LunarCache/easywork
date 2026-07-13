@@ -40,13 +40,31 @@ export function ComposerContextPill({
   );
 }
 
-export function ComposerUsagePill({ pct, title }: { pct: number; title?: string }) {
+export function ComposerUsagePill({ pct, title, testId }: { pct: number; title?: string; testId?: string }) {
   const rounded = Math.round(pct);
   const tone = pct > 85 ? "hot" : pct > 65 ? "warn" : "safe";
+  const detail = title ?? `上下文已用 ${rounded}%`;
   return (
-    <span className={`composer-strip-pill usage ${tone}`} title={title ?? `上下文已用 ${rounded}%`}>
-      <ContextRing pct={pct} title={title} />
-      <span>{rounded}%</span>
+    <span className="composer-usage">
+      <span
+        className={`composer-strip-pill usage ${tone}`}
+        role="meter"
+        tabIndex={0}
+        aria-label={detail}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.max(0, Math.min(100, rounded))}
+        {...(testId ? { "data-testid": testId } : {})}
+      >
+        <ContextRing pct={pct} />
+      </span>
+      <span
+        className="composer-usage-tooltip"
+        role="tooltip"
+        {...(testId ? { "data-testid": `${testId}-tooltip` } : {})}
+      >
+        {detail}
+      </span>
     </span>
   );
 }

@@ -563,7 +563,7 @@ export function Chat({
               </div>
               <div className="composer-bar-right">
                 <ModelSelect models={models} sources={modelSources} value={model} onChange={setModel} up align="right" variant="strip" />
-                {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} />}
+                {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} testId="chat-context-usage" />}
                 {busy ? (
                   <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
                     <StopIcon size={15} fill="currentColor" />

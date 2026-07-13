@@ -38,6 +38,13 @@
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
 
+## 2026-07-13 — Composer 无边框控件与上下文悬停详情
+
+- **视觉收口**：Chat 与 Workspace composer 的思考 / 联网 / 知识库、工作区 / 分支、模型、审批策略和附件状态控件统一移除描边，保留输入卡外框作为整体边界。
+- **上下文圆环**：移除圆环旁常驻百分比，只保留环形进度；悬停或键盘聚焦时通过产品内 tooltip 显示百分比与 `prompt/context` token 明细，并补齐 `meter` 可访问语义。
+- **回归锁定**：Playwright 直接验证双 composer 控件四边计算样式均为 `0px`，并覆盖 Chat / Workspace 圆环无可见数字及悬停详情。
+- **验证**：UI typecheck / lint / build 全绿；`composer.spec.ts` = **11 passed**；`npm test` = **343 passed / 1 skipped**；`npm run test:e2e` = **29 passed**。
+
 ## 2026-07-13 — macOS 放大工作台安全区
 
 - **根因与修复**：SideDock 放大态以 `position: fixed; inset: 0` 覆盖 Web 标题栏，但共用头部没有继承 macOS 原生 traffic lights 的左侧安全区，文件 / 浏览器等标题会落到原生窗口控件下方。标题栏和放大 SideDock 现统一复用 `--ad-traffic-light-safe-x: 88px`。

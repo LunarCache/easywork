@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures.js";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -22,7 +22,77 @@ async function pasteImage(page: Page, testId: string): Promise<void> {
   }, testId);
 }
 
+async function expectBorderless(locator: Locator): Promise<void> {
+  await expect(locator).toBeVisible();
+  await expect
+    .poll(() => locator.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth];
+    }))
+    .toEqual(["0px", "0px", "0px", "0px"]);
+}
+
 test.describe("composer e2e", () => {
+  test("聊天与工作区 composer 内的控件均为无边框", async ({ page, openApp, client, workspaceDir, sampleImagePath }) => {
+    const project = await client.createProject({ name: "Borderless Workspace", workspaceDir });
+
+    await openApp();
+
+    const chatBox = page.getByTestId("chat-composer-input").locator("..");
+    await expectBorderless(page.getByTestId("chat-think-pill"));
+    await expectBorderless(page.getByTestId("chat-web-pill"));
+    await expectBorderless(chatBox.locator(".model-sel-btn.strip"));
+    await page.getByTestId("chat-upload-input").setInputFiles(sampleImagePath);
+    await expectBorderless(page.getByTestId("chat-image-chip"));
+    await expectBorderless(page.getByTestId("chat-image-strip").locator("img"));
+
+    await page.getByTestId(`sidebar-project-${project.id}`).click();
+    const workspaceBox = page.getByTestId("workspace-composer-input").locator("..");
+    await expectBorderless(page.getByTestId("workspace-project-pill"));
+    await expectBorderless(page.getByTestId("workspace-think-pill"));
+    await expectBorderless(page.getByTestId("workspace-approval-pill"));
+    await expectBorderless(workspaceBox.locator(".model-sel-btn.strip"));
+    await page.getByTestId("workspace-upload-input").setInputFiles(sampleImagePath);
+    await expectBorderless(page.getByTestId("workspace-image-chip"));
+    await expectBorderless(page.getByTestId("workspace-image-strip").locator("img"));
+  });
+
+  test("聊天与工作区的上下文圆环隐藏数字，并在悬停时显示用量详情", async ({ page, openApp, client, info, workspaceDir }) => {
+    const project = await client.createProject({ name: "Context Usage Workspace", workspaceDir });
+    await page.route(`${info.baseUrl}/models`, async (route) => {
+      await route.fulfill({
+        json: {
+          routed: ["test-model"],
+          modelSources: [{ id: "test-model", kind: "engine", label: "Test", modelId: "test-model" }],
+          context: { "test-model": 32_768 },
+          engines: [],
+        },
+      });
+    });
+    await page.route(`${info.baseUrl}/threads/*/usage`, async (route) => {
+      await route.fulfill({
+        json: { usage: { promptTokens: 8_192, completionTokens: 512, totalTokens: 8_704 } },
+      });
+    });
+
+    await openApp();
+
+    const chatUsage = page.getByTestId("chat-context-usage");
+    await expect(chatUsage).toBeVisible();
+    await expect(chatUsage).not.toContainText("25%");
+    await chatUsage.hover();
+    await expect(page.getByTestId("chat-context-usage-tooltip")).toHaveText("上下文已用 25% · 8192/32768 tokens");
+    await expect(page.getByTestId("chat-context-usage-tooltip")).toBeVisible();
+
+    await page.getByTestId(`sidebar-project-${project.id}`).click();
+    const workspaceUsage = page.getByTestId("workspace-context-usage");
+    await expect(workspaceUsage).toBeVisible();
+    await expect(workspaceUsage).not.toContainText("25%");
+    await workspaceUsage.hover();
+    await expect(page.getByTestId("workspace-context-usage-tooltip")).toHaveText("上下文已用 25% · 8192/32768 tokens");
+    await expect(page.getByTestId("workspace-context-usage-tooltip")).toBeVisible();
+  });
+
   test("聊天页关闭联网后从请求中排除 explore_web 和 http_get", async ({ page, openApp, info }) => {
     let requestBody: { excludeTools?: string[] } | null = null;
     await page.route(`${info.baseUrl}/models`, async (route) => {
