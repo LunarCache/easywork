@@ -18,6 +18,8 @@
 .sd-launch-stat .del { color: var(--red); }
 /* 放大到整个窗口（position:fixed 逃出主区域，盖住 rail/会话列表/标题栏） */
 .side-dock.max { position: fixed; inset: 0; width: auto; z-index: 200; }
+/* Tauri/macOS 的原生 traffic lights 仍悬浮在 fixed 层之上；放大态共享头部须复用标题栏安全区。 */
+.is-desktop .side-dock.max .sd-top { padding-left: var(--ad-traffic-light-safe-x); }
 .sd-tabs { display: flex; align-items: center; gap: 2px; padding: 7px 8px; border-bottom: 1px solid var(--border); flex: none; }
 .sd-tab { height: 28px; padding: 0 11px; border: none; border-radius: var(--r); cursor: pointer; font-family: var(--font-mono); font-size: 11px; font-weight: 600; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
 .sd-tab:hover { background: var(--color-bg-tertiary); color: var(--text); }

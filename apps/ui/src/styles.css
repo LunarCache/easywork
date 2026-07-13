@@ -380,7 +380,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 /* ================================================================
    Agent Desk 工作台 shell（标题栏 + 图标轨道 + 会话列表 + 主区 + 浮层）
    ================================================================ */
-.ad-app { --ad-titlebar-height: 46px; position: relative; height: 100vh; width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); }
+.ad-app { --ad-titlebar-height: 46px; --ad-traffic-light-safe-x: 88px; position: relative; height: 100vh; width: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); }
 
 /* —— 标题栏（两段式：段A=侧栏宽+nav，段B=面包屑+工具）—— */
 .ad-titlebar { height: var(--ad-titlebar-height); flex: none; display: flex; align-items: stretch; background: color-mix(in srgb, var(--bg) 94%, var(--bg-inset)); user-select: none; }
@@ -388,7 +388,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .ad-tb-seg-a { flex: none; height: 100%; display: flex; align-items: center; gap: 3px; padding: 0 10px; }
 .ad-tb-seg-a.bordered { border-right: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent); }
 /* macOS titleBarStyle=Overlay：原生交通灯悬浮左上 → 段A 左侧让位（仅桌面，收起也保留）。 */
-.is-desktop .ad-tb-seg-a.desktop { padding-left: 88px; }
+.is-desktop .ad-tb-seg-a.desktop { padding-left: var(--ad-traffic-light-safe-x); }
 /* 原生交通灯的视觉中心比 46px Web 标题栏中心高 2px。 */
 .is-desktop .ad-tb-seg-a.desktop .ad-tb-nav { transform: translateY(-2px); }
 .ad-tb-nav { width: 28px; height: 26px; border-radius: var(--r-sm); border: none; background: transparent; color: var(--tx-1); display: flex; align-items: center; justify-content: center; cursor: pointer; }

@@ -181,11 +181,11 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 341 passed / 1 skipped
+npm test               # vitest: 343 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
-npm run test:e2e       # Playwright UI e2e: 25 条，真 daemon + 真 Vite + 隔离 data dir
+npm run test:e2e       # Playwright UI e2e: 27 条，真 daemon + 真 Vite + 隔离 data dir
 
 npm run dev:daemon     # 仅启动 daemon，首行输出 {baseUrl, token, pid}
 npm run dev:ui         # 仅启动 Vite

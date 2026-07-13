@@ -41,6 +41,26 @@ test.describe("navigation e2e", () => {
     await expect(page.locator(".ad-tb-nav-static").first()).toHaveAttribute("data-tauri-drag-region", "true");
   });
 
+  test("macOS 放大工作台时标题避开 traffic lights", async ({ page, openApp }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "__TAURI__", {
+        configurable: true,
+        value: { core: { invoke: async () => null } },
+      });
+    });
+    await openApp();
+
+    await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
+    await page.locator(".side-dock .sd-launch-row").filter({ hasText: "文件" }).click();
+    await page.getByTitle("放大到窗口").click();
+
+    const title = page.locator(".side-dock.max .sd-top-title");
+    await expect(title).toHaveText("文件");
+    const titleBox = await title.boundingBox();
+    expect(titleBox).not.toBeNull();
+    expect(titleBox!.x >= 88 || titleBox!.y >= 46).toBe(true);
+  });
+
   test("全局搜索可通过快捷键打开并切换到目标工作区", async ({ page, openApp, client, workspaceDir }) => {
     const alpha = await client.createProject({ name: "Alpha Search Workspace", workspaceDir });
     const beta = await client.createProject({ name: "Beta Search Workspace", workspaceDir });

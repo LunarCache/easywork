@@ -38,6 +38,12 @@
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
 
+## 2026-07-13 — macOS 放大工作台安全区
+
+- **根因与修复**：SideDock 放大态以 `position: fixed; inset: 0` 覆盖 Web 标题栏，但共用头部没有继承 macOS 原生 traffic lights 的左侧安全区，文件 / 浏览器等标题会落到原生窗口控件下方。标题栏和放大 SideDock 现统一复用 `--ad-traffic-light-safe-x: 88px`。
+- **回归锁定**：Playwright 模拟 Tauri/macOS，打开文件工作台并放大，直接断言标题边界不与 `88px × 46px` traffic-light 区域相交；真实渲染同时检查返回与标题布局。
+- **验证**：UI typecheck / lint / build 全绿；`navigation.spec.ts` = **6 passed**；`npm run test:e2e` = **27 passed**。
+
 ## 2026-07-12 — 记忆与 Skill 学习前端闭环
 
 - **记忆管理可见化**：记忆页新增 Additive Memory Provider 配置 / 启用状态与开关，文案明确本地仍是唯一写入真相源；旧 `global.skills` 迁移池以只读审计面板展示 candidate、Agent Note 和 ambiguous 分类。
