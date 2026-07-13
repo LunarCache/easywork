@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { MemoryItem, Project } from "@ew/shared";
+import type { LegacySkillMemory, MemoryItem, Project } from "@ew/shared";
 import { getClient } from "../lib/client.js";
 import { BrainIcon, TrashIcon, XIcon, EditIcon, CheckIcon, PlusIcon, SearchIcon, UserIcon, FolderClosedIcon } from "../icons.js";
 
@@ -54,6 +54,10 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
   const [note, setNote] = useState("");
   const [emb, setEmb] = useState<{ ready: boolean; modelId?: string; dim: number } | null>(null);
   const [embBusy, setEmbBusy] = useState(false);
+  const [provider, setProvider] = useState<{ configured: boolean; enabled: boolean; id?: string } | null>(null);
+  const [providerBusy, setProviderBusy] = useState(false);
+  const [legacySkills, setLegacySkills] = useState<LegacySkillMemory[]>([]);
+  const [legacyOpen, setLegacyOpen] = useState(false);
   // 信息流筛选：作用域（"all" / global / ws:<id>）+ 可选分类层。
   const [scopeFilter, setScopeFilter] = useState<string>("all");
   const [layerFilter, setLayerFilter] = useState<string | null>(null);
@@ -80,6 +84,18 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
       }
       try {
         setEmb(await getClient().embeddingStatus());
+      } catch {
+        /* ignore */
+      }
+      try {
+        setProvider(await getClient().memoryProviderStatus());
+      } catch {
+        /* ignore */
+      }
+      try {
+        const items = await getClient().listLegacySkillMemory();
+        setLegacySkills(items);
+        setLegacyOpen(items.some((item) => item.disposition === "ambiguous"));
       } catch {
         /* ignore */
       }
@@ -147,6 +163,20 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
       setNote(`启用失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setEmbBusy(false);
+    }
+  };
+
+  const toggleProvider = async () => {
+    if (!provider?.configured || providerBusy) return;
+    setProviderBusy(true);
+    try {
+      const next = await getClient().setMemoryProviderEnabled(!provider.enabled);
+      setProvider(next);
+      setNote(next.enabled ? "外部记忆 Provider 已启用；它只追加受限召回，本地仍是唯一写入真相源。" : "外部记忆 Provider 已停用；本地 Core Memory 不受影响。");
+    } catch (e) {
+      setNote(`切换 Provider 失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setProviderBusy(false);
     }
   };
 
@@ -230,12 +260,56 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
               </button>
             )}
           </span>
+          <div className="mem-provider-status" data-testid="memory-provider-status" title="外部 Provider 只追加受限召回，不接管本地记忆写入">
+            <span className="mem-recall-dot" data-on={provider?.enabled ? "1" : "0"} />
+            <span>{provider?.configured ? `外部记忆 · ${provider.id ?? "已配置"}` : "外部记忆未配置"}</span>
+            {provider?.configured && (
+              <button
+                className={`set-toggle ${provider.enabled ? "on" : ""}`}
+                aria-label={provider.enabled ? "停用外部记忆 Provider" : "启用外部记忆 Provider"}
+                aria-pressed={provider.enabled}
+                disabled={providerBusy}
+                onClick={() => void toggleProvider()}
+              >
+                <span />
+              </button>
+            )}
+          </div>
           <button className="set-btn primary" data-testid="memory-add-button" onClick={openAddTop}>
             <PlusIcon size={15} /> 添加
           </button>
         </div>
 
         {note && <div className="mem-ov-note">{note}</div>}
+
+        <section className="legacy-memory" data-testid="legacy-skill-memory">
+          <button className="legacy-memory-head" data-testid="legacy-skill-memory-toggle" onClick={() => setLegacyOpen((value) => !value)} aria-expanded={legacyOpen}>
+            <div>
+              <strong>旧 Skills 记忆迁移</strong>
+              <span>只读审计池；程序性内容需作为 Candidate 审核后才会成为 Skill。</span>
+            </div>
+            <span className="set-pill">待判断 {legacySkills.filter((item) => item.disposition === "ambiguous").length}</span>
+            <span className="legacy-memory-chevron">{legacyOpen ? "收起" : "查看"}</span>
+          </button>
+          {legacyOpen && (
+            <div className="legacy-memory-list">
+              {legacySkills.length === 0 ? (
+                <div className="legacy-memory-empty">没有待人工判断的旧 Skills 记忆。</div>
+              ) : legacySkills.map((item) => (
+                <div key={item.id} className="legacy-memory-item">
+                  <div className="legacy-memory-text">{item.text}</div>
+                  <div className="legacy-memory-meta">
+                    <span className={`set-pill ${item.disposition === "ambiguous" ? "warn" : ""}`}>
+                      {item.disposition === "candidate" ? "已转候选" : item.disposition === "agent-note" ? "已转 Agent Note" : "待人工判断"}
+                    </span>
+                    {item.sourceThreadId && <span title={item.sourceThreadId}>来源 {item.sourceThreadId.slice(0, 8)}</span>}
+                    <span>{relTime(item.updatedAt)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* 筛选 chips：作用域 + （选中具体作用域时）分类层 */}
         <div className="mem-filters">

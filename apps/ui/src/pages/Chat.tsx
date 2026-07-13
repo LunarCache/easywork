@@ -398,7 +398,7 @@ export function Chat({
   };
 
   return (
-    <div className="chat-wrap">
+    <div className="chat-wrap" data-testid="chat-root" data-thread-id={threadId}>
       <div className={`chat ${msgs.length === 0 ? "is-empty" : ""}`}>
         <div className="messages" ref={scrollRef} onScroll={onMessagesScroll}>
           {msgs.length === 0 && (

@@ -21,6 +21,7 @@ import {
   ChevronDownIcon,
   CheckIcon,
 } from "../icons.js";
+import { SkillAttentionBadge, type SkillAttention } from "../components/SkillAttentionBadge.js";
 
 export type SettingsSection = "general" | "models" | "channels" | "kb" | "skills" | "mcp" | "memory";
 
@@ -45,6 +46,7 @@ export interface SettingsPageHostProps {
   onThemeChange: (next: ThemePrefs) => void;
   onBack: () => void;
   onModelsChange: () => void;
+  skillAttention?: SkillAttention;
 }
 
 const SETTINGS_SEC_KEY = "ew.settingsSection";
@@ -190,7 +192,8 @@ function buildSettingsSections({
   theme,
   onThemeChange,
   onModelsChange,
-}: Pick<SettingsPageHostProps, "theme" | "onThemeChange" | "onModelsChange">): SettingsSectionDefinition[] {
+  activeSection,
+}: Pick<SettingsPageHostProps, "theme" | "onThemeChange" | "onModelsChange"> & { activeSection: SettingsSection }): SettingsSectionDefinition[] {
   return [
     {
       id: "general",
@@ -229,7 +232,7 @@ function buildSettingsSections({
       Icon: SparkIcon,
       kind: "page",
       keepAlive: true,
-      render: () => <Skills />,
+      render: () => <Skills active={activeSection === "skills"} />,
     },
     {
       id: "mcp",
@@ -258,10 +261,11 @@ export function SettingsPageHost({
   onThemeChange,
   onBack,
   onModelsChange,
+  skillAttention,
 }: SettingsPageHostProps) {
   const sections = useMemo(
-    () => buildSettingsSections({ theme, onThemeChange, onModelsChange }),
-    [theme, onThemeChange, onModelsChange],
+    () => buildSettingsSections({ theme, onThemeChange, onModelsChange, activeSection: section }),
+    [theme, onThemeChange, onModelsChange, section],
   );
   const sectionById = useMemo(() => new Map(sections.map((item) => [item.id, item])), [sections]);
   const current = sectionById.get(section) ?? sectionById.get(DEFAULT_SETTINGS_SECTION)!;
@@ -291,6 +295,7 @@ export function SettingsPageHost({
             onClick={() => openSection(id)}
           >
             <Icon size={16} /> {label}
+            {id === "skills" && <SkillAttentionBadge attention={skillAttention} testId="settings-skill-attention" />}
           </button>
         ))}
       </div>

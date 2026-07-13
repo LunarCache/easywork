@@ -47,6 +47,27 @@ function makeClient() {
         { status: 200, headers: { "content-type": "text/event-stream" } },
       );
     }
+    if (String(url).endsWith("/memory/legacy-skills")) {
+      return new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "legacy-1",
+              text: "Deploy with the release checklist",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+              disposition: "ambiguous",
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }
+    if (String(url).endsWith("/memory/provider")) {
+      const enabled = init?.method === "PATCH"
+        ? Boolean(JSON.parse(String(init.body ?? "{}") || "{}").enabled)
+        : true;
+      return new Response(JSON.stringify({ configured: true, enabled, id: "deep-memory" }), { status: 200 });
+    }
     if (String(url).includes("/start") || String(url).includes("/stop") || (String(url).endsWith("/im/connectors") && init?.method === "POST")) {
       return new Response(JSON.stringify({ ok: true, status: { id: "tg", kind: "telegram", enabled: true, running: true } }), { status: 200 });
     }
@@ -128,5 +149,24 @@ describe("EasyWorkClient IM routes", () => {
         channel: { kind: "wechat", channelId: "wxid_alice" },
       },
     ]);
+  });
+});
+
+describe("EasyWorkClient memory migration routes", () => {
+  it("lists the read-only legacy Skill migration pool", async () => {
+    const { client, calls } = makeClient();
+
+    await expect(client.listLegacySkillMemory()).resolves.toEqual([
+      expect.objectContaining({ id: "legacy-1", disposition: "ambiguous" }),
+    ]);
+    expect(calls.some((call) => String(call.url).endsWith("/memory/legacy-skills"))).toBe(true);
+  });
+
+  it("reads and toggles the additive memory provider", async () => {
+    const { client, calls } = makeClient();
+
+    await expect(client.memoryProviderStatus()).resolves.toEqual({ configured: true, enabled: true, id: "deep-memory" });
+    await expect(client.setMemoryProviderEnabled(false)).resolves.toEqual({ configured: true, enabled: false, id: "deep-memory" });
+    expect(calls.some((call) => String(call.url).endsWith("/memory/provider") && call.init?.method === "PATCH")).toBe(true);
   });
 });

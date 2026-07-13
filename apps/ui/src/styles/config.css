@@ -26,6 +26,27 @@
 .skill-detail-name { font-size: 15px; font-weight: 650; font-family: var(--font-mono); }
 .skill-detail-desc { font-size: 13px; color: var(--text-2); margin: 0 0 14px; line-height: 1.55; }
 .skill-detail-body { margin: 0; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--color-bg-card); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; color: var(--text); }
+.skill-candidate-sources { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.skill-candidate-sources strong { font-size: 12px; color: var(--text-2); margin-right: 2px; }
+.skill-evidence-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.skill-evidence-list button { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--border-soft); border-radius: var(--r); background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; }
+.skill-evidence-list button:hover { border-color: var(--accent); }
+.skill-evidence-list span { flex: 1; min-width: 0; font-size: 12px; }
+.skill-evidence-list small { flex: none; color: var(--text-tertiary); font-size: 10.5px; }
+.skill-feedback-dialog { max-height: min(760px, calc(100vh - 48px)); overflow: auto; }
+.skill-feedback-dialog .mem-add-pickers input { flex: 1; min-width: 0; }
+.skill-feedback-hint { margin: 10px 0 6px; color: var(--text-tertiary); font-size: 11.5px; }
+.skill-feedback-dialog .skill-detail-body { width: 100%; min-height: 260px; resize: vertical; box-sizing: border-box; }
+.skill-snapshot-dialog { width: min(920px, calc(100vw - 48px)); }
+.skill-snapshot-layout { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); gap: 12px; min-height: 320px; max-height: min(560px, calc(100vh - 180px)); }
+.skill-snapshot-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+.skill-snapshot-list button { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid var(--border-soft); border-radius: var(--r); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.skill-snapshot-list button.on { border-color: var(--accent); background: var(--accent-soft); }
+.skill-snapshot-list strong { font-size: 12px; }
+.skill-snapshot-list span { color: var(--text-tertiary); font-size: 10.5px; }
+.skill-snapshot-layout .skill-detail-body { overflow: auto; }
+.inline-empty-state { padding: 14px; color: var(--text-tertiary); font-size: 12px; }
+.note.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--border)); background: color-mix(in srgb, var(--red) 8%, transparent); }
 
 /* —— MCP 简约卡片（状态点 + 连接状态 + 开关）—— */
 .mcp-list { display: flex; flex-direction: column; gap: 10px; }

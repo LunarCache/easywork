@@ -12,6 +12,7 @@ import { Sidebar, type Mode } from "./components/Sidebar.js";
 import { SearchPalette } from "./components/SearchPalette.js";
 import { useConfirm } from "./components/ConfirmDialog.js";
 import { SettingsPageHost as Settings, useSettingsPageHost } from "./settings/SettingsHost.js";
+import { deriveSkillAttention, type SkillAttention } from "./components/SkillAttentionBadge.js";
 import { Inbox } from "./pages/Inbox.js";
 import { FolderTreeIcon, PlusIcon } from "./icons.js";
 
@@ -46,6 +47,7 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [workThreadId, setWorkThreadId] = useState<string>("");
+  const [inboxThreadId, setInboxThreadId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemePrefs>(loadThemePrefs);
   const [sessionWidth, setSessionWidth] = useState<number>(loadSessionWidth);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -53,8 +55,10 @@ export function App() {
   const [dockOpen, setDockOpen] = useState(false);
   const [workBranch, setWorkBranch] = useState<string | undefined>(undefined);
   const workspaceCreatePending = useRef(false);
+  const skillAttentionWatchGeneration = useRef(0);
   // 点项目「查看文件」→ 主区切到该项目的文件浏览页（替代对话，左上角「返回任务」回退）。
   const [filesProjectId, setFilesProjectId] = useState<string | null>(null);
+  const [skillAttention, setSkillAttention] = useState<SkillAttention>({ pending: 0, error: false });
 
   // 外观：应用到 <html>；跟随系统时监听 OS 明暗变化实时切换。
   useEffect(() => {
@@ -113,6 +117,45 @@ export function App() {
       /* ignore */
     }
   }, []);
+
+  const refreshSkillAttention = useCallback(async (): Promise<boolean> => {
+    try {
+      const [candidates, learning] = await Promise.all([
+        getClient().listSkillCandidates(),
+        getClient().skillLearningStatus(),
+      ]);
+      setSkillAttention(deriveSkillAttention(candidates, learning.status));
+      return learning.status.running;
+    } catch {
+      /* attention state is advisory and must not affect app connectivity */
+      return false;
+    }
+  }, []);
+
+  const watchSkillAttention = useCallback(async () => {
+    const watchId = ++skillAttentionWatchGeneration.current;
+    for (let attempt = 0; attempt < 60 && watchId === skillAttentionWatchGeneration.current; attempt++) {
+      if (!(await refreshSkillAttention())) return;
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 1_000));
+    }
+  }, [refreshSkillAttention]);
+
+  useEffect(() => {
+    const refresh = (event?: Event) => {
+      const attention = (event as CustomEvent<SkillAttention> | undefined)?.detail;
+      if (attention && typeof attention.pending === "number" && typeof attention.error === "boolean") {
+        setSkillAttention(attention);
+      } else {
+        void refreshSkillAttention();
+      }
+    };
+    window.addEventListener("ew:skill-attention-changed", refresh);
+    const interval = window.setInterval(refresh, 15_000);
+    return () => {
+      window.removeEventListener("ew:skill-attention-changed", refresh);
+      window.clearInterval(interval);
+    };
+  }, [refreshSkillAttention]);
 
   const enterWorkspace = useCallback(async (workspaceDir?: string) => {
     if (workspaceCreatePending.current) return;
@@ -190,10 +233,11 @@ export function App() {
       setStatus("ok");
       void refreshThreads();
       void refreshProjects();
+      void refreshSkillAttention();
     } catch {
       setStatus("unauthorized");
     }
-  }, [refreshThreads, refreshProjects]);
+  }, [refreshThreads, refreshProjects, refreshSkillAttention]);
 
   useEffect(() => {
     void check();
@@ -260,6 +304,34 @@ export function App() {
     setWorkThreadId(tid);
     setMode("work");
   };
+  useEffect(() => {
+    const openSourceThread = (async (event: Event) => {
+      const id = (event as CustomEvent<{ threadId?: string }>).detail?.threadId;
+      if (!id) return;
+      settingsHost.close();
+      let source = threads.find((thread) => thread.id === id);
+      if (!source) {
+        try {
+          const currentThreads = await getClient().listThreads();
+          setThreads(currentThreads);
+          source = currentThreads.find((thread) => thread.id === id);
+        } catch {
+          /* fall through to opening the id as a chat task */
+        }
+      }
+      if (source?.channel) {
+        setFilesProjectId(null);
+        setInboxThreadId(id);
+        setMode("inbox");
+      } else if (source?.projectId) {
+        selectWorkThread(source.projectId, id);
+      } else {
+        selectThread(id);
+      }
+    }) as EventListener;
+    window.addEventListener("ew:open-source-thread", openSourceThread);
+    return () => window.removeEventListener("ew:open-source-thread", openSourceThread);
+  }, [threads, settingsHost]);
   const newWorkThread = (pid: string) => {
     setFilesProjectId(null);
     setProjectId(pid);
@@ -279,6 +351,7 @@ export function App() {
   // 切换顶部模式（对话/工作区/收件箱）时退出文件浏览页。
   const changeMode = (m: Mode) => {
     setFilesProjectId(null);
+    if (m === "inbox") setInboxThreadId(null);
     setMode(m);
   };
   const delThread = async (id: string, e: React.MouseEvent) => {
@@ -393,6 +466,7 @@ export function App() {
                 onOpenInbox={() => changeMode("inbox")}
                 onOpenSettings={() => settingsHost.open()}
                 onOpenSearch={() => setSearchOpen(true)}
+                skillAttention={skillAttention}
               />
             </div>
             <div className="ad-resizer" title="拖动调整宽度" onMouseDown={onResizeStart}>
@@ -410,7 +484,7 @@ export function App() {
               skills={skills}
               contexts={contexts}
               threadId={threadId}
-              onSaved={refreshThreads}
+              onSaved={() => { void refreshThreads(); void watchSkillAttention(); }}
               dockOpen={dockOpen}
               setDockOpen={setDockOpen}
             />
@@ -429,7 +503,7 @@ export function App() {
                 contexts={contexts}
                 threadId={workThreadId || latestWorkThread(project.id)}
                 onChanged={refreshProjects}
-                onThreadsChanged={refreshThreads}
+                onThreadsChanged={() => { void refreshThreads(); void watchSkillAttention(); }}
                 onBranchChange={setWorkBranch}
                 onSelectProject={(id) => void selectProject(id)}
                 onOpenFolder={() => void openWorkspaceFolder()}
@@ -449,7 +523,7 @@ export function App() {
               </div>
             ))}
           {mode === "inbox" && (
-            <Inbox onThreadsChanged={refreshThreads} onOpenChannelSettings={openChannelSettings} />
+            <Inbox initialThreadId={inboxThreadId} onThreadsChanged={refreshThreads} onOpenChannelSettings={openChannelSettings} />
           )}
         </main>
       </div>
@@ -462,6 +536,7 @@ export function App() {
           onThemeChange={changeTheme}
           onModelsChange={check}
           onBack={settingsHost.close}
+          skillAttention={skillAttention}
         />
       )}
       {searchOpen && (

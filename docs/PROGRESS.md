@@ -38,6 +38,14 @@
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
 
+## 2026-07-12 — 记忆与 Skill 学习前端闭环
+
+- **记忆管理可见化**：记忆页新增 Additive Memory Provider 配置 / 启用状态与开关，文案明确本地仍是唯一写入真相源；旧 `global.skills` 迁移池以只读审计面板展示 candidate、Agent Note 和 ambiguous 分类。
+- **learned Skill 反馈与版本**：Skills 页可记录成功、失败和修正；修正提交完整 `SKILL.md` 时只生成待审核 optimistic-lock patch。原“回滚最新”升级为快照时间线，可预览并选择指定版本回滚。
+- **来源与提醒闭环**：Candidate 的来源对话和 evidence 可直接打开对应对话；后台待审核数量和上次学习失败会在主侧栏设置入口及 Skills 设置导航显示全局提醒。
+- **回归锁定**：SDK 新增只读迁移池方法和契约测试；Playwright 新增真实 daemon 场景覆盖 Provider / 迁移视图、全局提醒、来源跳转、快照和反馈 patch；真实页面截图验证记忆页布局无溢出。
+- **验证**：`npm run lint`、`npm run typecheck`、`npm run build` 全绿；`npm test` = **343 passed / 1 skipped**；`npm run test:e2e` = **26 passed**。
+
 ## 2026-07-12 — Core Memory 契约与可审核 Skill 自动学习
 
 - **记忆/程序彻底分离**：active memory 只接受全局 `user-profile/agent-notes` 与工作区三层；derived facts 不进入常驻 manifest。旧 `agent-memory` 迁为 Agent Notes，旧 `global.skills` 进入只读迁移池并分类为 pending Candidate、Agent Note 或 ambiguous；`skills.md` 原件与 legacy backup 均保留。

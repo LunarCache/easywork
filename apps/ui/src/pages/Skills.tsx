@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { LearnedSkill, Project, Skill, SkillCandidate, SkillLearningSettings, SkillLearningStatus, SkillSource } from "@ew/shared";
+import type { LearnedSkill, Project, Skill, SkillCandidate, SkillLearningSettings, SkillLearningStatus, SkillSnapshot, SkillSource } from "@ew/shared";
 import { getClient } from "../lib/client.js";
 import { ConfigEmptyState, ConfigToolbar } from "../components/ConfigPrimitives.js";
 import { loadDisabledSkills, saveDisabledSkills } from "../lib/prefs.js";
 import { SparkIcon, FolderIcon, PlusIcon, ArrowLeftIcon, CheckIcon, XIcon } from "../icons.js";
+import { deriveSkillAttention } from "../components/SkillAttentionBadge.js";
 
 function shortPath(p: string): string {
   const normalized = p.replace(/\\/g, "/");
@@ -25,7 +26,11 @@ function sourceSubtitle(source: SkillSource): string {
   }
 }
 
-export function Skills() {
+function notifySkillAttentionChanged(attention: { pending: number; error: boolean }): void {
+  window.dispatchEvent(new CustomEvent("ew:skill-attention-changed", { detail: attention }));
+}
+
+export function Skills({ active = true }: { active?: boolean }) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [sources, setSources] = useState<SkillSource[]>([]);
   const [candidates, setCandidates] = useState<SkillCandidate[]>([]);
@@ -47,6 +52,16 @@ export function Skills() {
   const [learnKind, setLearnKind] = useState<"text" | "path" | "url" | "conversation">("text");
   const [learnValue, setLearnValue] = useState("");
   const [learnWorkspaceId, setLearnWorkspaceId] = useState("");
+  const [feedback, setFeedback] = useState<{
+    learned: LearnedSkill;
+    outcome: "success" | "failure" | "correction";
+    summary: string;
+    sourceThreadId: string;
+    proposedSkillMd: string;
+  } | null>(null);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [snapshots, setSnapshots] = useState<{ learned: LearnedSkill; items: SkillSnapshot[]; selectedId: string } | null>(null);
+  const [snapshotsBusy, setSnapshotsBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -54,12 +69,14 @@ export function Skills() {
       const info = await getClient().skillsInfo();
       setSkills(info.skills);
       setSources(info.sources ?? []);
-      setCandidates(await getClient().listSkillCandidates());
+      const nextCandidates = await getClient().listSkillCandidates();
+      setCandidates(nextCandidates);
       setLearned(await getClient().listLearnedSkills());
       const learning = await getClient().skillLearningStatus();
       setLearningSettings(learning.settings);
       setLearningStatus(learning.status);
       setProjects(await getClient().listProjects());
+      notifySkillAttentionChanged(deriveSkillAttention(nextCandidates, learning.status));
     } catch {
       /* ignore */
     } finally {
@@ -68,8 +85,8 @@ export function Skills() {
   }, []);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (active) void refresh();
+  }, [active, refresh]);
 
   const openDir = async () => {
     try {
@@ -165,6 +182,10 @@ export function Skills() {
     await refresh();
   };
 
+  const openSourceThread = (sourceThreadId: string) => {
+    window.dispatchEvent(new CustomEvent("ew:open-source-thread", { detail: { threadId: sourceThreadId } }));
+  };
+
   const changeCandidateScope = async (scope: "global" | "workspace", workspaceId?: string) => {
     if (!candidateDetail) return;
     try {
@@ -220,18 +241,66 @@ export function Skills() {
     await refresh();
   };
 
-  const rollbackLatest = async (id: string) => {
+  const openSnapshots = async (learned: LearnedSkill) => {
+    setSnapshotsBusy(true);
     try {
-      const snapshots = await getClient().learnedSkillSnapshots(id);
-      if (!snapshots[0]) {
-        setNote("这个 learned Skill 还没有可回滚快照。");
-        return;
-      }
-      await getClient().rollbackLearnedSkill(id, snapshots[0].id);
-      setNote(`已回滚到快照：${snapshots[0].reason}`);
+      const items = await getClient().learnedSkillSnapshots(learned.id);
+      setSnapshots({ learned, items, selectedId: items[0]?.id ?? "" });
+    } catch (error) {
+      setNote(`读取版本失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSnapshotsBusy(false);
+    }
+  };
+
+  const rollbackSnapshot = async () => {
+    if (!snapshots?.selectedId) return;
+    setSnapshotsBusy(true);
+    try {
+      const selected = snapshots.items.find((item) => item.id === snapshots.selectedId);
+      await getClient().rollbackLearnedSkill(snapshots.learned.id, snapshots.selectedId);
+      setSnapshots(null);
+      setNote(`已回滚到快照：${selected?.reason ?? snapshots.selectedId}`);
       await refresh();
     } catch (error) {
       setNote(`回滚失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSnapshotsBusy(false);
+    }
+  };
+
+  const openFeedback = async (learnedSkill: LearnedSkill, skill: Skill) => {
+    let body = "";
+    try {
+      body = (await getClient().skillBody(skill.id)).body;
+    } catch {
+      /* correction editor remains empty when the package cannot be read */
+    }
+    setFeedback({ learned: learnedSkill, outcome: "success", summary: "", sourceThreadId: "", proposedSkillMd: body });
+  };
+
+  const submitFeedback = async () => {
+    if (!feedback || !feedback.summary.trim()) return;
+    setFeedbackBusy(true);
+    try {
+      const result = await getClient().recordLearnedSkillFeedback(feedback.learned.id, {
+        outcome: feedback.outcome,
+        summary: feedback.summary.trim(),
+        ...(feedback.sourceThreadId.trim() ? { sourceThreadId: feedback.sourceThreadId.trim() } : {}),
+        ...(feedback.outcome === "correction" && feedback.proposedSkillMd.trim() ? { proposedSkillMd: feedback.proposedSkillMd } : {}),
+      });
+      setFeedback(null);
+      if (result.candidate) {
+        setTab("pending");
+        setNote("修正已生成待审核 patch；当前 Skill 在批准前保持不变。");
+      } else {
+        setNote("反馈已记录，用于 learned Skill 的后续维护。");
+      }
+      await refresh();
+    } catch (error) {
+      setNote(`记录反馈失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setFeedbackBusy(false);
     }
   };
 
@@ -306,7 +375,30 @@ export function Skills() {
             {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select>
         </div>
-        <div className="note">来源：{candidateDetail.sourceThreadIds.join("、")} · {candidateDetail.evidence.map((entry) => entry.summary).join("；")}</div>
+        <div className="skill-candidate-sources">
+          <strong>来源对话</strong>
+          {candidateDetail.sourceThreadIds.length === 0 ? <span className="skill-desc">独立候选，无来源对话</span> : candidateDetail.sourceThreadIds.map((sourceThreadId) => (
+            <button
+              key={sourceThreadId}
+              className="set-btn ghost soft"
+              data-testid={`skill-candidate-source-${sourceThreadId}`}
+              title={sourceThreadId}
+              onClick={() => openSourceThread(sourceThreadId)}
+            >
+              {sourceThreadId.slice(0, 12)}
+            </button>
+          ))}
+        </div>
+        {candidateDetail.evidence.length > 0 && (
+          <div className="skill-evidence-list">
+            {candidateDetail.evidence.map((entry, index) => (
+              <button key={`${entry.sourceThreadId}-${index}`} onClick={() => openSourceThread(entry.sourceThreadId)}>
+                <span>{entry.summary}</span>
+                <small>打开来源对话 · {entry.sourceThreadId.slice(0, 12)}</small>
+              </button>
+            ))}
+          </div>
+        )}
         {candidateDetail.validation.findings.length > 0 && (
           <div className="note">{candidateDetail.validation.findings.map((finding) => `${finding.severity}: ${finding.message}`).join("；")}</div>
         )}
@@ -383,6 +475,9 @@ export function Skills() {
         </div>
       )}
       {note && <div className="note">{note}</div>}
+      {learningStatus?.lastResult === "error" && (
+        <div className="note danger" data-testid="skill-learning-error">自动学习上次检查失败：{learningStatus.lastError ?? "未知错误"}</div>
+      )}
       {learningSettings && (
         <div className="row gap" data-testid="skill-learning-controls">
           <label className="row gap">
@@ -450,6 +545,90 @@ export function Skills() {
               <span className="ad-spacer" />
               <button className="set-btn ghost soft" onClick={() => setLearning(false)}>取消</button>
               <button className="set-btn primary" data-testid="skills-learn-submit" onClick={() => void beginLearning()} disabled={!learnValue.trim()}>进入 Agent 学习</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {feedback && (
+        <div className="confirm-mask" onClick={() => setFeedback(null)}>
+          <div className="confirm-box wide skill-feedback-dialog" data-testid="learned-skill-feedback-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="confirm-title">反馈 · {feedback.learned.name}</div>
+            <div className="mem-add-pickers">
+              <select
+                data-testid="learned-skill-feedback-outcome"
+                value={feedback.outcome}
+                onChange={(event) => setFeedback((value) => value ? { ...value, outcome: event.target.value as typeof value.outcome } : value)}
+              >
+                <option value="success">使用成功</option>
+                <option value="failure">使用失败</option>
+                <option value="correction">需要修正</option>
+              </select>
+              <input
+                value={feedback.sourceThreadId}
+                placeholder="来源对话 ID（可选）"
+                onChange={(event) => setFeedback((value) => value ? { ...value, sourceThreadId: event.target.value } : value)}
+              />
+            </div>
+            <textarea
+              className="mem-add-textarea"
+              data-testid="learned-skill-feedback-summary"
+              value={feedback.summary}
+              placeholder="说明结果、失败原因或需要修正的地方"
+              onChange={(event) => setFeedback((value) => value ? { ...value, summary: event.target.value } : value)}
+            />
+            {feedback.outcome === "correction" && (
+              <>
+                <div className="skill-feedback-hint">提交完整 SKILL.md 后只会生成待审核 patch，不会直接覆盖当前 Skill。</div>
+                <textarea
+                  className="skill-detail-body"
+                  data-testid="learned-skill-feedback-body"
+                  value={feedback.proposedSkillMd}
+                  onChange={(event) => setFeedback((value) => value ? { ...value, proposedSkillMd: event.target.value } : value)}
+                />
+              </>
+            )}
+            <div className="confirm-actions">
+              <span className="ad-spacer" />
+              <button className="set-btn ghost soft" onClick={() => setFeedback(null)}>取消</button>
+              <button
+                className="set-btn primary"
+                data-testid="learned-skill-feedback-submit"
+                onClick={() => void submitFeedback()}
+                disabled={feedbackBusy || !feedback.summary.trim() || (feedback.outcome === "correction" && !feedback.proposedSkillMd.trim())}
+              >
+                {feedback.outcome === "correction" ? "生成待审核 patch" : "记录反馈"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {snapshots && (
+        <div className="confirm-mask" onClick={() => setSnapshots(null)}>
+          <div className="confirm-box wide skill-snapshot-dialog" data-testid="learned-skill-snapshots" onClick={(event) => event.stopPropagation()}>
+            <div className="confirm-title">版本快照 · {snapshots.learned.name}</div>
+            {snapshots.items.length === 0 ? (
+              <div className="inline-empty-state">还没有可回滚快照。维护、归档或回滚前会自动创建快照。</div>
+            ) : (
+              <div className="skill-snapshot-layout">
+                <div className="skill-snapshot-list">
+                  {snapshots.items.map((snapshot) => (
+                    <button
+                      key={snapshot.id}
+                      className={snapshot.id === snapshots.selectedId ? "on" : ""}
+                      onClick={() => setSnapshots((value) => value ? { ...value, selectedId: snapshot.id } : value)}
+                    >
+                      <strong>{snapshot.reason}</strong>
+                      <span>{new Date(snapshot.createdAt).toLocaleString()}</span>
+                    </button>
+                  ))}
+                </div>
+                <pre className="skill-detail-body">{snapshots.items.find((item) => item.id === snapshots.selectedId)?.packageFiles["SKILL.md"] ?? ""}</pre>
+              </div>
+            )}
+            <div className="confirm-actions">
+              <span className="ad-spacer" />
+              <button className="set-btn ghost soft" data-testid="learned-skill-snapshots-close" onClick={() => setSnapshots(null)}>关闭</button>
+              <button className="set-btn primary" onClick={() => void rollbackSnapshot()} disabled={snapshotsBusy || !snapshots.selectedId}>回滚到此版本</button>
             </div>
           </div>
         </div>
@@ -527,7 +706,8 @@ export function Skills() {
                           {learnedSkill && (
                             <>
                               <button className="set-btn ghost soft" onClick={() => void getClient().pinLearnedSkill(learnedSkill.id, !learnedSkill.pinned).then(refresh)}>{learnedSkill.pinned ? "取消固定" : "固定"}</button>
-                              <button className="set-btn ghost soft" onClick={() => void rollbackLatest(learnedSkill.id)}>回滚</button>
+                              <button className="set-btn ghost soft" data-testid={`learned-skill-feedback-${learnedSkill.id}`} onClick={() => void openFeedback(learnedSkill, s)}>反馈</button>
+                              <button className="set-btn ghost soft" data-testid={`learned-skill-versions-${learnedSkill.id}`} onClick={() => void openSnapshots(learnedSkill)} disabled={snapshotsBusy}>版本</button>
                               <button className="set-btn ghost soft" disabled={learnedSkill.pinned} onClick={() => void archiveLearned(learnedSkill.id)}>归档</button>
                             </>
                           )}

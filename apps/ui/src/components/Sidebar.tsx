@@ -12,6 +12,7 @@ import {
   SearchIcon,
   CollapseAllIcon,
 } from "../icons.js";
+import { SkillAttentionBadge, type SkillAttention } from "./SkillAttentionBadge.js";
 
 export type Mode = "chat" | "work" | "inbox";
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
@@ -71,6 +72,7 @@ export function Sidebar({
   onOpenInbox,
   onOpenSettings,
   onOpenSearch,
+  skillAttention,
 }: {
   threads: ThreadItem[];
   projects: Project[];
@@ -92,6 +94,7 @@ export function Sidebar({
   onOpenInbox: () => void;
   onOpenSettings: () => void;
   onOpenSearch?: () => void;
+  skillAttention?: SkillAttention;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
@@ -266,6 +269,7 @@ export function Sidebar({
         <button className="ad-side-set" data-testid="sidebar-settings" onClick={onOpenSettings}>
           <GearIcon size={17} />
           <span>设置</span>
+          <SkillAttentionBadge attention={skillAttention} testId="skill-attention-badge" />
         </button>
         <span className="ad-spacer" />
         <span

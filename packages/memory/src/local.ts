@@ -74,14 +74,7 @@ const LAYER_FILE: Record<(typeof GLOBAL_LAYERS)[number], string> = {
   "agent-notes": "agent-notes.md",
 };
 
-export interface LegacySkillMemory {
-  id: string;
-  text: string;
-  sourceThreadId?: string;
-  updatedAt: string;
-  meta?: Record<string, unknown>;
-  disposition?: "candidate" | "agent-note" | "ambiguous";
-}
+export type LegacySkillMemory = import("@ew/shared").LegacySkillMemory;
 
 interface Row {
   rowid?: number | bigint;

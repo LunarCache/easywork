@@ -114,4 +114,99 @@ test.describe("knowledge base and skills e2e", () => {
     await expect(page.getByTestId("chat-composer-input")).toContainText("stage_skill_candidate");
     expect((await client.listSkillCandidates()).filter((item) => item.status === "pending")).toHaveLength(0);
   });
+
+  test("学习与记忆的剩余生命周期可从前端完成", async ({ page, openApp, client }) => {
+    const suffix = Date.now().toString().slice(-6);
+    const name = `pw-feedback-${suffix}`;
+    const sourceThreadId = `pw-source-${suffix}`;
+    const skillMd = `---\nname: ${name}\ndescription: Feedback lifecycle fixture\nwhenToUse: when testing learned Skill feedback\nversion: "0.1.0"\n---\n# Workflow\n## Procedure\n1. Run the check.\n## Pitfalls\n- Keep it bounded.\n## Verification\n- Confirm the result.\n`;
+    const candidate = await client.stageSkillCandidate({
+      name,
+      description: "Feedback lifecycle fixture",
+      triggerConditions: ["when testing learned Skill feedback"],
+      scope: "global",
+      proposedSkillMd: skillMd,
+      requiredTools: [],
+      sourceThreadIds: [sourceThreadId],
+      evidence: [{ sourceThreadId, summary: "The source task established the workflow" }],
+      reason: "Reusable feedback fixture",
+      createdBy: "background-learning",
+    });
+
+    await openApp();
+    await expect(page.getByTestId("skill-attention-badge")).toHaveText("1");
+    await page.getByTestId("sidebar-settings").click();
+    await expect(page.getByTestId("settings-skill-attention")).toHaveText("1");
+    await page.getByTestId("settings-nav-memory").click();
+    await expect(page.getByTestId("memory-provider-status")).toContainText("未配置");
+    await page.getByTestId("legacy-skill-memory-toggle").click();
+    await expect(page.getByTestId("legacy-skill-memory")).toContainText("没有待人工判断的旧 Skills 记忆");
+
+    const lateName = `pw-late-${suffix}`;
+    const lateCandidate = await client.stageSkillCandidate({
+      name: lateName,
+      description: "Candidate created while Skills is kept alive in the background",
+      triggerConditions: ["when testing keep-alive refresh"],
+      scope: "global",
+      proposedSkillMd: skillMd.replaceAll(name, lateName),
+      requiredTools: [],
+      sourceThreadIds: [sourceThreadId],
+      evidence: [{ sourceThreadId, summary: "Created after the Skills page first mounted" }],
+      reason: "Verify returning to Skills refreshes background candidates",
+      createdBy: "background-learning",
+    });
+
+    await page.getByTestId("settings-nav-skills").click();
+    await page.getByTestId("skills-tab-pending").click();
+    await expect(page.getByTestId(`skill-candidate-${lateCandidate.id}`)).toBeVisible();
+    await client.rejectSkillCandidate(lateCandidate.id, "e2e cleanup");
+    await page.getByTestId("settings-nav-memory").click();
+    await page.getByTestId("settings-nav-skills").click();
+    await expect(page.getByTestId(`skill-candidate-${lateCandidate.id}`)).toHaveCount(0);
+    await page.getByTestId("skills-tab-pending").click();
+    await page.getByTestId(`skill-candidate-${candidate.id}`).click();
+    await page.getByTestId(`skill-candidate-source-${sourceThreadId}`).click();
+    await expect(page.getByTestId("chat-root")).toHaveAttribute("data-thread-id", sourceThreadId);
+
+    await page.getByTestId("sidebar-settings").click();
+    await page.getByTestId("settings-nav-skills").click();
+    await page.getByTestId("skills-tab-pending").click();
+    await page.getByTestId(`skill-candidate-${candidate.id}`).click();
+    await page.getByTestId("skill-candidate-approve").click();
+
+    await expect.poll(async () => (await client.listLearnedSkills()).some((item) => item.name === name)).toBe(true);
+    const learned = (await client.listLearnedSkills()).find((item) => item.name === name);
+    expect(learned).toBeTruthy();
+    await client.archiveLearnedSkill(learned!.id);
+    await client.restoreLearnedSkill(learned!.id);
+    await page.reload();
+    await page.getByTestId("sidebar-settings").click();
+    await page.getByTestId("settings-nav-skills").click();
+
+    const skill = (await client.skillsInfo()).skills.find((item) => item.frontmatter.name === name);
+    expect(skill).toBeTruthy();
+    await page.getByTestId(`learned-skill-versions-${learned!.id}`).click();
+    await expect(page.getByTestId("learned-skill-snapshots")).toContainText("archive");
+    await page.getByTestId("learned-skill-snapshots-close").click();
+
+    await page.getByTestId(`learned-skill-feedback-${learned!.id}`).click();
+    await page.getByTestId("learned-skill-feedback-summary").fill("The workflow completed successfully");
+    await page.getByTestId("learned-skill-feedback-submit").click();
+    await expect(page.getByTestId("learned-skill-feedback-dialog")).toHaveCount(0);
+
+    await page.getByTestId(`learned-skill-feedback-${learned!.id}`).click();
+    await page.getByTestId("learned-skill-feedback-outcome").selectOption("failure");
+    await page.getByTestId("learned-skill-feedback-summary").fill("The workflow failed before cleanup");
+    await page.getByTestId("learned-skill-feedback-submit").click();
+    await expect(page.getByTestId("learned-skill-feedback-dialog")).toHaveCount(0);
+
+    await page.getByTestId(`learned-skill-feedback-${learned!.id}`).click();
+    await page.getByTestId("learned-skill-feedback-outcome").selectOption("correction");
+    await page.getByTestId("learned-skill-feedback-summary").fill("Add an explicit cleanup verification step");
+    await page.getByTestId("learned-skill-feedback-body").fill(`${skillMd}\n- Confirm cleanup completed.\n`);
+    await page.getByTestId("learned-skill-feedback-submit").click();
+
+    await expect.poll(async () => (await client.listSkillCandidates()).filter((item) => item.status === "pending").length).toBe(1);
+    await expect(page.getByTestId("skills-tab-pending")).toContainText("1");
+  });
 });

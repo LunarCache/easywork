@@ -12,6 +12,7 @@ import type {
   LocalModel,
   LocalModelRuntimeSettings,
   LearnedSkill,
+  LegacySkillMemory,
   MemoryItem,
   ChannelKind,
   ChannelAdapterMeta,
@@ -35,7 +36,7 @@ import type {
   ThinkLevel,
 } from "@ew/shared";
 
-export type { Project, ApprovalMode, ChannelAdapterMeta, ChannelConfig, ChannelStatus, Thread, StoredMessage, InboxEvent } from "@ew/shared";
+export type { Project, ApprovalMode, ChannelAdapterMeta, ChannelConfig, ChannelStatus, Thread, StoredMessage, InboxEvent, LegacySkillMemory } from "@ew/shared";
 
 /** 工作区文件树条目。 */
 export interface WsEntry {
@@ -1082,6 +1083,11 @@ export class EasyWorkClient {
 
   memoryProviderStatus(): Promise<{ configured: boolean; enabled: boolean; id?: string }> {
     return this.getJSON("/memory/provider");
+  }
+
+  async listLegacySkillMemory(): Promise<LegacySkillMemory[]> {
+    const { items } = await this.getJSON<{ items: LegacySkillMemory[] }>("/memory/legacy-skills");
+    return items;
   }
 
   setMemoryProviderEnabled(enabled: boolean): Promise<{ configured: boolean; enabled: boolean; id?: string }> {

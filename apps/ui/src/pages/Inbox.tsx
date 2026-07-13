@@ -180,15 +180,17 @@ function toTimeline(messages: StoredMessage[]): TimelineMessage[] {
 }
 
 export function Inbox({
+  initialThreadId,
   onThreadsChanged,
   onOpenChannelSettings,
 }: {
+  initialThreadId?: string | null;
   onThreadsChanged?: () => void;
   onOpenChannelSettings?: () => void;
 }) {
   const [threads, setThreads] = useState<InboxThread[]>([]);
   const [statuses, setStatuses] = useState<ChannelStatus[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialThreadId ?? null);
   const [messages, setMessages] = useState<StoredMessage[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<InboxFilter>("all");
@@ -202,6 +204,10 @@ export function Inbox({
   useEffect(() => {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
+
+  useEffect(() => {
+    if (initialThreadId) setSelectedId(initialThreadId);
+  }, [initialThreadId]);
 
   const loadInbox = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {

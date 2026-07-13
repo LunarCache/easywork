@@ -37,6 +37,17 @@ export type MemoryOrigin = z.infer<typeof MemoryOriginSchema>;
 export const MemoryStateSchema = z.enum(["derived", "curated"]);
 export type MemoryState = z.infer<typeof MemoryStateSchema>;
 
+/** 从旧 global.skills 记忆层迁出的只读审计条目。 */
+export const LegacySkillMemorySchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  sourceThreadId: z.string().optional(),
+  updatedAt: z.string(),
+  meta: z.record(z.string(), z.unknown()).optional(),
+  disposition: z.enum(["candidate", "agent-note", "ambiguous"]).optional(),
+});
+export type LegacySkillMemory = z.infer<typeof LegacySkillMemorySchema>;
+
 /** 记忆作用域：全局（对话共享）或某工作区（隔离）。存为字符串。 */
 export const GLOBAL_SCOPE = "global";
 export function workspaceScope(projectId: string): string {
