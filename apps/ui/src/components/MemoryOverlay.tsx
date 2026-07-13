@@ -1,16 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Project } from "@ew/shared";
+import type { MemoryItem, Project } from "@ew/shared";
 import { getClient } from "../lib/client.js";
 import { BrainIcon, TrashIcon, XIcon, EditIcon, CheckIcon, PlusIcon, SearchIcon, UserIcon, FolderClosedIcon } from "../icons.js";
 
-interface MemItem {
-  id: string;
-  scope?: string;
-  layer: string;
-  text: string;
-  sessionId?: string;
-  updatedAt: string;
-}
+type MemItem = MemoryItem;
 
 const GLOBAL_SCOPE = "global";
 const GLOBAL_ORDER = ["user-profile", "agent-memory", "skills"];
@@ -31,6 +24,13 @@ const LAYER_COLOR: Record<string, string> = {
   conventions: "#3FB950",
   decisions: "#D29922",
   pitfalls: "#F85149",
+};
+const ORIGIN_PRESENTATION: Record<MemoryItem["origin"], { label: string; className: string }> = {
+  manual: { label: "手动", className: "man" },
+  "agent-managed": { label: "Agent 管理", className: "agent" },
+  extracted: { label: "自动提取", className: "auto" },
+  imported: { label: "既有 / 导入", className: "imported" },
+  provider: { label: "外部 Provider", className: "provider" },
 };
 const layerOrder = (scope: string) => (scope === GLOBAL_SCOPE ? GLOBAL_ORDER : WS_ORDER);
 
@@ -113,6 +113,16 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
     await refresh();
   };
 
+  const promote = async (id: string) => {
+    try {
+      await getClient().pinMemory(id);
+      setNote("已确认并保留；删除来源对话不会再删除这条事实。");
+      await refresh();
+    } catch (e) {
+      setNote(`确认失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const saveEdit = async () => {
     if (!editing) return;
@@ -171,6 +181,13 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
     .filter((m) => !layerFilter || m.layer === layerFilter)
     .filter((m) => !q || m.text.toLowerCase().includes(q))
     .sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1));
+
+  const originPresentation = (m: MemItem): { label: string; className: string } => {
+    const presentation = ORIGIN_PRESENTATION[m.origin];
+    return m.origin === "extracted" && m.state === "curated"
+      ? { ...presentation, label: `${presentation.label} · 已确认` }
+      : presentation;
+  };
 
   return (
     <div className={embedded ? "ad-page-embed" : "ad-overlay"} onClick={embedded ? undefined : onClose}>
@@ -274,8 +291,9 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
           </div>
         ) : (
           <div className="mem-feed">
-            {feed.map((m) => (
-              <div key={m.id} className="mem-fcard" data-testid={`memory-card-${m.id}`}>
+            {feed.map((m) => {
+              const origin = originPresentation(m);
+              return <div key={m.id} className="mem-fcard" data-testid={`memory-card-${m.id}`}>
                 {editing?.id === m.id ? (
                   <input
                     className="mem-ov-edit"
@@ -300,9 +318,24 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                     <span className="mem-dot" style={{ background: LAYER_COLOR[m.layer] ?? "var(--accent)" }} />
                     {LAYER_LABEL[m.layer] ?? m.layer}
                   </span>
-                  <span className={`mem-src ${m.sessionId ? "auto" : "man"}`}>{m.sessionId ? "自动" : "手动"}</span>
+                  <span className={`mem-src ${origin.className}`}>{origin.label}</span>
+                  {m.sourceThreadId && (
+                    <span className="mem-source-thread" title={m.sourceThreadId}>
+                      来源 {m.sourceThreadId.slice(0, 8)} · 随来源对话删除
+                    </span>
+                  )}
                   <span className="mem-time">{relTime(m.updatedAt)}</span>
                   <span className="ad-spacer" />
+                  {m.origin === "extracted" && m.state === "derived" && (
+                    <button
+                      className="mem-promote"
+                      data-testid={`memory-promote-${m.id}`}
+                      title="提升为独立长期记忆"
+                      onClick={() => void promote(m.id)}
+                    >
+                      <CheckIcon size={12} /> 确认并保留
+                    </button>
+                  )}
                   {editing?.id === m.id ? (
                     <button className="mem-card-act show" data-testid={`memory-save-${m.id}`} title="保存" onClick={() => void saveEdit()}>
                       <CheckIcon size={14} />
@@ -321,8 +354,8 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                     <TrashIcon size={14} />
                   </button>
                 </div>
-              </div>
-            ))}
+              </div>;
+            })}
           </div>
         )}
 

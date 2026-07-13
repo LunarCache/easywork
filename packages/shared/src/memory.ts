@@ -11,6 +11,20 @@ export const WORKSPACE_LAYERS = ["conventions", "decisions", "pitfalls"] as cons
 export const MemoryLayerSchema = z.enum([...GLOBAL_LAYERS, ...WORKSPACE_LAYERS]);
 export type MemoryLayer = z.infer<typeof MemoryLayerSchema>;
 
+/** 记忆来源：描述这条事实如何进入 EasyWork，而不是它当前是否仍依赖来源对话。 */
+export const MemoryOriginSchema = z.enum([
+  "manual",
+  "agent-managed",
+  "extracted",
+  "imported",
+  "provider",
+]);
+export type MemoryOrigin = z.infer<typeof MemoryOriginSchema>;
+
+/** derived 仍由来源对话拥有；curated 已拥有独立生命周期。 */
+export const MemoryStateSchema = z.enum(["derived", "curated"]);
+export type MemoryState = z.infer<typeof MemoryStateSchema>;
+
 /** 记忆作用域：全局（对话共享）或某工作区（隔离）。存为字符串。 */
 export const GLOBAL_SCOPE = "global";
 export function workspaceScope(projectId: string): string {
@@ -45,17 +59,75 @@ export function visibleScopes(scope: string): ScopeView[] {
   return [{ scope: GLOBAL_SCOPE, layers: GLOBAL_LAYERS }];
 }
 
-export const MemoryItemSchema = z.object({
+const MemoryItemBaseSchema = z.object({
   id: z.string(),
   /** 作用域：缺省 = global（对话/全局池）；工作区为 ws:<projectId>。 */
   scope: z.string().optional(),
   layer: MemoryLayerSchema,
   text: z.string(),
+  origin: MemoryOriginSchema,
+  state: MemoryStateSchema,
+  /** Extracted Fact 的来源；提升为 Curated Fact 后清空。 */
+  sourceThreadId: z.string().optional(),
+  /** @deprecated sourceThreadId 的兼容别名；旧客户端迁移完成后删除。 */
   sessionId: z.string().optional(),
   score: z.number().optional(),
   updatedAt: z.string(),
   meta: z.record(z.string(), z.unknown()).optional(),
 });
+
+function validateMemoryLifecycle(
+  item: {
+    origin?: MemoryOrigin;
+    state?: MemoryState;
+    sourceThreadId?: string;
+    sessionId?: string;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const sourceThreadId = item.sourceThreadId ?? item.sessionId;
+  if (item.sourceThreadId && item.sessionId && item.sourceThreadId !== item.sessionId) {
+    ctx.addIssue({
+      code: "custom",
+      message: "sourceThreadId and sessionId must match",
+      path: ["sessionId"],
+    });
+  }
+  if (item.state === "derived") {
+    if (item.origin !== undefined && item.origin !== "extracted") {
+      ctx.addIssue({
+        code: "custom",
+        message: "derived memory must be extracted",
+        path: ["origin"],
+      });
+    }
+    if (!sourceThreadId) {
+      ctx.addIssue({
+        code: "custom",
+        message: "derived memory requires sourceThreadId",
+        path: ["sourceThreadId"],
+      });
+    }
+  }
+  if (sourceThreadId) {
+    if (item.origin !== undefined && item.origin !== "extracted") {
+      ctx.addIssue({
+        code: "custom",
+        message: "source-owned memory must be extracted",
+        path: ["origin"],
+      });
+    }
+    if (item.state === "curated") {
+      ctx.addIssue({
+        code: "custom",
+        message: "curated memory cannot have sourceThreadId",
+        path: ["state"],
+      });
+    }
+  }
+}
+
+export const MemoryItemSchema = MemoryItemBaseSchema.superRefine(validateMemoryLifecycle);
 export type MemoryItem = z.infer<typeof MemoryItemSchema>;
 
 export const RecallQuerySchema = z.object({
@@ -69,7 +141,17 @@ export const RecallQuerySchema = z.object({
 });
 export type RecallQuery = z.infer<typeof RecallQuerySchema>;
 
-export const MemoryWriteSchema = MemoryItemSchema.omit({ id: true, updatedAt: true });
+export const MemoryWriteSchema = MemoryItemBaseSchema.omit({
+  id: true,
+  updatedAt: true,
+  origin: true,
+  state: true,
+})
+  .extend({
+    origin: MemoryOriginSchema.optional(),
+    state: MemoryStateSchema.optional(),
+  })
+  .superRefine(validateMemoryLifecycle);
 export type MemoryWrite = z.infer<typeof MemoryWriteSchema>;
 
 /**
@@ -81,6 +163,8 @@ export interface MemoryProvider {
   recall(q: RecallQuery): Promise<MemoryItem[]>;
   write(item: MemoryWrite): Promise<MemoryItem>;
   edit(id: string, patch: Partial<Pick<MemoryItem, "text" | "meta">>): Promise<MemoryItem>;
+  /** 把来源事实提升为独立 Curated Fact；幂等。 */
+  promote(id: string, opts?: { promotedBy?: "user" | "agent" }): Promise<MemoryItem>;
   list(filter?: { scope?: string; layer?: MemoryLayer; sessionId?: string }): Promise<MemoryItem[]>;
   delete(id: string): Promise<void>;
   /**
@@ -95,5 +179,10 @@ export interface MemoryProvider {
    * 抽取钩子：抽取持久事实写入对应作用域的分层。
    * scope 缺省 = global（对话池）；工作区传 ws:<id>。model 为当轮模型 id（已加载），可复用做 LLM 抽取。
    */
-  observe(input: { messages: unknown[]; sessionId: string; scope?: string; model?: string }): Promise<void>;
+  observe(input: {
+    messages: unknown[];
+    sessionId: string;
+    scope?: string;
+    model?: string;
+  }): Promise<void>;
 }

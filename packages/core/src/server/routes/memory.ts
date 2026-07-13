@@ -20,6 +20,16 @@ const MemoryWriteSchema = z.object({
 
 export function registerMemoryRoutes(ctx: CoreHttpContext, opts: MemoryRouteOptions): void {
   const { app, memory, embeddings } = ctx;
+  const promote = async (
+    id: string,
+    reply: { code(statusCode: number): { send(body: unknown): unknown } },
+  ) => {
+    try {
+      return await memory.promote(id, { promotedBy: "user" });
+    } catch (e) {
+      return reply.code(404).send({ error: e instanceof Error ? e.message : String(e) });
+    }
+  };
 
   app.get("/memory", async (req, reply) => {
     const q = req.query as { scope?: string; layer?: string; sessionId?: string };
@@ -38,7 +48,8 @@ export function registerMemoryRoutes(ctx: CoreHttpContext, opts: MemoryRouteOpti
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_memory", detail: parsed.error.format() });
     }
-    return memory.write(parsed.data);
+    const { sessionId: _legacySessionId, ...item } = parsed.data;
+    return memory.write({ ...item, origin: "manual", state: "curated" });
   });
   app.patch("/memory/:id", async (req, reply) => {
     const body = (req.body ?? {}) as { text?: string };
@@ -46,10 +57,19 @@ export function registerMemoryRoutes(ctx: CoreHttpContext, opts: MemoryRouteOpti
       return reply.code(400).send({ error: "invalid_text" });
     }
     try {
-      return await memory.edit((req.params as { id: string }).id, { text: body.text });
+      const id = (req.params as { id: string }).id;
+      const edited = await memory.edit(id, { text: body.text });
+      return edited.state === "derived" ? await memory.promote(id, { promotedBy: "user" }) : edited;
     } catch (e) {
       return reply.code(404).send({ error: e instanceof Error ? e.message : String(e) });
     }
+  });
+  app.post("/memory/:id/promote", async (req, reply) => {
+    return promote((req.params as { id: string }).id, reply);
+  });
+  // “固定”是用户侧提升意图的别名：与确认/编辑一样解除来源所有权。
+  app.post("/memory/:id/pin", async (req, reply) => {
+    return promote((req.params as { id: string }).id, reply);
   });
   app.delete("/memory/:id", async (req) => {
     await memory.delete((req.params as { id: string }).id);
@@ -61,7 +81,9 @@ export function registerMemoryRoutes(ctx: CoreHttpContext, opts: MemoryRouteOpti
     const scope = (req.params as { scope: string }).scope;
     if (!scope) return reply.code(400).send({ error: "scope_required" });
     if (!isWorkspaceScope(scope)) {
-      return reply.code(400).send({ error: "scope_not_clearable", message: "只能整池清空工作区作用域（ws:*）" });
+      return reply
+        .code(400)
+        .send({ error: "scope_not_clearable", message: "只能整池清空工作区作用域（ws:*）" });
     }
     return { removed: await memory.deleteByScope(scope) };
   });

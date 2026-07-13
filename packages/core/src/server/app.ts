@@ -86,6 +86,8 @@ export interface CreateCoreOptions {
   skillsDirs?: string[];
   /** agent 工具沙箱工作目录（默认 dataDir）。 */
   workspaceDir?: string;
+  /** pi Agent 配置与会话目录（测试/嵌入覆盖用）。 */
+  agentDir?: string;
   /** 会话 SQLite 路径（测试可传 ":memory:"）。 */
   dbPath?: string;
   /** 记忆 markdown 目录。 */
@@ -190,7 +192,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
 
   // Agent 运行时：内置工具（时间/计算器/HTTP/explore_web）由宿主桥成 pi customTools；
   // Skills 由 pi 自身发现（resourceLoader）；MCP 由宿主桥成 customTools。
-  const agentDir = fsPath.join(defaultDataDir(), "pi-agent");
+  const agentDir = opts.agentDir ?? fsPath.join(defaultDataDir(), "pi-agent");
   const skillSources = opts.skillsDirs ? skillSourcesFromDirs(opts.skillsDirs) : defaultSkillSources(agentDir);
   const skills = new SkillManager(skillSources);
   const mcp = new McpClientManager();

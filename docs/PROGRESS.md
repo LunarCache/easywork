@@ -12,7 +12,7 @@
 - **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/explore_web）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
 - **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 终端 / 预览）。
-- **记忆（作用域化）**：全局池 + 每工作区私有池；渐进式披露注入 + 批量事实抽取；sqlite-vec ⊕ 词法混合召回；markdown 可手改回灌。
+- **记忆（作用域化）**：全局池 + 每工作区私有池；渐进式披露注入 + 批量事实抽取；显式来源/生命周期 + 来源事实确认提升；sqlite-vec ⊕ 词法混合召回；markdown 可手改回灌。
 - **知识库 RAG**：上传 → 解析 → 分块 → 嵌入 → RRF 混合检索 + 引用来源。
 - **思考能力与过程**：`reasoning` 能力由运行时模型投影到 UI，推理模型首次默认中档、显式关闭按模型持久化；reasoning 内容落库并跨会话回放（不回喂模型）。
 - **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/知识库/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层。
@@ -36,6 +36,13 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-12 — 来源事实 provenance 与确认提升
+
+- **显式来源 / 生命周期**：记忆条目新增 `origin`（manual / agent-managed / extracted / imported / provider）、`state`（derived / curated）与 `sourceThreadId`；旧库启动时把带 `session_id` 的行迁为来源事实，其余不可可靠区分的既有行安全归为 `imported/curated`。
+- **删除与提升闭环**：被动抽取写入 `extracted/derived`；删除来源对话会跨 run/历史提交屏障等待在途工作，级联删除仍由它拥有的 derived facts、消息/FTS 与 cold/live pi 会话状态；JSONL 删除失败会向 API 冒泡。新增 `POST /memory/:id/promote|pin` + SDK/UI「确认并保留」（固定），提升后清除来源关系并保存 promoted audit meta；编辑来源事实或 Agent 明确 replace 也会提升。
+- **记忆 UI**：来源徽章不再靠 `sessionId` 猜测，明确显示手动、Agent 管理、自动提取、既有/导入、外部 Provider；来源事实显示来源 thread 摘要和提升操作。
+- **验证**：`npm run lint`、`npm run build`、`npm run typecheck`、`npm test` = **314 passed / 1 skipped**；`files-memory.spec.ts` = **3 passed**；设计文档派生 HTML 已同步。
 
 ## 2026-07-12 — 默认工作区直达
 

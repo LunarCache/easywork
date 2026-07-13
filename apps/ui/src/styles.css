@@ -734,6 +734,12 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mem-src { font-size: 10.5px; font-weight: 500; font-family: var(--font-mono); padding: 1px 7px; border-radius: 5px; }
 .mem-src.man { background: rgba(124, 132, 255, 0.14); color: #7C84FF; }
 .mem-src.auto { background: var(--color-bg-tertiary); color: var(--text-tertiary); }
+.mem-src.agent { background: rgba(63, 185, 80, 0.13); color: #3FB950; }
+.mem-src.imported { background: rgba(210, 153, 34, 0.12); color: #D29922; }
+.mem-src.provider { background: rgba(160, 108, 245, 0.13); color: #A06CF5; }
+.mem-source-thread { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; font-family: var(--font-mono); color: var(--text-tertiary); }
+.mem-promote { display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(63, 185, 80, 0.28); border-radius: 6px; padding: 3px 7px; background: rgba(63, 185, 80, 0.1); color: #3FB950; font-size: 10.5px; cursor: pointer; }
+.mem-promote:hover { background: rgba(63, 185, 80, 0.16); }
 .mem-time { font-size: 11px; font-family: var(--font-mono); color: var(--text-tertiary); }
 .mem-card-act { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; border: none; background: transparent; color: var(--muted); opacity: 0; cursor: pointer; }
 .mem-card-act.show { opacity: 1; }

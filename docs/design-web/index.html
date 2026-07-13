@@ -275,7 +275,7 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 - **SessionManager resume**（`session-host.ts`）：每 thread 一个 `<agentDir>/sessions/<threadId>.jsonl`，存在则 `open`（恢复含 compaction 状态），否则 `create`+lazy `setSessionFile`。**daemon 重启后模型仍保留重启前上下文**。注意这是**与 SQLite repo 平行的另一条持久化轨**：repo 是 UI/检索/渠道映射/项目元数据的真相源，pi JSONL 只承载"喂给模型的上下文"——别混淆。
 - **lastUsage**（`session-host.ts`）：扫 JSONL 取最后一条 assistant usage，重开历史会话时回填上下文用量环（归档消息文本没有 token 计数，也不含 system/记忆/工具 schema 开销，必须来自 pi 测得的 usage）。
-- **dispose**：丢弃抽取缓冲 + dispose pi 会话 + **删 JSONL 文件**（不留可恢复上下文）。MCP 工具集变更或本地网络绑定变更会 `invalidateAll` 重建全部会话（customTools 在会话创建时固定）。
+- **dispose / delete**：普通 dispose 丢弃抽取缓冲 + dispose pi 会话；来源对话删除则进入 thread 串行屏障，等待在途抽取、删除来源事实，并按 threadId **严格删除 JSONL 文件**（包括 daemon 重启后尚未 resume 的 cold session；失败向 API 冒泡，不宣称成功）。`/agent/run` 的历史提交也进入同一屏障：删除先到则拒绝迟到提交，提交先到则随后连同消息/FTS 一起删除。MCP 工具集变更或本地网络绑定变更会 `invalidateAll` 重建全部会话（customTools 在会话创建时固定）。
 - **pi 设置调优**（`session-host.ts`）：pi 默认 `compaction.reserveTokens=16384` 会让 4k/8k 本地上下文**每轮都触发 compaction**（每次回复后白跑一次总结 LLM）→ 启动时写 `reserveTokens:2048`。
 
 ---
@@ -340,7 +340,7 @@ router 默认 `127.0.0.1`。切 `0.0.0.0` **强制 api-key**：`POST /settings/l
 - **层**（按作用域不同）：全局 = `user-profile / agent-memory / skills`；工作区 = `conventions / decisions / pitfalls`。
 - **`visibleScopes(scope)`**（`memory.ts`）决定会话**看到什么**：全局会话只看 global；**工作区会话看自己的 `ws:`（3 个工作区层）+ global 的 `user-profile`（只读叠加）**——这样项目里也知道"你是谁"，又不把项目约定泄漏到别的项目。**`visibleScopes[0]` 是写入目标**。
 
-存储：`memory_items(id, scope, layer, session_id, text, embedding BLOB, updated_at, meta)`，每行可带 Float32 嵌入 blob（派生缓存）。
+存储：`memory_items(id, scope, layer, session_id, origin, lifecycle_state, source_thread_id, text, embedding BLOB, updated_at, meta)`，每行可带 Float32 嵌入 blob（派生缓存）。`session_id` 暂为旧客户端兼容列；产品语义由显式的 `origin/state/sourceThreadId` 承载。
 
 ### 6.2 渐进式披露（清单 + recall_memory）
 
@@ -351,15 +351,15 @@ router 默认 `127.0.0.1`。切 `0.0.0.0` **强制 api-key**：`POST /settings/l
 
 ### 6.3 写入两路
 
-- **Agent 主动（`manage_memory` 工具）**：`add/replace/remove`，`replace/remove` 按**子串 match** 定位（0 或 >1 命中报错）。**每层字符上限**（Hermes 风）：接近上限时 `add/replace` **报错逼模型合并/删除**而非无声膨胀。
-- **被动批量抽取**（非每轮）：`agent_end` 钩子把完成轮（含关键工具调用摘要 `[写文件 path]/[改文件 path]/[执行命令 cmd]`）转给 `ExtractionScheduler`（**被宿主 SessionHost 持有**，故跨 run 存活）。增量缓冲、≥24 轮立即 flush、否则 idle 90s debounce；失败 unshift 重试；删会话则 discard 缓冲；关停前 flushAll。抽取复用**当轮已加载的聊天模型**（temperature 0、json_object），按 scope 切 GLOBAL/WORKSPACE 提示词；模型不可解析则安全返回 `[]`。**取消的轮跳过抽取**。
+- **Agent 主动（`manage_memory` 工具）**：`add/replace/remove`，`replace/remove` 按**子串 match** 定位（0 或 >1 命中报错）。新增事实写为独立的 `agent-managed/curated`；若 Agent 明确改写一个来源事实，该事实同时被提升为 Curated Fact。**每层字符上限**（Hermes 风）：接近上限时 `add/replace` **报错逼模型合并/删除**而非无声膨胀。
+- **被动批量抽取**（非每轮）：`agent_end` 钩子把完成轮（含关键工具调用摘要 `[写文件 path]/[改文件 path]/[执行命令 cmd]`）转给 `ExtractionScheduler`（**被宿主 SessionHost 持有**，故跨 run 存活）。增量缓冲、≥24 轮立即 flush、否则 idle 90s debounce；失败 unshift 重试；关停前 flushAll。删除会话进入同一 thread 的 run 串行屏障，`discard` 清缓冲并等待在途抽取落定，再按 `sourceThreadId` 删除派生事实，避免迟到写入产生孤儿。抽取复用**当轮已加载的聊天模型**（temperature 0、json_object），按 scope 切 GLOBAL/WORKSPACE 提示词；模型不可解析则安全返回 `[]`。写入项显式为 `extracted/derived` 并记录 `sourceThreadId`；**取消的轮跳过抽取**。
 
 ### 6.4 混合召回 + markdown 真相源
 
 - **混合打分**（`local.ts`）：取 scope∩layers 全部行 → 嵌入 query → sqlite-vec **cosine KNN** 取语义分 → 每行算 `lexicalScore`（token 重叠）→ **组合分 = 0.75·sem + 0.25·lex**（无嵌入则纯词法）→ `minScore` 下限 + `topK` 上限**防 context 稀释**。（注：记忆用定权混合，知识库用 RRF。）
 - **markdown 真相源（仅全局）**：全局三层有人可编辑的 `*.md` 镜像（工作区记忆 DB-only）。DB→md：任何写/改/删后 `regenerateMarkdown`（`- <text> <!-- id -->`，id 注释是回链）。md→DB：`syncFromMarkdown` 解析行，id 变文→更新+重嵌、无 id 新行→插入、消失的 id→删除；幂等防 watcher 自触发。文件 watcher debounce 300ms。
 - **嵌入是派生缓存、变更才重嵌**：write 总嵌；edit 仅 `patch.text` 变才重嵌；md-sync 仅变行重嵌；启用/切换嵌入模型时 `reindex` 批量补嵌（批 16）。
-- **来源 manual vs auto**：自动抽取的事实带 `session_id`，`deleteBySession` 删会话时一并清；**手动事实 `session_id=NULL`，不被 deleteBySession 删**。`deleteByScope` 删工作区时清整个私有池。
+- **来源与生命周期**：`origin` 区分 `manual / agent-managed / extracted / imported / provider`，`lifecycle_state` 区分 `derived / curated`。共享 Zod 契约与 provider 写边界共同拒绝非法组合。`deleteBySession` 只删除仍由该 `source_thread_id` 拥有的 derived Extracted Facts；`POST /memory/:id/promote` 把事实提升为独立 Curated Fact，`POST /memory/:id/pin` 是用户“固定并保留”的同义入口；两者均清除来源关系并保留审计元数据。旧库启动迁移：有 `session_id` 的行归为来源事实，其余无法可靠区分旧写入方式的行安全归为 `imported/curated`。`deleteByScope` 删工作区时清整个私有池。
 
 ---
 

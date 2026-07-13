@@ -1,3 +1,4 @@
+import { MemoryItemSchema, MemoryWriteSchema } from "@ew/shared";
 import type { MemoryItem, MemoryProvider, MemoryWrite, RecallQuery } from "@ew/shared";
 
 export interface Mem0Options {
@@ -34,30 +35,54 @@ export class Mem0MemoryProvider implements MemoryProvider {
       body: JSON.stringify({ query: q.query, user_id: q.sessionId, limit: q.topK ?? 6 }),
     });
     if (!res.ok) return [];
-    const data = (await res.json()) as { results?: { id: string; memory: string; score?: number }[] };
+    const data = (await res.json()) as {
+      results?: { id: string; memory: string; score?: number }[];
+    };
     return (data.results ?? []).map((m) => ({
       id: m.id,
       layer: "agent-memory" as const,
       text: m.memory,
+      origin: "provider" as const,
+      state: "curated" as const,
       ...(m.score != null ? { score: m.score } : {}),
       updatedAt: new Date().toISOString(),
     }));
   }
 
   async write(item: MemoryWrite): Promise<MemoryItem> {
+    const parsed = MemoryWriteSchema.parse(item);
+    if (parsed.state === "derived" || parsed.sourceThreadId || parsed.sessionId) {
+      throw new Error("Mem0 adapter does not support source-owned derived facts");
+    }
     await this.fetchImpl(`${this.baseUrl}/v1/memories/`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({
-        messages: [{ role: "user", content: item.text }],
-        user_id: item.sessionId,
+        messages: [{ role: "user", content: parsed.text }],
       }),
     }).catch(() => undefined);
-    return { id: "mem0", updatedAt: new Date().toISOString(), ...item };
+    return MemoryItemSchema.parse({
+      id: "mem0",
+      updatedAt: new Date().toISOString(),
+      ...parsed,
+      origin: parsed.origin ?? "provider",
+      state: parsed.state ?? "curated",
+    });
   }
 
   async edit(id: string, patch: Partial<Pick<MemoryItem, "text" | "meta">>): Promise<MemoryItem> {
-    return { id, layer: "agent-memory", text: patch.text ?? "", updatedAt: new Date().toISOString() };
+    return {
+      id,
+      layer: "agent-memory",
+      text: patch.text ?? "",
+      origin: "provider",
+      state: "curated",
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  async promote(): Promise<MemoryItem> {
+    throw new Error("Mem0 promotion is not supported by this adapter");
   }
 
   async list(): Promise<MemoryItem[]> {

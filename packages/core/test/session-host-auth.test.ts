@@ -257,3 +257,38 @@ describe("SessionHost runtime settings", () => {
     fs.rmSync(agentDir, { recursive: true, force: true });
   });
 });
+
+describe("SessionHost thread lifecycle barrier", () => {
+  it("rejects a history commit queued behind deletion", async () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-delete-barrier-")));
+    const host = new SessionHost({ ...makeDeps([]), agentDir });
+    try {
+      let deletionStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        deletionStarted = resolve;
+      });
+      let releaseDeletion!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseDeletion = resolve;
+      });
+      const deletion = host.deleteThread("t1", async () => {
+        deletionStarted();
+        await gate;
+      });
+      await started;
+
+      let committed = false;
+      const lateCommit = host.commitThread("t1", () => {
+        committed = true;
+      });
+      releaseDeletion();
+
+      await deletion;
+      expect(await lateCommit).toBe(false);
+      expect(committed).toBe(false);
+    } finally {
+      host.disposeAll();
+      fs.rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
+});

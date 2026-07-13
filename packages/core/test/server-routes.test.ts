@@ -23,6 +23,7 @@ function makeCore(): CoreServer {
     memoryDbPath: ":memory:",
     memoryDir: path.join(tmpDir, "memory"),
     kbDbPath: ":memory:",
+    agentDir: path.join(tmpDir, "pi-agent"),
   });
 }
 
@@ -75,7 +76,9 @@ describe("server route modules", () => {
       url: "/memory?layer=user-profile",
       headers: { authorization: "Bearer t" },
     });
-    expect(list.json<{ items: { text: string }[] }>().items.map((item) => item.text)).toEqual(["用户偏好简洁回答"]);
+    expect(list.json<{ items: { text: string; origin: string; state: string }[] }>().items).toEqual(
+      [expect.objectContaining({ text: "用户偏好简洁回答", origin: "manual", state: "curated" })],
+    );
 
     const badLayer = await core.app.inject({
       method: "GET",
@@ -108,6 +111,239 @@ describe("server route modules", () => {
     expect(await core.memory.list({ scope })).toEqual([]);
   });
 
+  it("promotes an Extracted Fact and preserves it when its Source Conversation is deleted", async () => {
+    core = makeCore();
+    const thread = core.repo.createThread({ title: "来源对话", modelId: "test-model" });
+    const extracted = await core.memory.write({
+      layer: "user-profile",
+      text: "用户偏好先给结论",
+      origin: "extracted",
+      state: "derived",
+      sourceThreadId: thread.id,
+    });
+
+    const promote = await core.app.inject({
+      method: "POST",
+      url: `/memory/${encodeURIComponent(extracted.id)}/promote`,
+      headers: { authorization: "Bearer t" },
+    });
+    expect(promote.statusCode).toBe(200);
+    expect(promote.json()).toMatchObject({
+      id: extracted.id,
+      origin: "extracted",
+      state: "curated",
+      meta: { promotedBy: "user", promotedFromSourceThreadId: thread.id },
+    });
+    expect(promote.json<{ sourceThreadId?: string }>().sourceThreadId).toBeUndefined();
+
+    const removeThread = await core.app.inject({
+      method: "DELETE",
+      url: `/threads/${encodeURIComponent(thread.id)}`,
+      headers: { authorization: "Bearer t" },
+    });
+    expect(removeThread.statusCode).toBe(200);
+    expect(removeThread.json()).toMatchObject({ ok: true, factsRemoved: 0 });
+    expect((await core.memory.list()).map((item) => item.id)).toContain(extracted.id);
+  });
+
+  it("pinning an Extracted Fact promotes it", async () => {
+    core = makeCore();
+    const extracted = await core.memory.write({
+      layer: "user-profile",
+      text: "用户偏好先给结论",
+      origin: "extracted",
+      state: "derived",
+      sourceThreadId: "source-thread",
+    });
+
+    const pin = await core.app.inject({
+      method: "POST",
+      url: `/memory/${encodeURIComponent(extracted.id)}/pin`,
+      headers: { authorization: "Bearer t" },
+    });
+
+    expect(pin.statusCode).toBe(200);
+    expect(pin.json()).toMatchObject({
+      id: extracted.id,
+      state: "curated",
+      meta: { promotedBy: "user" },
+    });
+    expect(await core.memory.deleteBySession("source-thread")).toBe(0);
+  });
+
+  it("deleting a Source Conversation removes only its unpromoted Extracted Facts", async () => {
+    core = makeCore();
+    const thread = core.repo.createThread({ title: "来源对话", modelId: "test-model" });
+    const extracted = await core.memory.write({
+      layer: "agent-memory",
+      text: "这条事实仍依赖来源",
+      origin: "extracted",
+      state: "derived",
+      sourceThreadId: thread.id,
+    });
+    const curated = await core.memory.write({
+      layer: "agent-memory",
+      text: "这条事实独立保留",
+      origin: "agent-managed",
+      state: "curated",
+    });
+
+    const removeThread = await core.app.inject({
+      method: "DELETE",
+      url: `/threads/${encodeURIComponent(thread.id)}`,
+      headers: { authorization: "Bearer t" },
+    });
+    expect(removeThread.json()).toMatchObject({ ok: true, factsRemoved: 1 });
+    expect((await core.memory.list()).map((item) => item.id)).toEqual([curated.id]);
+    expect((await core.memory.list()).map((item) => item.id)).not.toContain(extracted.id);
+  });
+
+  it("keeps the Source Conversation when deleting its Extracted Facts fails", async () => {
+    core = makeCore();
+    const thread = core.repo.createThread({ title: "来源对话", modelId: "test-model" });
+    const extracted = await core.memory.write({
+      layer: "agent-memory",
+      text: "仍由来源拥有",
+      origin: "extracted",
+      state: "derived",
+      sourceThreadId: thread.id,
+    });
+    core.memory.deleteBySession = async () => {
+      throw new Error("memory db unavailable");
+    };
+
+    const removeThread = await core.app.inject({
+      method: "DELETE",
+      url: `/threads/${encodeURIComponent(thread.id)}`,
+      headers: { authorization: "Bearer t" },
+    });
+    expect(removeThread.statusCode).toBe(500);
+    expect(removeThread.json()).toMatchObject({ error: "thread_delete_failed" });
+    expect(core.repo.getThread(thread.id)?.id).toBe(thread.id);
+    expect((await core.memory.list()).map((item) => item.id)).toContain(extracted.id);
+  });
+
+  it("deletes a cold persisted pi session file with its Source Conversation", async () => {
+    core = makeCore();
+    const thread = core.repo.createThread({ title: "冷会话", modelId: "test-model" });
+    const sessionFile = path.join(tmpDir!, "pi-agent", "sessions", `${thread.id}.jsonl`);
+    fs.writeFileSync(sessionFile, '{"type":"session"}\n', "utf8");
+
+    const removeThread = await core.app.inject({
+      method: "DELETE",
+      url: `/threads/${encodeURIComponent(thread.id)}`,
+      headers: { authorization: "Bearer t" },
+    });
+
+    expect(removeThread.statusCode).toBe(200);
+    expect(fs.existsSync(sessionFile)).toBe(false);
+  });
+
+  it("rejects a late run for a deleted thread without recreating an empty Source Conversation", async () => {
+    core = makeCore();
+    const thread = core.repo.createThread({
+      id: "deleted-thread",
+      title: "待删除",
+      modelId: "test-model",
+    });
+    await core.app.inject({
+      method: "DELETE",
+      url: `/threads/${thread.id}`,
+      headers: { authorization: "Bearer t" },
+    });
+
+    const lateRun = await core.app.inject({
+      method: "POST",
+      url: "/agent/run",
+      headers: { authorization: "Bearer t" },
+      payload: { threadId: thread.id, model: "missing-model", history: [] },
+    });
+
+    expect(lateRun.statusCode).toBe(410);
+    expect(lateRun.json()).toEqual({ error: "thread_deleted" });
+    expect(core.repo.getThread(thread.id)).toBeNull();
+  });
+
+  it("keeps a project and its Source Conversation when source-fact deletion fails", async () => {
+    core = makeCore();
+    const project = core.repo.createProject({
+      name: "P",
+      workspaceDir: path.join(tmpDir!, "workspace"),
+    });
+    const thread = core.repo.createThread({ title: "来源", modelId: "m", projectId: project.id });
+    const fact = await core.memory.write({
+      scope: workspaceScope(project.id),
+      layer: "decisions",
+      text: "使用 SQLite",
+      origin: "extracted",
+      state: "derived",
+      sourceThreadId: thread.id,
+    });
+    core.memory.deleteBySession = async () => {
+      throw new Error("memory db unavailable");
+    };
+
+    const remove = await core.app.inject({
+      method: "DELETE",
+      url: `/projects/${project.id}`,
+      headers: { authorization: "Bearer t" },
+    });
+
+    expect(remove.statusCode).toBe(500);
+    expect(remove.json()).toMatchObject({ error: "project_delete_failed" });
+    expect(core.repo.getProject(project.id)?.id).toBe(project.id);
+    expect(core.repo.getThread(thread.id)?.id).toBe(thread.id);
+    expect((await core.memory.list()).map((item) => item.id)).toContain(fact.id);
+  });
+
+  it("reports workspace-memory cleanup failure instead of claiming project deletion succeeded", async () => {
+    core = makeCore();
+    const project = core.repo.createProject({
+      name: "P",
+      workspaceDir: path.join(tmpDir!, "workspace"),
+    });
+    core.memory.deleteByScope = async () => {
+      throw new Error("scope cleanup unavailable");
+    };
+
+    const remove = await core.app.inject({
+      method: "DELETE",
+      url: `/projects/${project.id}`,
+      headers: { authorization: "Bearer t" },
+    });
+
+    expect(remove.statusCode).toBe(500);
+    expect(remove.json()).toMatchObject({ error: "project_delete_failed" });
+    expect(core.repo.getProject(project.id)?.id).toBe(project.id);
+  });
+
+  it("editing an Extracted Fact through the user API promotes it", async () => {
+    core = makeCore();
+    const extracted = await core.memory.write({
+      layer: "user-profile",
+      text: "用户喜欢长回答",
+      origin: "extracted",
+      state: "derived",
+      sourceThreadId: "source-thread",
+    });
+
+    const edit = await core.app.inject({
+      method: "PATCH",
+      url: `/memory/${encodeURIComponent(extracted.id)}`,
+      headers: { authorization: "Bearer t" },
+      payload: { text: "用户喜欢先给简短结论" },
+    });
+    expect(edit.statusCode).toBe(200);
+    expect(edit.json()).toMatchObject({
+      id: extracted.id,
+      text: "用户喜欢先给简短结论",
+      origin: "extracted",
+      state: "curated",
+      meta: { promotedBy: "user", promotedFromSourceThreadId: "source-thread" },
+    });
+    expect(await core.memory.deleteBySession("source-thread")).toBe(0);
+  });
+
   it("creates projects and exposes workspace files through HTTP routes", async () => {
     core = makeCore();
     const workspaceDir = path.join(tmpDir!, "workspace");
@@ -129,7 +365,9 @@ describe("server route modules", () => {
       headers: { authorization: "Bearer t" },
     });
     expect(list.statusCode).toBe(200);
-    expect(list.json<{ entries: { path: string }[] }>().entries.map((entry) => entry.path)).toContain("notes.txt");
+    expect(
+      list.json<{ entries: { path: string }[] }>().entries.map((entry) => entry.path),
+    ).toContain("notes.txt");
 
     const meta = await core.app.inject({
       method: "GET",

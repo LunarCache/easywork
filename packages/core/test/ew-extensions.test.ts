@@ -160,9 +160,42 @@ describe("ExtractionScheduler（增量缓冲，长突发不漏；删会话丢弃
   it("discard：删会话丢弃缓冲，不抽取将删的对话", async () => {
     const { observed, sched } = recorder();
     sched.note("t1", "global", "m", [{ role: "user", content: "将删除的对话" }]);
-    sched.discard("t1");
+    await sched.discard("t1");
     await sched.flushAll();
     expect(observed).toHaveLength(0);
+  });
+
+  it("discard 等待在途抽取；随后删除事实不会被迟到写入复活", async () => {
+    let extractionStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      extractionStarted = resolve;
+    });
+    let releaseExtraction!: () => void;
+    const release = new Promise<void>((resolve) => {
+      releaseExtraction = resolve;
+    });
+    const facts: string[] = [];
+    const sched = new ExtractionScheduler(
+      async ({ messages }) => {
+        extractionStarted();
+        await release;
+        facts.push(...messages.map((message) => message.content));
+      },
+      { maxTurns: 1 },
+    );
+
+    sched.note("t1", "global", "m", [{ role: "user", content: "迟到事实" }]);
+    await started;
+    const deletion = (async () => {
+      await sched.discard("t1");
+      facts.length = 0;
+    })();
+    releaseExtraction();
+    await deletion;
+
+    expect(facts).toEqual([]);
+    await sched.flushAll();
+    expect(facts).toEqual([]);
   });
 
   it("note 透传 scope（工作区写本池）", async () => {

@@ -41,7 +41,9 @@ export function makeMemoryTool(memory: MemoryProvider, scope: string = GLOBAL_SC
   const layers = layersForScope(scope);
   const layerEnum = [...layers] as [string, ...string[]];
   const layerHelp = layers.map((l) => `${l}=${LAYER_DESC[l]}`).join("，");
-  const where = isWorkspaceScope(scope) ? "本工作区（与全局/其他工作区隔离）" : "全局（所有对话共享）";
+  const where = isWorkspaceScope(scope)
+    ? "本工作区（与全局/其他工作区隔离）"
+    : "全局（所有对话共享）";
 
   return defineTool({
     name: "manage_memory",
@@ -55,7 +57,8 @@ export function makeMemoryTool(memory: MemoryProvider, scope: string = GLOBAL_SC
     requiresApproval: "never",
     async run({ action, layer, text, match }) {
       const ml = layer as MemoryLayer;
-      if (!layers.includes(ml)) return err(`本会话不支持分层 ${layer}（可用：${layers.join("/")}）。`);
+      if (!layers.includes(ml))
+        return err(`本会话不支持分层 ${layer}（可用：${layers.join("/")}）。`);
       const cap = LAYER_CAP[ml];
       const items = await memory.list({ scope, layer: ml });
 
@@ -68,7 +71,13 @@ export function makeMemoryTool(memory: MemoryProvider, scope: string = GLOBAL_SC
             `${layer} 已用 ${used}/${cap} 字符，新增后超限。请先用 remove 删除过时条目或 replace 合并重叠条目，再重试。`,
           );
         }
-        const w = await memory.write({ scope, layer: ml, text: t });
+        const w = await memory.write({
+          scope,
+          layer: ml,
+          text: t,
+          origin: "agent-managed",
+          state: "curated",
+        });
         return ok(`已记入 ${layer}（${used + t.length}/${cap}）：${t}`, { id: w.id });
       }
 
@@ -96,13 +105,17 @@ export function makeMemoryTool(memory: MemoryProvider, scope: string = GLOBAL_SC
       if (used + t.length > cap) {
         return err(`${layer} 替换后超限（${used + t.length}/${cap}）。请精简内容或删除其他条目。`);
       }
-      const e = await memory.edit(target.id, { text: t });
+      let e = await memory.edit(target.id, { text: t });
+      if (target.state === "derived") e = await memory.promote(target.id, { promotedBy: "agent" });
       return ok(`已更新 ${layer}：${t}`, { id: e.id });
     },
   });
 }
 
-function ok(content: string, display?: Record<string, unknown>): {
+function ok(
+  content: string,
+  display?: Record<string, unknown>,
+): {
   content: string;
   display?: unknown;
 } {

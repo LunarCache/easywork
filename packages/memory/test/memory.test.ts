@@ -3,8 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { MemoryItemSchema } from "@ew/shared";
 import {
   LocalMemoryProvider,
+  Mem0MemoryProvider,
   type Embedder,
   type ExtractedFact,
   type FactExtractor,
@@ -13,7 +15,9 @@ import {
 /** 解析 sqlite-vec 扩展路径（未安装/平台无二进制 → undefined，相关用例跳过）。 */
 function vecPath(): string | undefined {
   try {
-    return (createRequire(import.meta.url)("sqlite-vec") as { getLoadablePath(): string }).getLoadablePath();
+    return (
+      createRequire(import.meta.url)("sqlite-vec") as { getLoadablePath(): string }
+    ).getLoadablePath();
   } catch {
     return undefined;
   }
@@ -34,6 +38,43 @@ const embed: Embedder = async (texts) =>
   texts.map((t) => [/cat/i.test(t) ? 1 : 0, /dog/i.test(t) ? 1 : 0, /weather/i.test(t) ? 1 : 0]);
 
 describe("LocalMemoryProvider", () => {
+  it("shared contract rejects impossible provenance combinations", () => {
+    const base = {
+      id: "m1",
+      layer: "user-profile" as const,
+      text: "事实",
+      updatedAt: new Date().toISOString(),
+    };
+    expect(
+      MemoryItemSchema.safeParse({
+        ...base,
+        origin: "manual",
+        state: "derived",
+        sourceThreadId: "t1",
+      }).success,
+    ).toBe(false);
+    expect(
+      MemoryItemSchema.safeParse({
+        ...base,
+        origin: "extracted",
+        state: "curated",
+        sourceThreadId: "t1",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("Mem0 boundary rejects source-owned derived facts it cannot preserve", async () => {
+    const m = new Mem0MemoryProvider({ apiKey: "test", fetch: async () => new Response("{}") });
+    await expect(
+      m.write({
+        layer: "user-profile",
+        text: "来源事实",
+        origin: "extracted",
+        state: "derived",
+        sourceThreadId: "t1",
+      }),
+    ).rejects.toThrow("does not support source-owned derived facts");
+  });
   it("词法召回（无 embedder）", async () => {
     const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
     await m.write({ layer: "agent-memory", text: "用户喜欢简洁的回答" });
@@ -47,7 +88,12 @@ describe("LocalMemoryProvider", () => {
   it("向量语义召回（sqlite-vec）", async () => {
     const vp = vecPath();
     if (!vp) return; // 无预编译二进制 → 跳过（语义召回唯一引擎）
-    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:", embed, vecExtensionPath: vp });
+    const m = new LocalMemoryProvider({
+      dir: freshDir(),
+      dbPath: ":memory:",
+      embed,
+      vecExtensionPath: vp,
+    });
     await m.write({ layer: "user-profile", text: "I have a cat named Mimi" });
     await m.write({ layer: "user-profile", text: "Today's weather is sunny" });
     const hits = await m.recall({ query: "tell me about my cat", topK: 1, minScore: 0.1 });
@@ -202,9 +248,15 @@ describe("LocalMemoryProvider", () => {
     await m.write({ scope: "ws:B", layer: "decisions", text: "B工程：改用 sqlite-vec" });
 
     // list 按作用域隔离
-    expect((await m.list({ scope: "ws:A" })).map((i) => i.text)).toEqual(["A工程：迁移到 Tailwind v4"]);
-    expect((await m.list({ scope: "ws:B" })).map((i) => i.text)).toEqual(["B工程：改用 sqlite-vec"]);
-    expect((await m.list({ scope: "global" })).map((i) => i.text)).toEqual(["全局：天气用 open-meteo"]);
+    expect((await m.list({ scope: "ws:A" })).map((i) => i.text)).toEqual([
+      "A工程：迁移到 Tailwind v4",
+    ]);
+    expect((await m.list({ scope: "ws:B" })).map((i) => i.text)).toEqual([
+      "B工程：改用 sqlite-vec",
+    ]);
+    expect((await m.list({ scope: "global" })).map((i) => i.text)).toEqual([
+      "全局：天气用 open-meteo",
+    ]);
 
     // recall 默认 global，不串入工作区
     const g = await m.recall({ query: "工程", topK: 10 });
@@ -239,7 +291,11 @@ describe("LocalMemoryProvider", () => {
     // 手工 / 模型主动写入（无 sessionId）—— 不应被会话删除影响。
     await m.write({ layer: "user-profile", text: "用户偏好中文" });
     // 被动抽取（带来源 sessionId=s1）。
-    await m.observe({ messages: [{ role: "user", content: "我在做记忆系统，跑在 fly.io" }], sessionId: "s1", model: "x" });
+    await m.observe({
+      messages: [{ role: "user", content: "我在做记忆系统，跑在 fly.io" }],
+      sessionId: "s1",
+      model: "x",
+    });
 
     expect(await m.list()).toHaveLength(3);
     const fromS1 = (await m.list({ sessionId: "s1" })).map((i) => i.text);
@@ -254,10 +310,131 @@ describe("LocalMemoryProvider", () => {
     m.close();
   });
 
+  it("Extracted Fact 带显式来源，提升后成为独立 Curated Fact", async () => {
+    const extract: FactExtractor = async () => [
+      { layer: "user-profile", text: "用户偏好先给结论" },
+    ];
+    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:", extract });
+
+    const manual = await m.write({ layer: "user-profile", text: "用户偏好中文" });
+    expect(manual).toMatchObject({ origin: "manual", state: "curated" });
+    expect(manual.sourceThreadId).toBeUndefined();
+
+    await m.observe({
+      messages: [{ role: "user", content: "回答时先给结论" }],
+      sessionId: "source-thread",
+      model: "x",
+    });
+    const [extracted] = await m.list({ sessionId: "source-thread" });
+    expect(extracted).toMatchObject({
+      origin: "extracted",
+      state: "derived",
+      sourceThreadId: "source-thread",
+    });
+
+    const promoted = await m.promote(extracted!.id, { promotedBy: "user" });
+    expect(promoted).toMatchObject({
+      origin: "extracted",
+      state: "curated",
+      meta: {
+        promotedBy: "user",
+        promotedFromSourceThreadId: "source-thread",
+      },
+    });
+    expect(promoted.sourceThreadId).toBeUndefined();
+    expect(promoted.sessionId).toBeUndefined();
+    expect(await m.deleteBySession("source-thread")).toBe(0);
+    expect((await m.list()).map((item) => item.text).sort()).toEqual([
+      "用户偏好中文",
+      "用户偏好先给结论",
+    ]);
+    m.close();
+  });
+
+  it("拒绝不一致的来源与生命周期组合", async () => {
+    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
+    await expect(
+      m.write({
+        layer: "user-profile",
+        text: "错误组合",
+        origin: "manual",
+        state: "derived",
+        sourceThreadId: "source-thread",
+      }),
+    ).rejects.toThrow("derived memory must be extracted");
+    await expect(
+      m.write({
+        layer: "user-profile",
+        text: "缺来源",
+        origin: "extracted",
+        state: "derived",
+      }),
+    ).rejects.toThrow("derived memory requires sourceThreadId");
+    await expect(
+      m.write({
+        layer: "user-profile",
+        text: "curated 不应仍带来源",
+        origin: "extracted",
+        state: "curated",
+        sourceThreadId: "source-thread",
+      }),
+    ).rejects.toThrow("curated memory cannot have sourceThreadId");
+    expect(await m.list()).toEqual([]);
+    m.close();
+  });
+
+  it("旧库迁移：有 session_id 的行变为 derived Extracted Fact，其余行安全归为 imported Curated Fact", async () => {
+    const d = freshDir();
+    const dbPath = path.join(d, "legacy-memory.db");
+    const { DatabaseSync } = createRequire(import.meta.url)(
+      "node:sqlite",
+    ) as typeof import("node:sqlite");
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE memory_items (
+        id TEXT PRIMARY KEY,
+        scope TEXT NOT NULL DEFAULT 'global',
+        layer TEXT NOT NULL,
+        session_id TEXT,
+        text TEXT NOT NULL,
+        embedding BLOB,
+        updated_at TEXT NOT NULL,
+        meta TEXT
+      );
+    `);
+    db.prepare(
+      `INSERT INTO memory_items (id, scope, layer, session_id, text, embedding, updated_at, meta)
+       VALUES (?, 'global', 'user-profile', ?, ?, NULL, ?, NULL)`,
+    ).run("derived-id", "source-thread", "自动事实", "2026-01-01T00:00:00.000Z");
+    db.prepare(
+      `INSERT INTO memory_items (id, scope, layer, session_id, text, embedding, updated_at, meta)
+       VALUES (?, 'global', 'agent-memory', NULL, ?, NULL, ?, NULL)`,
+    ).run("curated-id", "既有事实", "2026-01-02T00:00:00.000Z");
+    db.close();
+
+    const m = new LocalMemoryProvider({ dir: d, dbPath });
+    const items = await m.list();
+    expect(items.find((item) => item.id === "derived-id")).toMatchObject({
+      origin: "extracted",
+      state: "derived",
+      sourceThreadId: "source-thread",
+    });
+    expect(items.find((item) => item.id === "curated-id")).toMatchObject({
+      origin: "imported",
+      state: "curated",
+    });
+    m.close();
+  });
+
   it("sqlite-vec 向量索引：语义召回 + 删除同步（扩展可用时）", async () => {
     const vp = vecPath();
     if (!vp) return; // 扩展不可用 → 跳过（回退 brute-force 已由上面用例覆盖）
-    const m = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:", embed, vecExtensionPath: vp });
+    const m = new LocalMemoryProvider({
+      dir: freshDir(),
+      dbPath: ":memory:",
+      embed,
+      vecExtensionPath: vp,
+    });
     const cat = await m.write({ layer: "user-profile", text: "I have a cat named Mimi" });
     await m.write({ layer: "user-profile", text: "Today's weather is sunny" });
     const hits = await m.recall({ query: "tell me about my cat", topK: 1, minScore: 0.1 });

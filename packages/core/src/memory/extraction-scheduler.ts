@@ -22,6 +22,8 @@ interface State {
 
 export class ExtractionScheduler {
   private readonly state = new Map<string, State>();
+  private readonly inFlight = new Map<string, Promise<void>>();
+  private readonly discarding = new Set<string>();
   private readonly idleMs: number;
   private readonly maxTurns: number;
 
@@ -35,6 +37,7 @@ export class ExtractionScheduler {
 
   /** 转发本轮对话；累积新增轮次，达阈值立即抽、否则空闲去抖。 */
   note(threadId: string, scope: string, model: string, conv: { role: string; content: string }[]): void {
+    if (this.discarding.has(threadId)) return;
     let st = this.state.get(threadId);
     if (!st) {
       st = { scope, model, buffer: [], seenLen: 0 };
@@ -56,6 +59,12 @@ export class ExtractionScheduler {
 
   /** 抽取某会话缓冲（await 完成；失败把批次放回缓冲下次重试）。 */
   async flush(threadId: string): Promise<void> {
+    const active = this.inFlight.get(threadId);
+    if (active) {
+      await active;
+      if (this.state.get(threadId)?.buffer.length) await this.flush(threadId);
+      return;
+    }
     const st = this.state.get(threadId);
     if (!st) return;
     if (st.timer) {
@@ -65,18 +74,32 @@ export class ExtractionScheduler {
     if (st.buffer.length === 0) return;
     const batch = st.buffer;
     st.buffer = [];
+    const task = this.observe({ messages: batch, sessionId: threadId, scope: st.scope, model: st.model }).catch(() => {
+      // discard 已移除原 state 时不得复活待删会话；其他失败保留批次供下次重试。
+      if (this.state.get(threadId) === st) st.buffer.unshift(...batch);
+    });
+    this.inFlight.set(threadId, task);
     try {
-      await this.observe({ messages: batch, sessionId: threadId, scope: st.scope, model: st.model });
-    } catch {
-      st.buffer.unshift(...batch); // 失败放回，下次触发重试
+      await task;
+    } finally {
+      if (this.inFlight.get(threadId) === task) this.inFlight.delete(threadId);
     }
   }
 
-  /** 丢弃某会话缓冲（删会话时调用——不把将删的对话抽进记忆）。 */
-  discard(threadId: string): void {
+  /** 丢弃缓冲并等待在途抽取落定；调用方随后删除派生事实，保证不会被迟到写入复活。 */
+  async discard(threadId: string): Promise<void> {
+    this.discarding.add(threadId);
     const st = this.state.get(threadId);
     if (st?.timer) clearTimeout(st.timer);
     this.state.delete(threadId);
+    try {
+      await this.inFlight.get(threadId);
+    } finally {
+      const recreated = this.state.get(threadId);
+      if (recreated?.timer) clearTimeout(recreated.timer);
+      this.state.delete(threadId);
+      this.discarding.delete(threadId);
+    }
   }
 
   /** flush 全部（关停前在停模型前调用）。 */

@@ -3,7 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { LocalMemoryProvider } from "@ew/memory";
-import { GLOBAL_SCOPE, visibleScopes, workspaceScope, type ToolExecContext, type ToolResult } from "@ew/shared";
+import {
+  GLOBAL_SCOPE,
+  visibleScopes,
+  workspaceScope,
+  type ToolExecContext,
+  type ToolResult,
+} from "@ew/shared";
 import { makeMemoryTool } from "../src/memory/memory-tool.js";
 import { makeSessionSearchTool } from "../src/memory/session-search-tool.js";
 import { buildMemoryManifest } from "../src/server/app.js";
@@ -25,8 +31,10 @@ const ctx: ToolExecContext = {
   signal: new AbortController().signal,
   approval: { request: async () => "approve" },
 };
-const run = (t: { execute: (a: unknown, c: ToolExecContext) => Promise<ToolResult> }, args: unknown) =>
-  t.execute(args, ctx);
+const run = (
+  t: { execute: (a: unknown, c: ToolExecContext) => Promise<ToolResult> },
+  args: unknown,
+) => t.execute(args, ctx);
 
 describe("manage_memory 工具", () => {
   it("add / replace / remove + 子串定位", async () => {
@@ -35,10 +43,19 @@ describe("manage_memory 工具", () => {
 
     const a = await run(tool, { action: "add", layer: "user-profile", text: "用户是后端工程师" });
     expect(a.isError).toBeFalsy();
-    expect((await mem.list({ layer: "user-profile" }))[0]!.text).toBe("用户是后端工程师");
+    expect((await mem.list({ layer: "user-profile" }))[0]).toMatchObject({
+      text: "用户是后端工程师",
+      origin: "agent-managed",
+      state: "curated",
+    });
 
     // replace 用子串定位
-    const rep = await run(tool, { action: "replace", layer: "user-profile", match: "后端", text: "用户是全栈工程师" });
+    const rep = await run(tool, {
+      action: "replace",
+      layer: "user-profile",
+      match: "后端",
+      text: "用户是全栈工程师",
+    });
     expect(rep.isError).toBeFalsy();
     const items = await mem.list({ layer: "user-profile" });
     expect(items).toHaveLength(1);
@@ -57,9 +74,13 @@ describe("manage_memory 工具", () => {
     await run(tool, { action: "add", layer: "agent-memory", text: "项目部署在 AWS" });
     await run(tool, { action: "add", layer: "agent-memory", text: "项目使用 TypeScript" });
 
-    expect((await run(tool, { action: "remove", layer: "agent-memory", match: "GCP" })).isError).toBe(true);
+    expect(
+      (await run(tool, { action: "remove", layer: "agent-memory", match: "GCP" })).isError,
+    ).toBe(true);
     // "项目" 同时命中两条 → 歧义报错
-    expect((await run(tool, { action: "remove", layer: "agent-memory", match: "项目" })).isError).toBe(true);
+    expect(
+      (await run(tool, { action: "remove", layer: "agent-memory", match: "项目" })).isError,
+    ).toBe(true);
     // add 缺 text
     expect((await run(tool, { action: "add", layer: "agent-memory" })).isError).toBe(true);
     mem.close();
@@ -69,10 +90,40 @@ describe("manage_memory 工具", () => {
     const mem = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
     const tool = makeMemoryTool(mem);
     const big = "x".repeat(1300);
-    expect((await run(tool, { action: "add", layer: "user-profile", text: big })).isError).toBeFalsy();
+    expect(
+      (await run(tool, { action: "add", layer: "user-profile", text: big })).isError,
+    ).toBeFalsy();
     const over = await run(tool, { action: "add", layer: "user-profile", text: "y".repeat(200) });
     expect(over.isError).toBe(true);
     expect(over.content).toContain("超限");
+    mem.close();
+  });
+
+  it("replace 来源事实会把它提升为 Agent 管理的 Curated Fact", async () => {
+    const mem = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
+    const source = await mem.write({
+      layer: "user-profile",
+      text: "用户喜欢长回答",
+      origin: "extracted",
+      state: "derived",
+      sourceThreadId: "source-thread",
+    });
+    const tool = makeMemoryTool(mem);
+
+    const result = await run(tool, {
+      action: "replace",
+      layer: "user-profile",
+      match: "长回答",
+      text: "用户喜欢先给简短结论",
+    });
+    expect(result.isError).toBeFalsy();
+    expect((await mem.list()).find((item) => item.id === source.id)).toMatchObject({
+      text: "用户喜欢先给简短结论",
+      origin: "extracted",
+      state: "curated",
+      meta: { promotedBy: "agent", promotedFromSourceThreadId: "source-thread" },
+    });
+    expect(await mem.deleteBySession("source-thread")).toBe(0);
     mem.close();
   });
 });
@@ -83,8 +134,12 @@ describe("session_search 工具", () => {
     const t = repo.createThread({ title: "天气会话", modelId: "m" });
     const now = new Date().toISOString();
     repo.appendMessage({
-      id: "u1", threadId: t.id, role: "user", seq: repo.nextSeq(t.id),
-      parts: [{ type: "text", text: "北京天气如何" }], createdAt: now,
+      id: "u1",
+      threadId: t.id,
+      role: "user",
+      seq: repo.nextSeq(t.id),
+      parts: [{ type: "text", text: "北京天气如何" }],
+      createdAt: now,
     });
     const tool = makeSessionSearchTool(repo);
 
@@ -121,7 +176,11 @@ describe("buildMemoryManifest 记忆清单（渐进式披露）", () => {
   it("作用域隔离：工作区清单不含全局 agent-memory，但含全局 user-profile（共享身份）", async () => {
     const mem = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
     await mem.write({ scope: GLOBAL_SCOPE, layer: "user-profile", text: "答复请简洁" });
-    await mem.write({ scope: GLOBAL_SCOPE, layer: "agent-memory", text: "全局事实不该进工作区清单" });
+    await mem.write({
+      scope: GLOBAL_SCOPE,
+      layer: "agent-memory",
+      text: "全局事实不该进工作区清单",
+    });
     const ws = workspaceScope("proj1");
     await mem.write({ scope: ws, layer: "pitfalls", text: "并发下要串行化" });
 

@@ -6,6 +6,7 @@ import type * as NodeSqlite from "node:sqlite";
 import {
   GLOBAL_LAYERS,
   GLOBAL_SCOPE,
+  MemoryWriteSchema,
   layersForScope,
   type MemoryItem,
   type MemoryLayer,
@@ -78,6 +79,9 @@ interface Row {
   scope: string;
   layer: MemoryLayer;
   session_id: string | null;
+  origin: MemoryItem["origin"];
+  lifecycle_state: MemoryItem["state"];
+  source_thread_id: string | null;
   text: string;
   embedding: Buffer | null;
   updated_at: string;
@@ -112,6 +116,9 @@ export class LocalMemoryProvider implements MemoryProvider {
         id TEXT PRIMARY KEY,
         layer TEXT NOT NULL,
         session_id TEXT,
+        origin TEXT NOT NULL DEFAULT 'manual',
+        lifecycle_state TEXT NOT NULL DEFAULT 'curated',
+        source_thread_id TEXT,
         text TEXT NOT NULL,
         embedding BLOB,
         updated_at TEXT NOT NULL,
@@ -121,11 +128,39 @@ export class LocalMemoryProvider implements MemoryProvider {
       CREATE INDEX IF NOT EXISTS idx_mem_session ON memory_items(session_id);
     `);
     // 迁移：旧库无 scope 列 → 加上并把存量归入 global。
-    const cols = this.db.prepare(`PRAGMA table_info(memory_items)`).all() as unknown as { name: string }[];
+    const cols = this.db.prepare(`PRAGMA table_info(memory_items)`).all() as unknown as {
+      name: string;
+    }[];
     if (!cols.some((c) => c.name === "scope")) {
-      this.db.exec(`ALTER TABLE memory_items ADD COLUMN scope TEXT NOT NULL DEFAULT '${GLOBAL_SCOPE}'`);
+      this.db.exec(
+        `ALTER TABLE memory_items ADD COLUMN scope TEXT NOT NULL DEFAULT '${GLOBAL_SCOPE}'`,
+      );
     }
+    if (!cols.some((c) => c.name === "origin")) {
+      this.db.exec(`ALTER TABLE memory_items ADD COLUMN origin TEXT`);
+    }
+    if (!cols.some((c) => c.name === "lifecycle_state")) {
+      this.db.exec(`ALTER TABLE memory_items ADD COLUMN lifecycle_state TEXT`);
+    }
+    if (!cols.some((c) => c.name === "source_thread_id")) {
+      this.db.exec(`ALTER TABLE memory_items ADD COLUMN source_thread_id TEXT`);
+    }
+    // 旧行无法区分手工与 foreground agent 写入，安全归为 imported；带 session_id 的旧行是来源事实。
+    this.db.exec(`
+      UPDATE memory_items
+      SET origin = CASE WHEN session_id IS NOT NULL THEN 'extracted' ELSE 'imported' END
+      WHERE origin IS NULL OR origin = '';
+      UPDATE memory_items
+      SET lifecycle_state = CASE WHEN session_id IS NOT NULL THEN 'derived' ELSE 'curated' END
+      WHERE lifecycle_state IS NULL OR lifecycle_state = '';
+      UPDATE memory_items
+      SET source_thread_id = session_id
+      WHERE source_thread_id IS NULL AND session_id IS NOT NULL AND lifecycle_state = 'derived';
+    `);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_mem_scope ON memory_items(scope)`);
+    this.db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_mem_source_thread ON memory_items(source_thread_id)`,
+    );
     if (opts.vecExtensionPath) {
       this.vec = new SqliteVecIndex(this.db, "vec_items");
       this.vec.load(opts.vecExtensionPath); // 失败抛出：sqlite-vec 是必备依赖
@@ -145,12 +180,15 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   private toItem(r: Row): MemoryItem {
+    const sourceThreadId = r.source_thread_id ?? r.session_id ?? undefined;
     return {
       id: r.id,
       scope: r.scope,
       layer: r.layer,
       text: r.text,
-      ...(r.session_id ? { sessionId: r.session_id } : {}),
+      origin: r.origin,
+      state: r.lifecycle_state,
+      ...(sourceThreadId ? { sourceThreadId, sessionId: sourceThreadId } : {}),
       updatedAt: r.updated_at,
       ...(r.meta ? { meta: JSON.parse(r.meta) as Record<string, unknown> } : {}),
     };
@@ -167,26 +205,61 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   async write(item: MemoryWrite): Promise<MemoryItem> {
+    MemoryWriteSchema.parse(item);
     const id = randomUUID();
     const scope = item.scope ?? GLOBAL_SCOPE;
     const updatedAt = new Date().toISOString();
+    const sourceThreadId = item.sourceThreadId ?? item.sessionId;
+    const origin = item.origin ?? (sourceThreadId ? "extracted" : "manual");
+    const state = item.state ?? (origin === "extracted" && sourceThreadId ? "derived" : "curated");
+    if (state === "derived") {
+      if (origin !== "extracted") throw new Error("derived memory must be extracted");
+      if (!sourceThreadId) throw new Error("derived memory requires sourceThreadId");
+    } else if (sourceThreadId) {
+      throw new Error("curated memory cannot have sourceThreadId");
+    }
     const emb = await this.embedOne(item.text);
     const buf = emb ? Buffer.from(emb.buffer) : null;
     const info = this.db
       .prepare(
-        `INSERT INTO memory_items (id, scope, layer, session_id, text, embedding, updated_at, meta)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO memory_items
+           (id, scope, layer, session_id, origin, lifecycle_state, source_thread_id, text, embedding, updated_at, meta)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(id, scope, item.layer, item.sessionId ?? null, item.text, buf, updatedAt, item.meta ? JSON.stringify(item.meta) : null);
+      .run(
+        id,
+        scope,
+        item.layer,
+        state === "derived" ? (sourceThreadId ?? null) : null,
+        origin,
+        state,
+        state === "derived" ? (sourceThreadId ?? null) : null,
+        item.text,
+        buf,
+        updatedAt,
+        item.meta ? JSON.stringify(item.meta) : null,
+      );
     if (buf) this.vecSet(info.lastInsertRowid, buf);
     this.regenerateMarkdown(scope, item.layer);
-    return { id, updatedAt, ...item, scope };
+    return {
+      id,
+      scope,
+      layer: item.layer,
+      text: item.text,
+      origin,
+      state,
+      ...(state === "derived" && sourceThreadId
+        ? { sourceThreadId, sessionId: sourceThreadId }
+        : {}),
+      updatedAt,
+      ...(item.meta ? { meta: item.meta } : {}),
+    };
   }
 
   async edit(id: string, patch: Partial<Pick<MemoryItem, "text" | "meta">>): Promise<MemoryItem> {
-    const row = this.db.prepare(`SELECT rowid, * FROM memory_items WHERE id = ?`).get(id) as unknown as
-      | Row
-      | undefined;
+    const row = this.db
+      .prepare(`SELECT rowid, * FROM memory_items WHERE id = ?`)
+      .get(id) as unknown as Row | undefined;
     if (!row) throw new Error(`memory item not found: ${id}`);
     const text = patch.text ?? row.text;
     const updatedAt = new Date().toISOString();
@@ -194,14 +267,53 @@ export class LocalMemoryProvider implements MemoryProvider {
     const buf = emb instanceof Float32Array ? Buffer.from(emb.buffer) : emb;
     const meta = patch.meta !== undefined ? JSON.stringify(patch.meta) : row.meta;
     this.db
-      .prepare(`UPDATE memory_items SET text = ?, embedding = ?, updated_at = ?, meta = ? WHERE id = ?`)
+      .prepare(
+        `UPDATE memory_items SET text = ?, embedding = ?, updated_at = ?, meta = ? WHERE id = ?`,
+      )
       .run(text, buf, updatedAt, meta, id);
     if (patch.text) this.vecSet(row.rowid, buf); // 文本变了才会重嵌 → 同步向量
     this.regenerateMarkdown(row.scope, row.layer);
     return this.toItem({ ...row, text, updated_at: updatedAt, meta });
   }
 
-  async list(filter?: { scope?: string; layer?: MemoryLayer; sessionId?: string }): Promise<MemoryItem[]> {
+  async promote(id: string, opts: { promotedBy?: "user" | "agent" } = {}): Promise<MemoryItem> {
+    const row = this.db
+      .prepare(`SELECT rowid, * FROM memory_items WHERE id = ?`)
+      .get(id) as unknown as Row | undefined;
+    if (!row) throw new Error(`memory item not found: ${id}`);
+    if (row.lifecycle_state === "curated") return this.toItem(row);
+    const promotedAt = new Date().toISOString();
+    const previousMeta = row.meta ? (JSON.parse(row.meta) as Record<string, unknown>) : {};
+    const sourceThreadId = row.source_thread_id ?? row.session_id;
+    const meta = JSON.stringify({
+      ...previousMeta,
+      promotedAt,
+      promotedBy: opts.promotedBy ?? "user",
+      ...(sourceThreadId ? { promotedFromSourceThreadId: sourceThreadId } : {}),
+    });
+    this.db
+      .prepare(
+        `UPDATE memory_items
+         SET lifecycle_state = 'curated', source_thread_id = NULL, session_id = NULL, updated_at = ?, meta = ?
+         WHERE id = ?`,
+      )
+      .run(promotedAt, meta, id);
+    this.regenerateMarkdown(row.scope, row.layer);
+    return this.toItem({
+      ...row,
+      lifecycle_state: "curated",
+      source_thread_id: null,
+      session_id: null,
+      updated_at: promotedAt,
+      meta,
+    });
+  }
+
+  async list(filter?: {
+    scope?: string;
+    layer?: MemoryLayer;
+    sessionId?: string;
+  }): Promise<MemoryItem[]> {
     let sql = `SELECT * FROM memory_items`;
     const where: string[] = [];
     const params: (string | null)[] = [];
@@ -224,7 +336,9 @@ export class LocalMemoryProvider implements MemoryProvider {
   }
 
   async delete(id: string): Promise<void> {
-    const row = this.db.prepare(`SELECT rowid, scope, layer FROM memory_items WHERE id = ?`).get(id) as unknown as
+    const row = this.db
+      .prepare(`SELECT rowid, scope, layer FROM memory_items WHERE id = ?`)
+      .get(id) as unknown as
       | { rowid: number | bigint; scope: string; layer: MemoryLayer }
       | undefined;
     this.db.prepare(`DELETE FROM memory_items WHERE id = ?`).run(id);
@@ -234,13 +348,20 @@ export class LocalMemoryProvider implements MemoryProvider {
     }
   }
 
-  /** 删除某会话被动抽取写入的记忆事实（带 session_id 的条目）。返回删除条数。 */
+  /** 删除某 Source Conversation 仍拥有的 derived Extracted Facts。返回删除条数。 */
   async deleteBySession(sessionId: string): Promise<number> {
     const rows = this.db
-      .prepare(`SELECT rowid, scope, layer FROM memory_items WHERE session_id = ?`)
+      .prepare(
+        `SELECT rowid, scope, layer FROM memory_items
+         WHERE source_thread_id = ? AND lifecycle_state = 'derived'`,
+      )
       .all(sessionId) as unknown as { rowid: number | bigint; scope: string; layer: MemoryLayer }[];
     if (rows.length === 0) return 0;
-    this.db.prepare(`DELETE FROM memory_items WHERE session_id = ?`).run(sessionId);
+    this.db
+      .prepare(
+        `DELETE FROM memory_items WHERE source_thread_id = ? AND lifecycle_state = 'derived'`,
+      )
+      .run(sessionId);
     for (const r of rows) this.vecSet(r.rowid, null);
     for (const sl of uniqueScopeLayers(rows)) this.regenerateMarkdown(sl.scope, sl.layer);
     return rows.length;
@@ -292,7 +413,9 @@ export class LocalMemoryProvider implements MemoryProvider {
   async reindex(opts: { force?: boolean; batch?: number } = {}): Promise<number> {
     if (!this.embed) return 0;
     const where = opts.force ? "" : "WHERE embedding IS NULL";
-    const rows = this.db.prepare(`SELECT rowid, id, text FROM memory_items ${where}`).all() as unknown as {
+    const rows = this.db
+      .prepare(`SELECT rowid, id, text FROM memory_items ${where}`)
+      .all() as unknown as {
       rowid: number | bigint;
       id: string;
       text: string;
@@ -325,7 +448,12 @@ export class LocalMemoryProvider implements MemoryProvider {
    * 记忆抽取（注入 extractor 时）：把持久事实写入对应作用域，带去重 + 来源 sessionId。
    * scope 缺省 = global（对话池）；工作区传 ws:<id>。会话历史本身由 ConversationRepo 完整存档。
    */
-  async observe(input: { messages: unknown[]; sessionId: string; scope?: string; model?: string }): Promise<void> {
+  async observe(input: {
+    messages: unknown[];
+    sessionId: string;
+    scope?: string;
+    model?: string;
+  }): Promise<void> {
     if (!this.extract) return;
     const msgs = input.messages as { role: string; content: unknown }[];
     await this.extractFacts(msgs, input.sessionId, input.scope ?? GLOBAL_SCOPE, input.model);
@@ -353,7 +481,14 @@ export class LocalMemoryProvider implements MemoryProvider {
         const text = f.text.trim();
         if (!text || !layers.includes(f.layer)) continue; // 作用域外的层一律忽略
         if (this.isDuplicateFact(f.layer, text, existing)) continue;
-        await this.write({ scope, layer: f.layer, text, sessionId });
+        await this.write({
+          scope,
+          layer: f.layer,
+          text,
+          origin: "extracted",
+          state: "derived",
+          sourceThreadId: sessionId,
+        });
         existing.push({ layer: f.layer, text }); // 同批内也去重
       }
     } catch {
@@ -365,7 +500,9 @@ export class LocalMemoryProvider implements MemoryProvider {
   private scopeFacts(scope: string, layers: readonly MemoryLayer[]): ExtractedFact[] {
     const placeholders = layers.map(() => "?").join(",");
     const rows = this.db
-      .prepare(`SELECT layer, text FROM memory_items WHERE scope = ? AND layer IN (${placeholders})`)
+      .prepare(
+        `SELECT layer, text FROM memory_items WHERE scope = ? AND layer IN (${placeholders})`,
+      )
       .all(scope, ...layers) as unknown as { layer: MemoryLayer; text: string }[];
     return rows.map((r) => ({ layer: r.layer, text: r.text }));
   }
@@ -411,7 +548,9 @@ export class LocalMemoryProvider implements MemoryProvider {
     }
     const entries = parseLayerMarkdown(content);
     const rows = this.db
-      .prepare(`SELECT rowid, * FROM memory_items WHERE scope = ? AND layer = ? ORDER BY updated_at`)
+      .prepare(
+        `SELECT rowid, * FROM memory_items WHERE scope = ? AND layer = ? ORDER BY updated_at`,
+      )
       .all(GLOBAL_SCOPE, layer) as unknown as Row[];
     const byId = new Map(rows.map((r) => [r.id, r]));
     const seenIds = new Set<string>();
@@ -438,9 +577,11 @@ export class LocalMemoryProvider implements MemoryProvider {
         const buf = emb ? Buffer.from(emb.buffer) : null;
         const info = this.db
           .prepare(
-            `INSERT INTO memory_items (id, scope, layer, session_id, text, embedding, updated_at, meta) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+            `INSERT INTO memory_items
+               (id, scope, layer, session_id, origin, lifecycle_state, source_thread_id, text, embedding, updated_at, meta)
+             VALUES (?, ?, ?, NULL, 'imported', 'curated', NULL, ?, ?, ?, NULL)`,
           )
-          .run(id, GLOBAL_SCOPE, layer, null, e.text, buf, now);
+          .run(id, GLOBAL_SCOPE, layer, e.text, buf, now);
         if (buf) this.vecSet(info.lastInsertRowid, buf);
         changed = true;
       }
@@ -497,7 +638,9 @@ export class LocalMemoryProvider implements MemoryProvider {
 }
 
 /** 去重 (scope,layer) 组合。 */
-function uniqueScopeLayers(rows: { scope: string; layer: MemoryLayer }[]): { scope: string; layer: MemoryLayer }[] {
+function uniqueScopeLayers(
+  rows: { scope: string; layer: MemoryLayer }[],
+): { scope: string; layer: MemoryLayer }[] {
   const seen = new Set<string>();
   const out: { scope: string; layer: MemoryLayer }[] = [];
   for (const r of rows) {

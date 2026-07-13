@@ -51,7 +51,7 @@ export class AgentSessionStore {
    * pi 上下文，含 compaction），否则 create() 后定向到该 threadId 文件。
    */
   sessionManagerFor(threadId: string, cwd: string): SessionManager {
-    const file = path.join(this.sessionsDir, `${threadId}.jsonl`);
+    const file = this.sessionFileFor(threadId);
     if (fs.existsSync(file)) return SessionManager.open(file, this.sessionsDir, cwd);
     const sm = SessionManager.create(cwd, this.sessionsDir);
     sm.setSessionFile(file);
@@ -62,7 +62,7 @@ export class AgentSessionStore {
    * 读该会话 pi 日志里最后一条 assistant 消息的 usage，用于打开历史会话时回填上下文用量环。
    */
   lastUsage(threadId: string): AgentTokenUsage | null {
-    const file = path.join(this.sessionsDir, `${threadId}.jsonl`);
+    const file = this.sessionFileFor(threadId);
     if (!fs.existsSync(file)) return null;
     let last: AgentTokenUsage | null = null;
     for (const line of fs.readFileSync(file, "utf8").split("\n")) {
@@ -93,6 +93,21 @@ export class AgentSessionStore {
     }
   }
 
+  deleteSessionFileStrict(file: string | undefined): void {
+    if (file) fs.rmSync(file, { force: true });
+  }
+
+  /** 删除尚未载入进程的 cold session 持久化文件。 */
+  deleteThreadSessionFile(threadId: string): void {
+    this.deleteSessionFileStrict(this.sessionFileFor(threadId));
+  }
+
+  private sessionFileFor(threadId: string): string {
+    const file = path.resolve(this.sessionsDir, `${threadId}.jsonl`);
+    if (path.dirname(file) !== this.sessionsDir) throw new Error("invalid_thread_id");
+    return file;
+  }
+
   /**
    * 调校 pi 设置（写 agentDir/settings.json，SettingsManager 启动时读取）。
    * pi 默认 compaction.reserveTokens=16384；本地小上下文模型会因此每轮压缩，调低到 2048。
@@ -100,7 +115,9 @@ export class AgentSessionStore {
   private tunePiSettings(): void {
     const file = path.join(this.agentDir, "settings.json");
     try {
-      const cur = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>) : {};
+      const cur = fs.existsSync(file)
+        ? (JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>)
+        : {};
       const comp = (cur.compaction as Record<string, unknown> | undefined) ?? {};
       if (comp.reserveTokens == null) {
         cur.compaction = { ...comp, reserveTokens: 2048 };

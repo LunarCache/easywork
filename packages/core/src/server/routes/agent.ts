@@ -64,6 +64,10 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_request", detail: parsed.error.format() });
     }
+    const threadId = parsed.data.threadId;
+    if (sessionHost.isThreadDeleted(threadId)) {
+      return reply.code(410).send({ error: "thread_deleted" });
+    }
     const unavailable = agentModelUnavailableError(parsed.data.model, registry, providers);
     if (unavailable) {
       return reply.code(404).send({ error: "model_not_loaded", message: String(unavailable) });
@@ -71,7 +75,6 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
 
     // pi 内核托管：会话内自持历史/技能/compaction，并自行加载项目上下文（AGENTS.md）。
     // 记忆召回/抽取、知识库、MCP、内置工具均由宿主以扩展/customTools 注入（见 SessionHost）。
-    const threadId = parsed.data.threadId;
     const projectId = parsed.data.projectId ?? repo.getThread(threadId)?.projectId ?? undefined;
     const project = projectId ? repo.getProject(projectId) : null;
     const isWorkspace = !!project?.workspaceDir;
@@ -167,6 +170,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
       }
       // 仅在「未被取消」时落库：用户取消 → 整轮不计入历史（与 pi 上下文回滚一致）。
       if (sawFinal && !ac.signal.aborted) {
+        await sessionHost.commitThread(threadId, () => {
         if (lastUser?.role === "user") {
           repo.appendMessage({
             id: crypto.randomUUID(),
@@ -216,11 +220,13 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
             createdAt: new Date().toISOString(),
           });
         }
+        });
       } else if (threadCreated && repo.history(threadId).length === 0) {
         // 新建会话的首轮即被取消 → 清掉这个空会话，避免侧栏残留空壳。
         repo.deleteThread(threadId);
       }
     } catch (err) {
+      if (threadCreated && repo.history(threadId).length === 0) repo.deleteThread(threadId);
       send({ type: "error", message: err instanceof Error ? err.message : String(err) });
     } finally {
       if (!raw.writableEnded && !raw.destroyed) raw.write("data: [DONE]\n\n");

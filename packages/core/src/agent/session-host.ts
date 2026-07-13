@@ -100,6 +100,7 @@ interface HostedSession {
  */
 export class SessionHost {
   private readonly sessions = new Map<string, HostedSession>();
+  private readonly deleting = new Set<string>();
   private readonly sessionStore: AgentSessionStore;
   private readonly agentDir: string;
   // R2：provider/runtime seam 拥有共享 auth/registry（OAuth 与 key 跨重启持久；所有会话复用）。
@@ -280,7 +281,25 @@ export class SessionHost {
   async *run(input: EwAgentRunInput): AsyncGenerator<AgentEvent> {
     const release = await this.runQueue.acquire(input.threadId);
     try {
+      if (this.deleting.has(input.threadId)) throw new Error("thread_deleted");
       yield* this.runOne(input);
+    } finally {
+      release();
+    }
+  }
+
+  /** HTTP 等入口在创建持久化 thread 前调用，拒绝已完成删除的迟到请求。 */
+  isThreadDeleted(threadId: string): boolean {
+    return this.deleting.has(threadId);
+  }
+
+  /** 把 HTTP 历史落库也纳入 thread 屏障；删除先到时拒绝迟到提交。 */
+  async commitThread(threadId: string, commit: () => Promise<void> | void): Promise<boolean> {
+    const release = await this.runQueue.acquire(threadId);
+    try {
+      if (this.deleting.has(threadId)) return false;
+      await commit();
+      return true;
     } finally {
       release();
     }
@@ -399,11 +418,40 @@ export class SessionHost {
     await this.extraction.flushAll();
   }
 
+  /**
+   * 在该 thread 的 run 串行屏障内删除：先等活动轮次结束，再丢弃/等待抽取，最后执行持久层删除。
+   * 成功后保留 tombstone，阻止已排队或迟到的请求重新创建同 id 会话；失败则恢复可用状态。
+   */
+  async deleteThread(threadId: string, deletePersistentState: () => Promise<void> | void): Promise<void> {
+    this.deleting.add(threadId);
+    const release = await this.runQueue.acquire(threadId);
+    let persistentDeleted = false;
+    try {
+      await this.extraction.discard(threadId);
+      await deletePersistentState();
+      persistentDeleted = true;
+      this.disposeSession(threadId, true);
+    } catch (error) {
+      // 持久层尚未删除时恢复 thread；若已删而 pi 文件清理失败，保留 tombstone 防止复活并允许重试 DELETE。
+      if (!persistentDeleted) this.deleting.delete(threadId);
+      throw error;
+    } finally {
+      release();
+    }
+  }
+
   /** 释放某 thread 的会话。 */
   dispose(threadId: string): void {
-    this.extraction.discard(threadId); // 删会话：丢弃待抽取缓冲，不把将删的对话抽进记忆
+    void this.extraction.discard(threadId); // 非删除重建：异步丢弃待抽取缓冲
+    this.disposeSession(threadId);
+  }
+
+  private disposeSession(threadId: string, strict = false): void {
     const s = this.sessions.get(threadId);
-    if (!s) return;
+    if (!s) {
+      if (strict) this.sessionStore.deleteThreadSessionFile(threadId);
+      return;
+    }
     // 彻底删除：先取 pi 会话落盘文件，dispose 后删掉，避免残留可恢复的对话上下文。
     let file: string | undefined;
     try {
@@ -413,7 +461,12 @@ export class SessionHost {
     }
     s.dispose();
     this.sessions.delete(threadId);
-    this.sessionStore.deleteSessionFile(file);
+    if (strict) {
+      this.sessionStore.deleteSessionFileStrict(file);
+      this.sessionStore.deleteThreadSessionFile(threadId);
+    } else {
+      this.sessionStore.deleteSessionFile(file);
+    }
   }
 
   /**
@@ -426,7 +479,7 @@ export class SessionHost {
 
   /** 释放全部（daemon 关停）。注意：关停前应先 await flushAllExtraction()（停模型前抽完）。 */
   disposeAll(): void {
-    for (const id of [...this.sessions.keys()]) this.extraction.discard(id);
+    for (const id of [...this.sessions.keys()]) void this.extraction.discard(id);
     for (const s of this.sessions.values()) s.dispose();
     this.sessions.clear();
   }

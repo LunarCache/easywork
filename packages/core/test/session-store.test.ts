@@ -25,9 +25,19 @@ describe("AgentSessionStore", () => {
       fs.writeFileSync(
         file,
         [
-          JSON.stringify({ message: { role: "assistant", usage: { input: 10, output: 4, cacheRead: 2, cacheWrite: 3, totalTokens: 19 } } }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              usage: { input: 10, output: 4, cacheRead: 2, cacheWrite: 3, totalTokens: 19 },
+            },
+          }),
           "not json",
-          JSON.stringify({ message: { role: "assistant", usage: { input: 20, output: 5, cacheRead: 7, cacheWrite: 0, totalTokens: 32 } } }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              usage: { input: 20, output: 5, cacheRead: 7, cacheWrite: 0, totalTokens: 32 },
+            },
+          }),
         ].join("\n"),
         "utf8",
       );
@@ -43,7 +53,9 @@ describe("AgentSessionStore", () => {
   });
 
   it("ignores aborted/error or zero-token assistant usage records", () => {
-    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-session-usage-abort-")));
+    const agentDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "ew-session-usage-abort-")),
+    );
     try {
       const store = new AgentSessionStore(agentDir);
       const file = path.join(agentDir, "sessions", "thread-abort.jsonl");
@@ -87,6 +99,21 @@ describe("AgentSessionStore", () => {
         completionTokens: 4,
         totalTokens: 17,
       });
+    } finally {
+      fs.rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("strict thread deletion propagates a persisted-session removal failure", () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-session-delete-")));
+    try {
+      const store = new AgentSessionStore(agentDir);
+      const file = path.join(agentDir, "sessions", "blocked.jsonl");
+      fs.mkdirSync(file);
+      fs.writeFileSync(path.join(file, "child"), "cannot remove as a file");
+
+      expect(() => store.deleteThreadSessionFile("blocked")).toThrow();
+      expect(fs.existsSync(file)).toBe(true);
     } finally {
       fs.rmSync(agentDir, { recursive: true, force: true });
     }

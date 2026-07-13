@@ -11,6 +11,7 @@ import type {
   LocalLoadOptions,
   LocalModel,
   LocalModelRuntimeSettings,
+  MemoryItem,
   ChannelKind,
   ChannelAdapterMeta,
   ChannelConfig,
@@ -853,6 +854,16 @@ export class EasyWorkClient {
     });
   }
 
+  /** 把来源事实提升为独立 Curated Fact。 */
+  async promoteMemory(id: string): Promise<MemoryItem> {
+    return this.postJSON(`/memory/${encodeURIComponent(id)}/promote`, {});
+  }
+
+  /** 固定来源事实；语义上等同提升，事实从此独立于来源对话。 */
+  async pinMemory(id: string): Promise<MemoryItem> {
+    return this.postJSON(`/memory/${encodeURIComponent(id)}/pin`, {});
+  }
+
   /** 清空某作用域的全部记忆（如某工作区私有池）。返回删除条数。 */
   async clearMemoryScope(scope: string): Promise<{ removed: number }> {
     const res = await this.fetchImpl(`${this.baseUrl}/memory/scope/${encodeURIComponent(scope)}`, {
@@ -865,14 +876,12 @@ export class EasyWorkClient {
   /** 列出记忆条目（可按作用域/层过滤）。 */
   async listMemory(
     opts: { scope?: string; layer?: string } = {},
-  ): Promise<{ id: string; scope?: string; layer: string; text: string; sessionId?: string; updatedAt: string }[]> {
+  ): Promise<MemoryItem[]> {
     const qs = new URLSearchParams();
     if (opts.scope) qs.set("scope", opts.scope);
     if (opts.layer) qs.set("layer", opts.layer);
     const q = qs.toString();
-    const { items } = await this.getJSON<{
-      items: { id: string; scope?: string; layer: string; text: string; sessionId?: string; updatedAt: string }[];
-    }>(`/memory${q ? `?${q}` : ""}`);
+    const { items } = await this.getJSON<{ items: MemoryItem[] }>(`/memory${q ? `?${q}` : ""}`);
     return items;
   }
 

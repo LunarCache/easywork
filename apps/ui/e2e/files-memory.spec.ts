@@ -40,10 +40,17 @@ test.describe("files and memory e2e", () => {
     await page.getByTestId("memory-add-submit").click();
 
     await expect
-      .poll(async () => (await client.listMemory({ scope: `ws:${project.id}` })).find((item) => item.text === initialText)?.id ?? null)
+      .poll(
+        async () =>
+          (await client.listMemory({ scope: `ws:${project.id}` })).find(
+            (item) => item.text === initialText,
+          )?.id ?? null,
+      )
       .not.toBeNull();
     const createdId =
-      (await client.listMemory({ scope: `ws:${project.id}` })).find((item) => item.text === initialText)?.id ?? "";
+      (await client.listMemory({ scope: `ws:${project.id}` })).find(
+        (item) => item.text === initialText,
+      )?.id ?? "";
 
     await expect(page.getByTestId(`memory-card-${createdId}`)).toContainText(initialText);
     await page.getByTestId(`memory-edit-${createdId}`).click();
@@ -51,7 +58,12 @@ test.describe("files and memory e2e", () => {
     await page.getByTestId(`memory-save-${createdId}`).click();
 
     await expect
-      .poll(async () => (await client.listMemory({ scope: `ws:${project.id}` })).find((item) => item.id === createdId)?.text)
+      .poll(
+        async () =>
+          (await client.listMemory({ scope: `ws:${project.id}` })).find(
+            (item) => item.id === createdId,
+          )?.text,
+      )
       .toBe(editedText);
 
     await page.getByTestId("memory-search-input").fill("updated");
@@ -61,8 +73,66 @@ test.describe("files and memory e2e", () => {
     await page.getByTestId(`memory-delete-${createdId}`).click();
 
     await expect
-      .poll(async () => (await client.listMemory({ scope: `ws:${project.id}` })).some((item) => item.id === createdId))
+      .poll(async () =>
+        (await client.listMemory({ scope: `ws:${project.id}` })).some(
+          (item) => item.id === createdId,
+        ),
+      )
       .toBe(false);
     await expect(page.getByTestId(`memory-card-${createdId}`)).toHaveCount(0);
+  });
+
+  test("来源事实显示 provenance，并可确认提升为独立长期记忆", async ({ page, openApp }) => {
+    let item = {
+      id: "derived-memory",
+      scope: "global",
+      layer: "user-profile",
+      text: "用户偏好先给结论",
+      origin: "extracted" as const,
+      state: "derived" as const,
+      sourceThreadId: "source-thread-1234",
+      sessionId: "source-thread-1234",
+      updatedAt: new Date().toISOString(),
+    };
+
+    await page.route(/\/memory(?:\?.*)?$/, async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ items: [item] }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+    await page.route("**/memory/derived-memory/pin", async (route) => {
+      const { sourceThreadId: _sourceThreadId, sessionId: _sessionId, ...rest } = item;
+      item = {
+        ...rest,
+        state: "curated",
+        updatedAt: new Date().toISOString(),
+      } as typeof item;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(item),
+      });
+    });
+
+    await openApp();
+    await page.getByTestId("sidebar-settings").click();
+    await page.getByTestId("settings-nav-memory").click();
+
+    const card = page.getByTestId("memory-card-derived-memory");
+    await expect(card).toContainText("自动提取");
+    await expect(card).toContainText("来源 source-t");
+    await expect(card).toContainText("随来源对话删除");
+    await page.getByTestId("memory-promote-derived-memory").click();
+
+    await expect(card).toContainText("自动提取 · 已确认");
+    await expect(card).not.toContainText("来源 source-t");
+    await expect(page.getByTestId("memory-promote-derived-memory")).toHaveCount(0);
+    await expect(page.getByText("已确认并保留；删除来源对话不会再删除这条事实。")).toBeVisible();
   });
 });

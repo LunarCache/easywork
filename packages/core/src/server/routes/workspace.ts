@@ -164,12 +164,21 @@ export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
   }));
   // 手动压缩该会话上下文（pi session.compact()）；排进该 thread 的 run 串行链。无活动会话则 skipped。
   app.post("/threads/:id/compact", async (req) => sessionHost.compact((req.params as { id: string }).id));
-  app.delete("/threads/:id", async (req) => {
+  app.delete("/threads/:id", async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const projectId = repo.getThread(id)?.projectId;
-    repo.deleteThread(id); // 删 SQLite 会话 + 消息 + FTS
-    sessionHost.dispose(id); // 彻底删除：丢弃进程内 pi 会话上下文 + 落盘 session 文件 + 待抽取缓冲
-    const facts = await memory.deleteBySession(id).catch(() => 0); // 一并清除该对话抽取出的记忆事实
+    let facts = 0;
+    try {
+      await sessionHost.deleteThread(id, async () => {
+        facts = await memory.deleteBySession(id);
+        repo.deleteThread(id); // 删 SQLite 会话 + 消息 + FTS
+      });
+    } catch (e) {
+      return reply.code(500).send({
+        error: "thread_delete_failed",
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
     // 对话会话（无项目）：删掉其每会话工件目录（软件 scratch；工作区会话用项目目录，不动）。
     if (!projectId) {
       try {
@@ -206,17 +215,25 @@ export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
       return reply.code(404).send({ error: "not_found" });
     }
   });
-  app.delete("/projects/:id", async (req) => {
+  app.delete("/projects/:id", async (req, reply) => {
     const id = (req.params as { id: string }).id;
-    // 删除工作区时，连同其下会话一并彻底删除（消息 + pi 会话上下文/落盘文件），不留孤儿会话。
-    for (const t of repo.listThreads({ projectId: id })) {
-      repo.deleteThread(t.id);
-      sessionHost.dispose(t.id);
+    try {
+      // 每个来源会话先删其 derived facts 再删对话；随后清除剩余的独立工作区记忆。
+      for (const t of repo.listThreads({ projectId: id })) {
+        await sessionHost.deleteThread(t.id, async () => {
+          await memory.deleteBySession(t.id);
+          repo.deleteThread(t.id);
+        });
+      }
+      await memory.deleteByScope(workspaceScope(id));
+      repo.deleteProject(id);
+      return { ok: true };
+    } catch (e) {
+      return reply.code(500).send({
+        error: "project_delete_failed",
+        message: e instanceof Error ? e.message : String(e),
+      });
     }
-    // 工作区的私有记忆池整体清除（隔离作用域 ws:<id>）。
-    await memory.deleteByScope(workspaceScope(id)).catch(() => 0);
-    repo.deleteProject(id);
-    return { ok: true };
   });
 
   const projectRoot = (id: string): string => {
