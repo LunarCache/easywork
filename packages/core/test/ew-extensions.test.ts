@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Tool, MemoryProvider, ConversationRepo } from "@ew/shared";
+import type { Tool, MemoryProvider, ConversationRepo, SkillCandidateCreate } from "@ew/shared";
 import type { KnowledgeBaseStore } from "../src/rag/store.js";
 import { toPiTool, buildEwCustomTools, turnsForExtraction } from "../src/agent/ew-extensions.js";
 import { ExtractionScheduler } from "../src/memory/extraction-scheduler.js";
@@ -89,6 +89,35 @@ describe("buildEwCustomTools", () => {
     const builtins = [fakeTool("explore_web", async () => ({ content: "" })), fakeTool("calculator", async () => ({ content: "" }))];
     const tools = await buildEwCustomTools({ sessionId: "s", cwd: "/tmp", builtins });
     expect(tools.map((t) => t.name).sort()).toEqual(["calculator", "explore_web"]);
+  });
+
+  it("exposes a staging-only Skill Candidate tool with run provenance and workspace scope", async () => {
+    let staged: SkillCandidateCreate | undefined;
+    const tools = await buildEwCustomTools({
+      sessionId: "source-thread",
+      cwd: "/tmp",
+      memoryScope: "ws:project-1",
+      modelId: "model-1",
+      stageSkillCandidate(input) {
+        staged = input;
+        const now = new Date().toISOString();
+        return {
+          ...input, id: "candidate-1", slug: input.name, status: "pending",
+          validation: { valid: true, contentHash: "hash", findings: [], checkedAt: now }, createdAt: now, updatedAt: now,
+        };
+      },
+    });
+    const tool = tools.find((item) => item.name === "stage_skill_candidate")!;
+    const result = await tool.execute("call", {
+      name: "release-flow", description: "Release safely", triggerConditions: ["when releasing"],
+      proposedSkillMd: "---\nname: release-flow\ndescription: Release safely\nwhenToUse: when releasing\n---\n## Procedure\n1. Test.\n## Verification\n- Check.\n",
+      requiredTools: [], evidenceSummary: "worked", reason: "reusable",
+    }, undefined, undefined, {} as never);
+    expect(staged).toMatchObject({
+      scope: "workspace", workspaceId: "project-1", sourceThreadIds: ["source-thread"],
+      createdBy: "foreground-agent", learnerModel: "model-1",
+    });
+    expect(result.details).toMatchObject({ status: "pending", candidateId: "candidate-1" });
   });
 });
 

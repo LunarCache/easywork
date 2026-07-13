@@ -109,6 +109,15 @@ export function Workspace({
   const [permOpen, setPermOpen] = useState(false);
   const [msgs, setMsgs] = useState<UiMsg[]>([]);
   const [input, setInput] = useState("");
+
+  useEffect(() => {
+    const setPrompt = ((event: Event) => {
+      const detail = (event as CustomEvent<{ prompt?: string; workspaceId?: string }>).detail;
+      if (detail?.prompt && detail.workspaceId === project.id) setInput(detail.prompt);
+    }) as EventListener;
+    window.addEventListener("ew:set-composer-prompt", setPrompt);
+    return () => window.removeEventListener("ew:set-composer-prompt", setPrompt);
+  }, [project.id]);
   const [busy, setBusy] = useState(false);
   const [thinkLevel, setThinkLevel] = useState<ThinkLevel>("off");
   const [notice, setNotice] = useState<string | null>(null);

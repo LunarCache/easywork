@@ -43,3 +43,11 @@ _Avoid_: memory, tip, fact
 **Skill Review**:
 The review that compares a Skill Candidate or proposed Skill change with existing Skills and decides whether to reject, revise, merge, or approve it.
 _Avoid_: memory extraction, automatic install
+
+**Learned Skill**:
+An approved Skill created through EasyWork's Candidate pipeline. EasyWork may record its usage, propose version-locked patches, pin it, mark it stale, or archive it recoverably; approval is still required for content changes.
+_Avoid_: user-authored Skill, automatically installed Skill
+
+**Additive Memory Provider**:
+An optional untrusted recall source that can supplement local Core Memory but cannot receive or own EasyWork memory writes. Its absence or failure must not change local behavior.
+_Avoid_: primary memory backend, memory replacement

@@ -79,4 +79,39 @@ test.describe("knowledge base and skills e2e", () => {
     await page.getByTestId(`skill-toggle-${created!.id}`).click();
     await expect(page.getByTestId(`skill-status-${created!.id}`)).toHaveCount(0);
   });
+
+  test("Skill Candidate 需在审核页批准，显式学习只生成 Agent 提示", async ({ page, openApp, client }) => {
+    const suffix = Date.now().toString().slice(-6);
+    const name = `pw-learned-${suffix}`;
+    const candidate = await client.stageSkillCandidate({
+      name,
+      description: "A reviewed Playwright workflow",
+      triggerConditions: ["when validating candidate review"],
+      scope: "global",
+      proposedSkillMd: `---\nname: ${name}\ndescription: A reviewed Playwright workflow\nwhenToUse: when validating candidate review\nversion: "0.1.0"\n---\n# Workflow\n## Procedure\n1. Run the check.\n## Pitfalls\n- Keep it bounded.\n## Verification\n- Confirm the result.\n`,
+      requiredTools: [],
+      sourceThreadIds: ["pw-source"],
+      evidence: [{ sourceThreadId: "pw-source", summary: "The flow succeeded" }],
+      reason: "Reusable e2e flow",
+      createdBy: "foreground-agent",
+    });
+    expect((await client.skillsInfo()).skills.some((skill) => skill.id === name)).toBe(false);
+
+    await openApp();
+    await page.getByTestId("sidebar-settings").click();
+    await page.getByTestId("settings-nav-skills").click();
+    await page.getByTestId("skills-tab-pending").click();
+    await page.getByTestId(`skill-candidate-${candidate.id}`).click();
+    await expect(page.getByTestId("skill-candidate-editor")).toContainText("## Verification");
+    await expect(page.getByTestId("skill-candidate-diff")).toContainText("+++ b/SKILL.md");
+    await page.getByTestId("skill-candidate-approve").click();
+    await expect.poll(async () => (await client.skillsInfo()).skills.some((skill) => skill.id === name)).toBe(true);
+
+    await page.getByTestId("skills-learn-button").click();
+    await expect(page.getByTestId("skills-learn-dialog")).toBeVisible();
+    await page.locator(".mem-add-textarea").fill("提炼一套可复用的发布检查流程");
+    await page.getByTestId("skills-learn-submit").click();
+    await expect(page.getByTestId("chat-composer-input")).toContainText("stage_skill_candidate");
+    expect((await client.listSkillCandidates()).filter((item) => item.status === "pending")).toHaveLength(0);
+  });
 });

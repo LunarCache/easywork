@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineTool } from "@ew/tools";
 import {
   GLOBAL_SCOPE,
+  MEMORY_LAYER_CAPS,
   isWorkspaceScope,
   layersForScope,
   type MemoryLayer,
@@ -13,19 +14,9 @@ import {
  * 各层字符上限（参考 Hermes：USER.md 1375 / MEMORY.md 2200）。
  * 接近上限时 add/replace 报错，逼模型合并或删旧条目，而非静默膨胀。
  */
-const LAYER_CAP: Record<MemoryLayer, number> = {
-  "user-profile": 1375,
-  "agent-memory": 2200,
-  skills: 2200,
-  conventions: 1375,
-  decisions: 2200,
-  pitfalls: 2200,
-};
-
 const LAYER_DESC: Record<MemoryLayer, string> = {
   "user-profile": "用户身份/偏好",
-  "agent-memory": "你应记住的客观事实/约定",
-  skills: "可复用流程",
+  "agent-notes": "你应记住的环境事实和跨会话教训",
   conventions: "本工程的约定/约束/偏好",
   decisions: "做过的关键变动/决策（记 why，不记 diff）",
   pitfalls: "踩过的坑/教训及规避",
@@ -33,7 +24,7 @@ const LAYER_DESC: Record<MemoryLayer, string> = {
 
 /**
  * manage_memory 工具（参考 Hermes：模型自治、有界的长期记忆），按作用域参数化。
- * - 对话/全局会话：分层 user-profile/agent-memory/skills（写入全局池）。
+ * - 对话/全局会话：分层 user-profile/agent-notes（写入 Core Memory）。
  * - 工作区会话：分层 conventions/decisions/pitfalls（写入本工作区池，与全局/别的工作区隔离）。
  * replace/remove 用子串定位已有条目（无需全文）。与被动 LLM 抽取互补。
  */
@@ -59,7 +50,7 @@ export function makeMemoryTool(memory: MemoryProvider, scope: string = GLOBAL_SC
       const ml = layer as MemoryLayer;
       if (!layers.includes(ml))
         return err(`本会话不支持分层 ${layer}（可用：${layers.join("/")}）。`);
-      const cap = LAYER_CAP[ml];
+      const cap = MEMORY_LAYER_CAPS[ml];
       const items = await memory.list({ scope, layer: ml });
 
       if (action === "add") {

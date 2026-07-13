@@ -94,9 +94,9 @@ flowchart LR
 
 ### 记忆、知识库、Skills、MCP
 
-- 记忆按全局 / 工作区作用域隔离，支持语义召回、词法召回和 markdown 真相源回灌。
+- Core Memory 只保存 User Profile / Agent Notes；自动事实保留来源所有权，删除来源对话会级联删除未提升事实。工作区记忆隔离，支持语义/词法召回和 markdown 回灌；外部 Deep Memory 只能追加受限召回，不能替换本地真相源。
 - 知识库支持上传、解析、分块、混合检索和引用来源。
-- Skills 页面只展示全局技能来源：内置 `~/.easywork/pi-agent/skills` 与标准 `~/.agents/skills`。
+- Skills 页面展示全局来源以及待审核/已归档 learned Skills；Chat 或设置里的“学习 Skill”和受限后台复盘都只生成 Candidate，明确批准后才会激活。候选支持完整 package 验证、工作区 scope、证据、乐观锁 patch；learned Skills 支持遥测、固定、快照、归档、恢复和回滚。
 - MCP 支持 stdio 与 HTTP，工具清单探测、启停、导入和审批一体化。
 
 ### 外部渠道
@@ -181,11 +181,11 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 296 passed / 1 skipped
+npm test               # vitest: 341 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
-npm run test:e2e       # Playwright UI e2e: 23 条，真 daemon + 真 Vite + 隔离 data dir
+npm run test:e2e       # Playwright UI e2e: 25 条，真 daemon + 真 Vite + 隔离 data dir
 
 npm run dev:daemon     # 仅启动 daemon，首行输出 {baseUrl, token, pid}
 npm run dev:ui         # 仅启动 Vite
@@ -207,8 +207,8 @@ npm run app:build --workspace @ew/desktop
 
 ## 测试覆盖
 
-- Vitest：296 passed / 1 skipped。
-- Playwright UI e2e：23 条，覆盖设置页、模型模板跨协议元数据继承、推理模型默认思考档位、默认工作区直达、渠道/知识库/Skills/记忆入口、Chat / Workspace composer、联网工具门控、图片上传与粘贴、搜索导航、文件页、记忆 CRUD、知识库、Skills 模板与详情。
+- Vitest：341 passed / 1 skipped。
+- Playwright UI e2e：25 条，覆盖设置页、模型模板跨协议元数据继承、推理模型默认思考档位、默认工作区直达、渠道/知识库/Skills/记忆入口、Chat / Workspace composer、联网工具门控、图片上传与粘贴、搜索导航、文件页、来源事实、记忆 CRUD、知识库、Skills 模板/候选 diff/审批与显式学习。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
 
 ---

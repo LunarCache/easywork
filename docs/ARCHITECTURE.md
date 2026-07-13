@@ -34,9 +34,9 @@ packages/
   shared/         @ew/shared        Zod schema、类型与少量运行时 helper（契约层；运行时依赖 zod）
   core/           @ew/core          daemon 库：server / routes / SessionHost(托管 pi) / ew-extensions / ChannelOperations / /v1 网关 / RAG / store
   providers/      @ew/providers     LlamaServeEngine（--host/--api-key）/ OpenAICompatibleEngine / harmony 解析
-  memory/         @ew/memory        MemoryProvider：local（作用域化分层 + SqliteVecIndex 语义 ⊕ 词法召回）+ mem0 适配骨架（部分实现）
+  memory/         @ew/memory        local Core Memory + additive external recall + SqliteVecIndex 语义 ⊕ 词法召回
   tools/          @ew/tools         内置工具 + SSRF 防护
-  skills/         @ew/skills        Skills 发现 / 渐进披露 / 执行
+  skills/         @ew/skills        Skills 发现 / 渐进披露 / 执行（候选学习状态由 core/skill-learning 管理）
   mcp/            @ew/mcp           MCP client（stdio + HTTP）
   im-connectors/  @ew/im-connectors Channel Gateway + adapter registry（Telegram long-poll；Feishu/Lark WebSocket 默认 + webhook 高级模式；WeChat iLink QR + long-poll；Discord / WeCom 规划中）
   sdk/            @ew/sdk           daemon HTTP API 的类型化客户端
@@ -72,6 +72,12 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 
 `@ew/core` 暴露以下管理面：`GET /im/adapters`，`GET/POST /im/connectors`，`POST /im/connectors/:id/start`，`POST /im/connectors/:id/stop`，以及 `DELETE /im/connectors/:id`。这些路由都走 daemon Bearer 鉴权，并由 `ChannelOperations` 调用 gateway 完成实际变更。Feishu/Lark 扫码注册 helper 是 `POST /im/feishu/register` 与 `GET/DELETE /im/feishu/register/:id`：core 启动 SDK registerApp 短会话，二维码确认成功后自动保存 `transport:websocket` 连接器并按需启动；取消或 core stop 会 abort 未完成扫码会话，避免取消后落库。WeChat 对应 `POST /im/wechat/register` 与 `GET/DELETE /im/wechat/register/:id`，通过同一 setup session 模式完成 iLink QR 登录和 connector 保存。`GET /inbox/threads` 是给桌面收件箱的只读读模型：从 `ConversationRepo` 里筛选 `thread.channel`，聚合最后一条文本消息和消息数，不引入第二套 IM 消息表；`GET /inbox/events` 是 Bearer 鉴权的 SSE 失效通知，只发 `ready/changed`，消息正文仍通过 read model 读取。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。Core 只针对 webhook 捕获 raw body 供签名校验，并在读取前/读取中执行 32MiB 上限。Feishu/Lark adapter 的高级 webhook 模式负责 URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化和文本回复；非 `transport:webhook` 或未配置 `verificationToken`/`encryptKey` 时拒绝 public webhook。渠道配置先落 SQLite settings；平台 secret 目前随配置存储，后续可在不改 adapter seam 的情况下迁到 keychain/secret ref。
 
+### 记忆与 Skill 学习边界
+
+- `LocalMemoryProvider` 是唯一可写真相源：全局 Core Memory 只有 User Profile / Agent Notes，工作区只有 conventions / decisions / pitfalls；Extracted Fact 在提升前带 Source Conversation 所有权。`AdditiveMemoryProvider` 只在 Agent/IM 的 recall 上叠加受扫描、限长、带来源与 untrusted fence 的外部结果，失败/禁用/移除不影响本地。HTTP 管理面仍直接编辑本地记忆。
+- `SessionHost` 同时服务 Chat、Workspace、CLI agent 和 IM，因此这些入口都获得相同记忆、`stage_skill_candidate` 与 pi Skill 发现；`/v1` 只调用模型 runtime helper，不进入上述链路。
+- `SkillCandidateStore/Service/Coordinator` 位于 core：foreground Learn 通过普通 Agent turn 暂存候选，background reviewer 只接收冻结 trajectory 和 Skill catalog，迁移器把旧 memory-layer skills 分类成 candidate/fact/ambiguous。只有用户批准会经过 package/工具/secret/injection/path/symlink/hash 验证并原子写入 Skill source。learned Skills 的遥测、patch、pin、stale/archive、snapshot/restore/rollback 也由该模块拥有。
+
 ## 技术栈
 
 | 关注点 | 选型 |
@@ -81,7 +87,7 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 | HTTP | Fastify 路由编排；SSE 通过 Node `reply.raw` 手写 |
 | 契约 / 校验 | Zod 共享契约；HTTP handler 通过 `safeParse` 等手动校验请求 |
 | 本地 DB | `node:sqlite`（内置 DatabaseSync，零原生编译） |
-| 记忆 / RAG | 独立 `llama serve --embedding`（默认下载 nomic-embed-text，也可切换模型；维度运行时探测；默认 GPU offload）+ **sqlite-vec**；记忆按 `0.75 × 语义 + 0.25 × 词法` 加权，知识库才用 dense / lexical RRF；向量不可用时降级纯词法 |
+| 记忆 / RAG | 本地 Core Memory + 可选 additive provider；独立 `llama serve --embedding`（默认 nomic）+ **sqlite-vec**；记忆按 `0.75 × 语义 + 0.25 × 词法` 加权，知识库用 dense / lexical RRF；向量或 provider 不可用时本地词法链路仍工作 |
 | UI | React 19 + Vite + react-markdown |
 | 桌面 | Tauri 2（Rust 外壳 + TS 前端；Rust 启动并持有 daemon child） |
 | 打包 | daemon Node SEA 单文件二进制；Tauri dmg；GitHub Actions（`v*` tag → Releases） |

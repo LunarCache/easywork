@@ -56,7 +56,7 @@ const ApproveSchema = z.object({
 });
 
 export function registerAgentRoutes(ctx: CoreHttpContext): void {
-  const { app, registry, providers, repo, sessionHost } = ctx;
+  const { app, registry, providers, repo, sessionHost, skillCandidates, skillLearning } = ctx;
   const approvalRegistry = new ApprovalRegistry();
 
   app.post("/agent/run", async (req, reply) => {
@@ -127,6 +127,9 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     // 从事件流重建工具往返（assistant tool_calls + tool results），缓冲到本轮成功结束再落库。
     const recorder = new ToolTurnRecorder();
     const recorded: ReturnType<ToolTurnRecorder["push"]> = [];
+    const learningToolCalls = new Map<string, { name: string; ok: boolean }>();
+    const usedLearnedSkills = new Set<string>();
+    const learnedSkillReads = new Map<string, string>();
     let sawFinal = false;
 
     const userText = lastUser?.role === "user" ? messageText(lastUser.content) : "";
@@ -161,6 +164,16 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
         ...(parsed.data.excludeSkills?.length ? { excludeSkills: parsed.data.excludeSkills } : {}),
         ...(parsed.data.excludeTools?.length ? { excludeTools: parsed.data.excludeTools } : {}),
       })) {
+        if (ev.type === "tool-start") {
+          learningToolCalls.set(ev.call.id, { name: ev.call.name, ok: true });
+          const learnedId = skillCandidates.learnedIdForToolCall(ev.call.name, ev.call.arguments, runWorkspaceDir);
+          if (learnedId) learnedSkillReads.set(ev.call.id, learnedId);
+        }
+        if (ev.type === "tool-end") {
+          learningToolCalls.set(ev.call.id, { name: ev.call.name, ok: !ev.result.isError });
+          const learnedId = learnedSkillReads.get(ev.call.id);
+          if (learnedId && !ev.result.isError) usedLearnedSkills.add(learnedId);
+        }
         recorded.push(...recorder.push(ev));
         if (ev.type === "final") {
           sawFinal = true;
@@ -170,7 +183,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
       }
       // 仅在「未被取消」时落库：用户取消 → 整轮不计入历史（与 pi 上下文回滚一致）。
       if (sawFinal && !ac.signal.aborted) {
-        await sessionHost.commitThread(threadId, () => {
+        const committed = await sessionHost.commitThread(threadId, () => {
         if (lastUser?.role === "user") {
           repo.appendMessage({
             id: crypto.randomUUID(),
@@ -221,6 +234,21 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
           });
         }
         });
+        if (committed) {
+          for (const learnedId of usedLearnedSkills) skillCandidates.recordTelemetry(learnedId, "use");
+          const toolCalls = [...learningToolCalls.values()];
+          skillLearning.schedule({
+            threadId,
+            memoryScope: isWorkspace && projectId ? workspaceScope(projectId) : GLOBAL_SCOPE,
+            model: parsed.data.model,
+            userText,
+            finalText: finalContent,
+            toolCalls,
+            corrected: /(?:不对|修正|应该|更正|wrong|correct)/i.test(userText),
+            recovered: toolCalls.some((call) => !call.ok) && toolCalls.some((call) => call.ok),
+            usedLearnedSkillIds: [...usedLearnedSkills],
+          });
+        }
       } else if (threadCreated && repo.history(threadId).length === 0) {
         // 新建会话的首轮即被取消 → 清掉这个空会话，避免侧栏残留空壳。
         repo.deleteThread(threadId);

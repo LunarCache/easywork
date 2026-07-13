@@ -94,11 +94,30 @@ export function Chat({
   const { model, setModel } = useAvailableModel(models);
   const [msgs, setMsgs] = useState<UiMsg[]>([]);
   const [input, setInput] = useState("");
+
+  useEffect(() => {
+    const setPrompt = ((event: Event) => {
+      const detail = (event as CustomEvent<{ prompt?: string; workspaceId?: string }>).detail;
+      if (detail?.prompt && !detail.workspaceId) setInput(detail.prompt);
+    }) as EventListener;
+    window.addEventListener("ew:set-composer-prompt", setPrompt);
+    return () => window.removeEventListener("ew:set-composer-prompt", setPrompt);
+  }, []);
   const [busy, setBusy] = useState(false);
   const [thinkLevel, setThinkLevel] = useState<ThinkLevel>("off");
   const [notice, setNotice] = useState<string | null>(null); // 重试/压缩等瞬态状态提示
   const [web, setWeb] = useState(true);
   const [kb, setKb] = useState(false);
+
+  const learnCurrentConversation = async () => {
+    try {
+      const prepared = await getClient().prepareSkillLearning({ kind: "conversation", threadId });
+      window.dispatchEvent(new CustomEvent("ew:learn-skill-compose", { detail: prepared }));
+      setNotice("已生成 Skill 学习提示，请检查后发送");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "无法从当前对话学习");
+    }
+  };
   const [kbId] = useState<string | undefined>(undefined); // undefined = 全部集合
   const [usage, setUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(
     null,
@@ -526,6 +545,14 @@ export function Chat({
               <div className="composer-bar-left">
                 <button className="cbtn" data-testid="chat-upload-button" title="上传图片" onClick={() => fileRef.current?.click()}>
                   <PlusBtnIcon size={18} />
+                </button>
+                <button
+                  className="cbtn"
+                  data-testid="chat-learn-skill-button"
+                  title="从当前对话学习 Skill"
+                  onClick={() => void learnCurrentConversation()}
+                >
+                  <SparkIcon size={17} />
                 </button>
                 {images.length > 0 && (
                   <span className="cmini-chip" data-testid="chat-image-chip" title={`已附加 ${images.length} 张图片`}>

@@ -62,9 +62,15 @@ function uniqueSources(inputs: SkillSourceInput[]): SkillSource[] {
 export class SkillManager {
   private skills = new Map<string, Skill>();
   private readonly sourcesConfig: SkillSource[];
+  private onOpen?: (skill: Skill) => void;
 
   constructor(sources: SkillSourceInput[], private readonly maxDepth = 6) {
     this.sourcesConfig = uniqueSources(sources);
+  }
+
+  /** 宿主可观测实际 open_skill 使用；不改变 Skill 发现/加载契约。 */
+  setOpenListener(listener?: (skill: Skill) => void): void {
+    this.onOpen = listener;
   }
 
   /** 重新扫描所有目录。 */
@@ -170,8 +176,10 @@ export class SkillManager {
       requiresApproval: "never",
       execute: async (args) => {
         const skillId = (args as { skillId?: string })?.skillId ?? "";
+        const skill = this.skills.get(slug(skillId));
         const body = await this.loadBody(slug(skillId)).catch(() => null);
         if (body == null) return { content: `未找到技能: ${skillId}`, isError: true };
+        if (skill) this.onOpen?.(skill);
         return { content: body };
       },
     };

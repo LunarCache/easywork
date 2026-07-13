@@ -2,14 +2,26 @@ import { z } from "zod";
 
 /**
  * 记忆分层。两类作用域用不同分层（形状不同）：
- * - 全局（= 对话记忆，所有对话共享）：user-profile / agent-memory / skills——关于「你这个人」。
+ * - 全局（= Core Memory，所有对话共享）：user-profile / agent-notes。
  * - 工作区（每个工程独立）：conventions / decisions / pitfalls——关于「这个工程」。
  * 会话级历史由 ConversationRepo 完整存档 + FTS5（session_search 工具）承载，不在记忆层。
  */
-export const GLOBAL_LAYERS = ["user-profile", "agent-memory", "skills"] as const;
+export const GLOBAL_LAYERS = ["user-profile", "agent-notes"] as const;
 export const WORKSPACE_LAYERS = ["conventions", "decisions", "pitfalls"] as const;
 export const MemoryLayerSchema = z.enum([...GLOBAL_LAYERS, ...WORKSPACE_LAYERS]);
 export type MemoryLayer = z.infer<typeof MemoryLayerSchema>;
+
+/** Curated Core/Workspace Memory caps; derived pools use a separate 4x budget. */
+export const MEMORY_LAYER_CAPS: Record<MemoryLayer, number> = {
+  "user-profile": 1375,
+  "agent-notes": 2200,
+  conventions: 1375,
+  decisions: 2200,
+  pitfalls: 2200,
+};
+export const DERIVED_MEMORY_LAYER_CAPS: Record<MemoryLayer, number> = Object.fromEntries(
+  Object.entries(MEMORY_LAYER_CAPS).map(([layer, cap]) => [layer, cap * 4]),
+) as Record<MemoryLayer, number>;
 
 /** 记忆来源：描述这条事实如何进入 EasyWork，而不是它当前是否仍依赖来源对话。 */
 export const MemoryOriginSchema = z.enum([
@@ -78,13 +90,21 @@ const MemoryItemBaseSchema = z.object({
 
 function validateMemoryLifecycle(
   item: {
+    scope?: string;
+    layer?: MemoryLayer;
     origin?: MemoryOrigin;
     state?: MemoryState;
     sourceThreadId?: string;
     sessionId?: string;
+    text?: string;
   },
   ctx: z.RefinementCtx,
 ): void {
+  const scope = item.scope ?? GLOBAL_SCOPE;
+  const validLayers = isWorkspaceScope(scope) ? WORKSPACE_LAYERS : scope === GLOBAL_SCOPE ? GLOBAL_LAYERS : [];
+  if (!item.layer || !validLayers.includes(item.layer as never)) {
+    ctx.addIssue({ code: "custom", message: "invalid memory scope/layer", path: ["layer"] });
+  }
   const sourceThreadId = item.sourceThreadId ?? item.sessionId;
   if (item.sourceThreadId && item.sessionId && item.sourceThreadId !== item.sessionId) {
     ctx.addIssue({
@@ -124,6 +144,12 @@ function validateMemoryLifecycle(
         path: ["state"],
       });
     }
+  }
+  if (item.text && /\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S{6,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i.test(item.text)) {
+    ctx.addIssue({ code: "custom", message: "memory text contains a possible credential", path: ["text"] });
+  }
+  if (item.text && /ignore (?:all )?(?:previous|prior) instructions|override (?:the )?(?:system|developer) (?:prompt|instructions)/i.test(item.text)) {
+    ctx.addIssue({ code: "custom", message: "memory text contains instruction injection", path: ["text"] });
   }
 }
 

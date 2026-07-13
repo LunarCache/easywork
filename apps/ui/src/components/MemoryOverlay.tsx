@@ -6,12 +6,11 @@ import { BrainIcon, TrashIcon, XIcon, EditIcon, CheckIcon, PlusIcon, SearchIcon,
 type MemItem = MemoryItem;
 
 const GLOBAL_SCOPE = "global";
-const GLOBAL_ORDER = ["user-profile", "agent-memory", "skills"];
+const GLOBAL_ORDER = ["user-profile", "agent-notes"];
 const WS_ORDER = ["conventions", "decisions", "pitfalls"];
 const LAYER_LABEL: Record<string, string> = {
   "user-profile": "用户画像 / 偏好",
-  "agent-memory": "助手记忆",
-  skills: "技能",
+  "agent-notes": "Agent Notes",
   conventions: "约定 / 约束",
   decisions: "变动 / 决策",
   pitfalls: "坑 / 教训",
@@ -19,8 +18,7 @@ const LAYER_LABEL: Record<string, string> = {
 // 层语义色（小圆点 / 分区标识；两套主题下都用显式色值）。
 const LAYER_COLOR: Record<string, string> = {
   "user-profile": "#3B82F6",
-  "agent-memory": "#7C84FF",
-  skills: "#A06CF5",
+  "agent-notes": "#7C84FF",
   conventions: "#3FB950",
   decisions: "#D29922",
   pitfalls: "#F85149",

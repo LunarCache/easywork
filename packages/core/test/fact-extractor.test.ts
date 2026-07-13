@@ -38,16 +38,15 @@ describe("buildFactExtractor", () => {
     const reply = JSON.stringify({
       facts: [
         { layer: "user-profile", text: "用户是后端工程师" },
-        { layer: "agent-memory", text: "偏好简洁回答" },
+        { layer: "agent-notes", text: "偏好简洁回答" },
         { layer: "bogus-layer", text: "应丢弃" },
-        { layer: "skills", text: "   " }, // 空文本丢弃
       ],
     });
     const extract = buildFactExtractor({ resolveEngine: () => fakeEngine(reply) });
     const facts = await extract({ messages: convo, existing: [], model: "m", ...G });
     expect(facts).toEqual([
       { layer: "user-profile", text: "用户是后端工程师" },
-      { layer: "agent-memory", text: "偏好简洁回答" },
+      { layer: "agent-notes", text: "偏好简洁回答" },
     ]);
   });
 
@@ -55,7 +54,7 @@ describe("buildFactExtractor", () => {
     const reply = '好的，结果如下：\n```json\n{"facts":[{"layer":"skills","text":"用 jq 解析"}]}\n```\n完毕';
     const extract = buildFactExtractor({ resolveEngine: () => fakeEngine(reply) });
     const facts = await extract({ messages: convo, existing: [], model: "m", ...G });
-    expect(facts).toEqual([{ layer: "skills", text: "用 jq 解析" }]);
+    expect(facts).toEqual([]);
   });
 
   it("无 model / 模型未路由 / 非 JSON → 安全返回 []", async () => {

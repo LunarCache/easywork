@@ -29,7 +29,7 @@ const KbUploadSchema = z.object({
 });
 
 export function registerKnowledgeRoutes(ctx: CoreHttpContext): void {
-  const { app, kb, skills, skillsDir } = ctx;
+  const { app, kb, skills, skillsDir, skillCandidates } = ctx;
   const kbJobs: KbJob[] = []; // 最近在前，上限 100
 
   app.get("/kb/list", async () => ({ kbs: kb.listKbs() }));
@@ -108,6 +108,7 @@ export function registerKnowledgeRoutes(ctx: CoreHttpContext): void {
     if (!skill) return reply.code(404).send({ error: "not_found" });
     try {
       const body = fs.readFileSync(skill.bodyPath, "utf8");
+      skillCandidates.recordViewByPath(skill.bodyPath);
       return { body, bodyPath: skill.bodyPath };
     } catch (e) {
       return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });

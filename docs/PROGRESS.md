@@ -12,7 +12,8 @@
 - **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/explore_web）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
 - **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 终端 / 预览）。
-- **记忆（作用域化）**：全局池 + 每工作区私有池；渐进式披露注入 + 批量事实抽取；显式来源/生命周期 + 来源事实确认提升；sqlite-vec ⊕ 词法混合召回；markdown 可手改回灌。
+- **记忆（作用域化）**：Core Memory = User Profile / Agent Notes；每工作区私有 conventions / decisions / pitfalls；derived facts 保留来源所有权，manifest 有界；sqlite-vec ⊕ 词法召回，markdown 可手改回灌；外部 provider 仅 additive、受限且可关闭。
+- **Skill 学习闭环**：Chat/设置显式 Learn + restricted background review → pending Candidate → 用户审核批准 → 全局/工作区原子激活；支持证据、package 安全验证、来源删除、乐观锁 patch、使用反馈、pin、stale、可恢复归档、快照与回滚。
 - **知识库 RAG**：上传 → 解析 → 分块 → 嵌入 → RRF 混合检索 + 引用来源。
 - **思考能力与过程**：`reasoning` 能力由运行时模型投影到 UI，推理模型首次默认中档、显式关闭按模型持久化；reasoning 内容落库并跨会话回放（不回喂模型）。
 - **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/知识库/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层。
@@ -36,6 +37,15 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-12 — Core Memory 契约与可审核 Skill 自动学习
+
+- **记忆/程序彻底分离**：active memory 只接受全局 `user-profile/agent-notes` 与工作区三层；derived facts 不进入常驻 manifest。旧 `agent-memory` 迁为 Agent Notes，旧 `global.skills` 进入只读迁移池并分类为 pending Candidate、Agent Note 或 ambiguous；`skills.md` 原件与 legacy backup 均保留。
+- **Candidate 审核管线**：新增结构化候选、证据、scope、完整 package、unified diff 与 validation report；校验 frontmatter、Verification、引用/路径/symlink、声明工具、凭证、指令注入、数据外传、不可见 Unicode、package 大小和全 package optimistic hash。批准才原子写入全局或 workspace Skill source并刷新会话；删除最后来源删除所有未批准候选。
+- **Learn 与 restricted reviewer**：Chat composer 和 Skills 设置均可把对话、文本、confined path 或 SSRF-safe URL 组成正常 Agent 学习 turn；`stage_skill_candidate` 永不直接激活。后台只读成功 trajectory/catalog，低信号、取消、未恢复失败和 secret-bearing 工作跳过，`Nothing to learn` 为正常结果，失败不影响主答复。
+- **反馈与 curator**：learned Skills 在成功加载后记录 use，并记录 view/success/failure/correction/patch；修正可产生全 package 版本绑定 patch candidate。pin、30 天 active→stale→recoverable archive、pre-transition snapshot、可读报告、restore/rollback 已接 API/UI；用户创作和 pinned Skills 不受自动维护，LLM consolidation 默认关闭，开启后以指定/最近聊天模型 dry-run 且只能提案。
+- **Additive provider hardening**：本地始终负责所有写入；外部 provider 召回可关闭，失败安全降级，内容限条/限长、扫描 secret/injection、带 provider attribution 与 untrusted fence。Chat/Workspace/IM 复用 SessionHost，直接 `/v1` 继续不带记忆或 Skill 学习。
+- **验证**：双轴 code review 最终 **Standards 0 findings / Spec 0 findings**；`npm run lint`、`npm run typecheck`、`npm run build` 全绿；`npm test` = **341 passed / 1 skipped**；`npm run test:e2e` = **25 passed**；设计文档派生 HTML 已同步。
 
 ## 2026-07-12 — 来源事实 provenance 与确认提升
 

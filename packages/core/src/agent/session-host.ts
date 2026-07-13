@@ -21,6 +21,7 @@ import { runAgentTurn } from "./run-agent-turn.js";
 import { agentSessionResourceKey, buildAgentSessionResources } from "./session-resources.js";
 import { AgentSessionStore } from "./session-store.js";
 import { ThreadRunQueue } from "./thread-run-queue.js";
+import type { StageSkillCandidate } from "../skill-learning/candidate-tool.js";
 
 /** 宿主依赖（从 daemon 注入）。 */
 export interface SessionHostDeps {
@@ -101,6 +102,7 @@ interface HostedSession {
 export class SessionHost {
   private readonly sessions = new Map<string, HostedSession>();
   private readonly deleting = new Set<string>();
+  private stageSkillCandidate?: StageSkillCandidate;
   private readonly sessionStore: AgentSessionStore;
   private readonly agentDir: string;
   // R2：provider/runtime seam 拥有共享 auth/registry（OAuth 与 key 跨重启持久；所有会话复用）。
@@ -128,6 +130,11 @@ export class SessionHost {
    */
   syncCloudProviders(): void {
     this.providerRuntime.syncCloudProviders();
+  }
+
+  setSkillCandidateStager(stage: StageSkillCandidate): void {
+    this.stageSkillCandidate = stage;
+    this.invalidateAll();
   }
 
   /** 解析一个 EasyWork modelId → pi `Model`（本地 llama / 云端 provider）。 */
@@ -207,6 +214,7 @@ export class SessionHost {
       ...(this.deps.kb ? { kb: this.deps.kb } : {}),
       ...(this.deps.mcp ? { mcp: this.deps.mcp } : {}),
       ...(this.deps.builtins ? { builtins: this.deps.builtins } : {}),
+      ...(this.stageSkillCandidate ? { stageSkillCandidate: this.stageSkillCandidate } : {}),
     }, {
       threadId,
       modelId,

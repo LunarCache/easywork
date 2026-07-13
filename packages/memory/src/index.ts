@@ -5,7 +5,9 @@ export {
   type Embedder,
   type ExtractedFact,
   type FactExtractor,
+  type LegacySkillMemory,
 } from "./local.js";
 export { Mem0MemoryProvider, type Mem0Options } from "./mem0.js";
+export { AdditiveMemoryProvider } from "./additive.js";
 export { cosine, lexicalScore } from "./cosine.js";
 export { SqliteVecIndex, type VecRepopulate } from "./vec-index.js";

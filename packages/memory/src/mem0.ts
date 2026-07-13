@@ -40,7 +40,7 @@ export class Mem0MemoryProvider implements MemoryProvider {
     };
     return (data.results ?? []).map((m) => ({
       id: m.id,
-      layer: "agent-memory" as const,
+      layer: "agent-notes" as const,
       text: m.memory,
       origin: "provider" as const,
       state: "curated" as const,
@@ -73,7 +73,7 @@ export class Mem0MemoryProvider implements MemoryProvider {
   async edit(id: string, patch: Partial<Pick<MemoryItem, "text" | "meta">>): Promise<MemoryItem> {
     return {
       id,
-      layer: "agent-memory",
+      layer: "agent-notes",
       text: patch.text ?? "",
       origin: "provider",
       state: "curated",

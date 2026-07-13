@@ -72,6 +72,24 @@ export function App() {
     setWorkBranch(undefined);
   }, [mode, threadId, workThreadId, projectId]);
 
+  useEffect(() => {
+    const composeLearn = ((event: Event) => {
+      const detail = (event as CustomEvent<{ prompt?: string; workspaceId?: string }>).detail;
+      if (!detail?.prompt) return;
+      settingsHost.close();
+      if (detail.workspaceId) {
+        setMode("work");
+        setProjectId(detail.workspaceId);
+        setWorkThreadId((current) => current || crypto.randomUUID());
+      } else {
+        setMode("chat");
+      }
+      setTimeout(() => window.dispatchEvent(new CustomEvent("ew:set-composer-prompt", { detail })), 0);
+    }) as EventListener;
+    window.addEventListener("ew:learn-skill-compose", composeLearn);
+    return () => window.removeEventListener("ew:learn-skill-compose", composeLearn);
+  }, [settingsHost]);
+
   const changeTheme = useCallback((next: ThemePrefs) => {
     setTheme(next);
     saveThemePrefs(next);

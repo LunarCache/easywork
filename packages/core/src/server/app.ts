@@ -10,6 +10,7 @@ import {
   ChannelConfigSchema,
   type ChannelConfig,
   type McpServerConfig,
+  type MemoryProvider,
 } from "@ew/shared";
 import { LlamaServeEngine } from "@ew/providers";
 import { builtinTools } from "@ew/tools";
@@ -22,7 +23,7 @@ import {
   registerFeishuApp,
   registerWechatAccount,
 } from "@ew/im-connectors";
-import { LocalMemoryProvider } from "@ew/memory";
+import { AdditiveMemoryProvider, LocalMemoryProvider } from "@ew/memory";
 import { z } from "zod";
 import { EngineRegistry } from "../engine/registry.js";
 import { ModelManager } from "../models/manager.js";
@@ -48,6 +49,7 @@ import { registerChannelRoutes } from "./routes/channels.js";
 import { registerKnowledgeRoutes } from "./routes/knowledge.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
 import { registerMemoryRoutes } from "./routes/memory.js";
+import { registerSkillLearningRoutes } from "./routes/skill-learning.js";
 import { registerWorkspaceRoutes } from "./routes/workspace.js";
 import {
   dataDir as defaultDataDir,
@@ -56,6 +58,9 @@ import {
   modelsDir as defaultModelsDir,
   chatWorkspaceDir,
 } from "../config/paths.js";
+import { SkillCandidateStore } from "../skill-learning/candidate-store.js";
+import { SkillCandidateService } from "../skill-learning/candidate-service.js";
+import { SkillLearningCoordinator } from "../skill-learning/coordinator.js";
 
 export { agentModelUnavailableError } from "./routes/agent.js";
 
@@ -69,6 +74,7 @@ export interface CoreServer {
   mcp: McpClientManager;
   channels: ChannelGateway;
   memory: LocalMemoryProvider;
+  agentMemory: AdditiveMemoryProvider;
   embeddings: EmbeddingService;
   kb: KnowledgeBaseStore;
   repo: SqliteConversationRepo;
@@ -88,6 +94,10 @@ export interface CreateCoreOptions {
   workspaceDir?: string;
   /** pi Agent 配置与会话目录（测试/嵌入覆盖用）。 */
   agentDir?: string;
+  /** Skill Candidate / learned Skill 结构化状态库。 */
+  skillLearningDbPath?: string;
+  /** 可选 Deep Memory provider；仅 additive recall，永不替换本地 Core Memory。 */
+  deepMemoryProvider?: MemoryProvider;
   /** 会话 SQLite 路径（测试可传 ":memory:"）。 */
   dbPath?: string;
   /** 记忆 markdown 目录。 */
@@ -221,6 +231,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     // sqlite-vec 可加载扩展：记忆语义召回唯一引擎（已移除 JS 余弦）；平台无二进制时召回退化为纯词法。
     ...(vecExtensionPath ? { vecExtensionPath } : {}),
   });
+  const agentMemory = new AdditiveMemoryProvider(memory, opts.deepMemoryProvider);
   // markdown 为真相源：监听用户手工编辑并回灌索引（内存库/测试不监听）。
   const stopMemWatch =
     (opts.memoryDbPath ?? "") === ":memory:" ? () => {} : memory.startWatching();
@@ -243,13 +254,107 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     providers,
     agentDir,
     globalSkillPaths: skillSources.map((source) => source.dir),
-    memory,
+    memory: agentMemory,
     repo,
     kb,
     mcp,
     builtins: builtinTools,
     localModelSettings,
   });
+  const skillCandidateStore = new SkillCandidateStore(
+    opts.skillLearningDbPath ?? fsPath.join(defaultDataDir(), "skill-learning.db"),
+  );
+  const primarySkillSource = skillSources.find((source) => source.primary) ?? skillSources[0];
+  const skillsDir = primarySkillSource?.dir ?? fsPath.join(agentDir, "skills");
+  const skillCandidates = new SkillCandidateService({
+    store: skillCandidateStore,
+    skills,
+    skillsDir,
+    repo,
+    sessionHost,
+    archiveDir: fsPath.join(fsPath.dirname(agentDir), "skill-archive"),
+    knownTools: () => [
+      "read", "write", "edit", "bash", "grep", "find", "ls",
+      "manage_memory", "recall_memory", "session_search", "search_knowledge_base", "stage_skill_candidate",
+      ...builtinTools.map((tool) => tool.definition.name),
+    ],
+  });
+  skills.setOpenListener((skill) => skillCandidates.recordUseByPath(skill.bodyPath));
+  sessionHost.setSkillCandidateStager((input) => skillCandidates.stage(input));
+  const skillLearning = new SkillLearningCoordinator({
+    store: skillCandidateStore,
+    candidates: skillCandidates,
+    skills,
+    reviewer: async ({ trajectory, catalog }) => {
+      const settings = skillCandidateStore.getState<{ learnerModel?: string }>("settings", {});
+      const model = settings.learnerModel ?? trajectory.model;
+      let engine;
+      try {
+        engine = registry.resolve(model);
+      } catch {
+        return null;
+      }
+      const response = await engine.chat({
+        model,
+        temperature: 0,
+        maxTokens: 1800,
+        responseFormat: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a restricted Skill reviewer. You have read-only trajectory and catalog data and no tools. " +
+              "Return JSON {action:'nothing'} unless the successful work contains a genuinely reusable procedure. " +
+              "Prefer patching the used/class-level Skill over a narrow new Skill. Never include facts, secrets, logs, temporary paths, or policy overrides. " +
+              "For a candidate return {action:'candidate', candidate:{name,description,triggerConditions,scope,workspaceId?,proposedSkillMd,packageFiles?,requiredTools,sourceThreadIds,evidence,reason,createdBy:'background-learning',baseSkillId?,baseContentHash?}}. " +
+              "SKILL.md must contain frontmatter plus Procedure, Pitfalls, and Verification sections.",
+          },
+          {
+            role: "user",
+            content: JSON.stringify({ trajectory, catalog }),
+          },
+        ],
+      });
+      const raw = messageText(response.message.content);
+      const start = raw.indexOf("{");
+      const end = raw.lastIndexOf("}");
+      if (start < 0 || end <= start) return null;
+      const parsed = JSON.parse(raw.slice(start, end + 1)) as { action?: string; candidate?: unknown };
+      return parsed.action === "candidate" ? (parsed.candidate as never) : null;
+    },
+  });
+  // 一次性收口旧 global.skills：程序化条目进入待审核候选，事实进入 Agent Notes，歧义项只读保留。
+  for (const legacy of memory.listLegacySkillMemory().filter((item) => !item.disposition)) {
+    const procedural = /(?:^|\s)(?:npm|pnpm|yarn|git|docker|curl|python|node)\s|(?:先|然后|步骤|流程|运行|执行|命令)/i.test(legacy.text);
+    const factual = /用户|偏好|项目|环境|部署在|路径|使用|版本/.test(legacy.text);
+    try {
+      if (procedural) {
+        const name = `legacy-${legacy.id.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "workflow"}`;
+        skillCandidates.stage({
+          name,
+          description: "Imported legacy procedural memory pending review",
+          triggerConditions: ["when the imported legacy workflow is relevant"],
+          scope: "global",
+          proposedSkillMd: `---\nname: ${name}\ndescription: Imported legacy procedural memory pending review\nwhenToUse: when the imported legacy workflow is relevant\nversion: "0.1.0"\n---\n\n# Imported workflow\n\n## Procedure\n\n${legacy.text}\n\n## Pitfalls\n\n- Review and generalize this migrated content before approval.\n\n## Verification\n\n- Confirm the procedure against the current environment.\n`,
+          requiredTools: [],
+          sourceThreadIds: legacy.sourceThreadId ? [legacy.sourceThreadId] : [],
+          evidence: legacy.sourceThreadId ? [{ sourceThreadId: legacy.sourceThreadId, summary: legacy.text.slice(0, 160) }] : [],
+          reason: "Migrated from the removed global.skills memory layer",
+          createdBy: "migration",
+        });
+        memory.markLegacySkillMemory(legacy.id, "candidate");
+      } else if (factual) {
+        void memory
+          .write({ layer: "agent-notes", text: legacy.text, origin: "imported", state: "curated", meta: { migratedFrom: "global.skills", legacyId: legacy.id } })
+          .then(() => memory.markLegacySkillMemory(legacy.id, "agent-note"))
+          .catch(() => {});
+      } else {
+        memory.markLegacySkillMemory(legacy.id, "ambiguous");
+      }
+    } catch {
+      // 留在 disposition=NULL，下一次启动可重试；绝不直接激活为 Skill。
+    }
+  }
 
   // ---- 持久化 provider / MCP 配置（重启后恢复）----
   const PROVIDERS_KEY = "providers";
@@ -320,17 +425,60 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     run: (input) => {
       const modelId = resolveChannelModel(input.model);
       const last = input.history[input.history.length - 1];
-      return sessionHost.run({
-        threadId: input.threadId,
-        modelId,
-        text: last?.role === "user" ? messageText(last.content) : "",
-        cwd: chatWorkspaceDir(input.threadId),
-        workspace: false,
-        memoryScope: GLOBAL_SCOPE,
-        approvalMode: "auto-edits",
-        ...(input.signal ? { signal: input.signal } : {}),
-        ...(input.sampling ? { sampling: input.sampling } : {}),
-      });
+      const userText = last?.role === "user" ? messageText(last.content) : "";
+      return (async function* () {
+        const toolCalls = new Map<string, { name: string; ok: boolean }>();
+        const usedLearnedSkills = new Set<string>();
+        const learnedSkillReads = new Map<string, string>();
+        let finalText = "";
+        let sawFinal = false;
+        for await (const event of sessionHost.run({
+          threadId: input.threadId,
+          modelId,
+          text: userText,
+          cwd: chatWorkspaceDir(input.threadId),
+          workspace: false,
+          memoryScope: GLOBAL_SCOPE,
+          approvalMode: "auto-edits",
+          ...(input.signal ? { signal: input.signal } : {}),
+          ...(input.sampling ? { sampling: input.sampling } : {}),
+        })) {
+          if (event.type === "tool-start") {
+            toolCalls.set(event.call.id, { name: event.call.name, ok: true });
+            const learnedId = skillCandidates.learnedIdForToolCall(
+              event.call.name,
+              event.call.arguments,
+              chatWorkspaceDir(input.threadId),
+            );
+            if (learnedId) learnedSkillReads.set(event.call.id, learnedId);
+          }
+          if (event.type === "tool-end") {
+            toolCalls.set(event.call.id, { name: event.call.name, ok: !event.result.isError });
+            const learnedId = learnedSkillReads.get(event.call.id);
+            if (learnedId && !event.result.isError) usedLearnedSkills.add(learnedId);
+          }
+          if (event.type === "final") {
+            sawFinal = true;
+            finalText = messageText(event.message.content);
+          }
+          yield event;
+        }
+        if (sawFinal && !input.signal?.aborted) {
+          for (const learnedId of usedLearnedSkills) skillCandidates.recordTelemetry(learnedId, "use");
+          const calls = [...toolCalls.values()];
+          skillLearning.schedule({
+            threadId: input.threadId,
+            memoryScope: GLOBAL_SCOPE,
+            model: modelId,
+            userText,
+            finalText,
+            toolCalls: calls,
+            corrected: /(?:不对|修正|应该|更正|wrong|correct)/i.test(userText),
+            recovered: calls.some((call) => !call.ok) && calls.some((call) => call.ok),
+            usedLearnedSkillIds: [...usedLearnedSkills],
+          });
+        }
+      })();
     },
     persistConfigs: (configs) => {
       try {
@@ -432,7 +580,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
 
   app.get("/health", async () => ({ ok: true, name: "easywork-core" }));
 
-  const primarySkillSource = skillSources.find((source) => source.primary) ?? skillSources[0];
   const routeContext: CoreHttpContext = {
     app,
     registry,
@@ -442,11 +589,14 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     providers,
     sessionHost,
     skills,
-    skillsDir: primarySkillSource?.dir ?? fsPath.join(agentDir, "skills"),
+    skillsDir,
+    skillCandidates,
+    skillLearning,
     mcp,
     channels,
     channelOps,
     memory,
+    agentMemory,
     embeddings,
     kb,
     repo,
@@ -500,6 +650,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     downloadEmbeddingModel: (repoId, fileName) => models.download({ repoId, fileName, quant: "", sizeBytes: 0, shardCount: 1 }),
     saveEmbedSetting,
   });
+  registerSkillLearningRoutes(routeContext);
 
   // ---- OpenAI/Anthropic 兼容端点（复用同一 registry） ----
   // 本地模型透传到 router；云端流式经 pi-ai（统一 ModelRegistry/AuthStorage）。
@@ -521,6 +672,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     mcp,
     channels,
     memory,
+    agentMemory,
     embeddings,
     kb,
     repo,
@@ -564,6 +716,11 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       }
       try {
         kb.close();
+      } catch {
+        /* ignore */
+      }
+      try {
+        skillCandidateStore.close();
       } catch {
         /* ignore */
       }

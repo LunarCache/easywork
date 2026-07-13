@@ -6,6 +6,8 @@ import type * as NodeSqlite from "node:sqlite";
 import {
   GLOBAL_LAYERS,
   GLOBAL_SCOPE,
+  DERIVED_MEMORY_LAYER_CAPS,
+  MEMORY_LAYER_CAPS,
   MemoryWriteSchema,
   layersForScope,
   type MemoryItem,
@@ -69,9 +71,17 @@ export interface LocalMemoryOptions {
 /** 仅全局作用域有 markdown 镜像（人类可读/可编辑）；工作区记忆为 DB-only。 */
 const LAYER_FILE: Record<(typeof GLOBAL_LAYERS)[number], string> = {
   "user-profile": "user-profile.md",
-  "agent-memory": "agent-memory.md",
-  skills: "skills.md",
+  "agent-notes": "agent-notes.md",
 };
+
+export interface LegacySkillMemory {
+  id: string;
+  text: string;
+  sourceThreadId?: string;
+  updatedAt: string;
+  meta?: Record<string, unknown>;
+  disposition?: "candidate" | "agent-note" | "ambiguous";
+}
 
 interface Row {
   rowid?: number | bigint;
@@ -122,15 +132,27 @@ export class LocalMemoryProvider implements MemoryProvider {
         text TEXT NOT NULL,
         embedding BLOB,
         updated_at TEXT NOT NULL,
-        meta TEXT
+        meta TEXT,
+        disposition TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_mem_layer ON memory_items(layer);
       CREATE INDEX IF NOT EXISTS idx_mem_session ON memory_items(session_id);
+      CREATE TABLE IF NOT EXISTS legacy_skill_memory (
+        id TEXT PRIMARY KEY,
+        text TEXT NOT NULL,
+        source_thread_id TEXT,
+        updated_at TEXT NOT NULL,
+        meta TEXT
+      );
     `);
     // 迁移：旧库无 scope 列 → 加上并把存量归入 global。
     const cols = this.db.prepare(`PRAGMA table_info(memory_items)`).all() as unknown as {
       name: string;
     }[];
+    const legacyCols = this.db.prepare(`PRAGMA table_info(legacy_skill_memory)`).all() as unknown as { name: string }[];
+    if (!legacyCols.some((column) => column.name === "disposition")) {
+      this.db.exec(`ALTER TABLE legacy_skill_memory ADD COLUMN disposition TEXT`);
+    }
     if (!cols.some((c) => c.name === "scope")) {
       this.db.exec(
         `ALTER TABLE memory_items ADD COLUMN scope TEXT NOT NULL DEFAULT '${GLOBAL_SCOPE}'`,
@@ -156,7 +178,22 @@ export class LocalMemoryProvider implements MemoryProvider {
       UPDATE memory_items
       SET source_thread_id = session_id
       WHERE source_thread_id IS NULL AND session_id IS NOT NULL AND lifecycle_state = 'derived';
+      INSERT OR IGNORE INTO legacy_skill_memory (id, text, source_thread_id, updated_at, meta)
+      SELECT id, text, COALESCE(source_thread_id, session_id), updated_at, meta
+      FROM memory_items WHERE scope = '${GLOBAL_SCOPE}' AND layer = 'skills';
+      DELETE FROM memory_items WHERE scope = '${GLOBAL_SCOPE}' AND layer = 'skills';
+      UPDATE memory_items SET layer = 'agent-notes'
+      WHERE scope = '${GLOBAL_SCOPE}' AND layer = 'agent-memory';
     `);
+    const legacySkillsFile = path.join(this.dir, "skills.md");
+    const legacyBackupFile = path.join(this.dir, "skills.legacy-backup.md");
+    if (fs.existsSync(legacySkillsFile) && !fs.existsSync(legacyBackupFile)) {
+      try {
+        fs.copyFileSync(legacySkillsFile, legacyBackupFile, fs.constants.COPYFILE_EXCL);
+      } catch {
+        /* 备份失败不阻止启动；原文件仍保留且不再注入 */
+      }
+    }
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_mem_scope ON memory_items(scope)`);
     this.db.exec(
       `CREATE INDEX IF NOT EXISTS idx_mem_source_thread ON memory_items(source_thread_id)`,
@@ -194,6 +231,32 @@ export class LocalMemoryProvider implements MemoryProvider {
     };
   }
 
+  /** 旧 global.skills 的只读迁移池；不参与 recall/manifest。 */
+  listLegacySkillMemory(): LegacySkillMemory[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM legacy_skill_memory ORDER BY updated_at`)
+      .all() as unknown as {
+      id: string;
+      text: string;
+      source_thread_id: string | null;
+      updated_at: string;
+      meta: string | null;
+      disposition: "candidate" | "agent-note" | "ambiguous" | null;
+    }[];
+    return rows.map((row) => ({
+      id: row.id,
+      text: row.text,
+      ...(row.source_thread_id ? { sourceThreadId: row.source_thread_id } : {}),
+      updatedAt: row.updated_at,
+      ...(row.meta ? { meta: JSON.parse(row.meta) as Record<string, unknown> } : {}),
+      ...(row.disposition ? { disposition: row.disposition } : {}),
+    }));
+  }
+
+  markLegacySkillMemory(id: string, disposition: LegacySkillMemory["disposition"]): void {
+    this.db.prepare(`UPDATE legacy_skill_memory SET disposition = ? WHERE id = ?`).run(disposition ?? null, id);
+  }
+
   private async embedOne(text: string): Promise<Float32Array | null> {
     if (!this.embed) return null;
     try {
@@ -218,6 +281,7 @@ export class LocalMemoryProvider implements MemoryProvider {
     } else if (sourceThreadId) {
       throw new Error("curated memory cannot have sourceThreadId");
     }
+    this.assertCapacity(scope, item.layer, state, item.text);
     const emb = await this.embedOne(item.text);
     const buf = emb ? Buffer.from(emb.buffer) : null;
     const info = this.db
@@ -262,6 +326,16 @@ export class LocalMemoryProvider implements MemoryProvider {
       .get(id) as unknown as Row | undefined;
     if (!row) throw new Error(`memory item not found: ${id}`);
     const text = patch.text ?? row.text;
+    MemoryWriteSchema.parse({
+      scope: row.scope,
+      layer: row.layer,
+      text,
+      origin: row.origin,
+      state: row.lifecycle_state,
+      ...(row.source_thread_id ? { sourceThreadId: row.source_thread_id } : {}),
+      ...(row.meta ? { meta: JSON.parse(row.meta) as Record<string, unknown> } : {}),
+    });
+    this.assertCapacity(row.scope, row.layer, row.lifecycle_state, text, id);
     const updatedAt = new Date().toISOString();
     const emb = patch.text ? await this.embedOne(text) : row.embedding;
     const buf = emb instanceof Float32Array ? Buffer.from(emb.buffer) : emb;
@@ -282,6 +356,7 @@ export class LocalMemoryProvider implements MemoryProvider {
       .get(id) as unknown as Row | undefined;
     if (!row) throw new Error(`memory item not found: ${id}`);
     if (row.lifecycle_state === "curated") return this.toItem(row);
+    this.assertCapacity(row.scope, row.layer, "curated", row.text);
     const promotedAt = new Date().toISOString();
     const previousMeta = row.meta ? (JSON.parse(row.meta) as Record<string, unknown>) : {};
     const sourceThreadId = row.source_thread_id ?? row.session_id;
@@ -524,7 +599,7 @@ export class LocalMemoryProvider implements MemoryProvider {
     if (!file) return;
     try {
       const rows = this.db
-        .prepare(`SELECT * FROM memory_items WHERE scope = ? AND layer = ? ORDER BY updated_at`)
+        .prepare(`SELECT * FROM memory_items WHERE scope = ? AND layer = ? AND lifecycle_state = 'curated' ORDER BY updated_at`)
         .all(GLOBAL_SCOPE, layer) as unknown as Row[];
       fs.writeFileSync(path.join(this.dir, file), renderLayer(layer, rows));
     } catch {
@@ -547,12 +622,18 @@ export class LocalMemoryProvider implements MemoryProvider {
       return false; // 文件不存在 → 跳过
     }
     const entries = parseLayerMarkdown(content);
+    for (const entry of entries) {
+      MemoryWriteSchema.parse({ scope: GLOBAL_SCOPE, layer, text: entry.text, origin: "imported", state: "curated" });
+    }
+    const markdownSize = entries.reduce((total, entry) => total + entry.text.length, 0);
+    if (markdownSize > MEMORY_LAYER_CAPS[layer]) throw new Error(`memory layer capacity exceeded: ${layer}`);
     const rows = this.db
       .prepare(
         `SELECT rowid, * FROM memory_items WHERE scope = ? AND layer = ? ORDER BY updated_at`,
       )
       .all(GLOBAL_SCOPE, layer) as unknown as Row[];
-    const byId = new Map(rows.map((r) => [r.id, r]));
+    const curatedRows = rows.filter((row) => row.lifecycle_state === "curated");
+    const byId = new Map(curatedRows.map((r) => [r.id, r]));
     const seenIds = new Set<string>();
     let changed = false;
     const now = new Date().toISOString();
@@ -586,7 +667,7 @@ export class LocalMemoryProvider implements MemoryProvider {
         changed = true;
       }
     }
-    for (const r of rows) {
+    for (const r of curatedRows) {
       if (!seenIds.has(r.id)) {
         this.db.prepare(`DELETE FROM memory_items WHERE id = ?`).run(r.id);
         this.vecSet(r.rowid, null);
@@ -595,6 +676,21 @@ export class LocalMemoryProvider implements MemoryProvider {
     }
     if (changed) this.regenerateMarkdown(GLOBAL_SCOPE, layer);
     return changed;
+  }
+
+  private assertCapacity(
+    scope: string,
+    layer: MemoryLayer,
+    state: MemoryItem["state"],
+    text: string,
+    excludeId?: string,
+  ): void {
+    const row = this.db.prepare(
+      `SELECT COALESCE(SUM(LENGTH(text)), 0) AS total FROM memory_items
+       WHERE scope = ? AND layer = ? AND lifecycle_state = ?${excludeId ? " AND id <> ?" : ""}`,
+    ).get(...(excludeId ? [scope, layer, state, excludeId] : [scope, layer, state])) as { total: number };
+    const cap = state === "derived" ? DERIVED_MEMORY_LAYER_CAPS[layer] : MEMORY_LAYER_CAPS[layer];
+    if (Number(row.total) + text.length > cap) throw new Error(`memory layer capacity exceeded: ${layer}/${state}`);
   }
 
   /** 监听全局 markdown 目录，用户手工编辑后自动回灌索引（去抖）。返回停止函数。 */

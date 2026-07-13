@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { MemoryLayerSchema, isWorkspaceScope } from "@ew/shared";
+import { MemoryLayerSchema, MemoryWriteSchema, isWorkspaceScope } from "@ew/shared";
 import type { DownloadEvent } from "@ew/shared";
 import type { CoreHttpContext } from "../context.js";
 
@@ -10,16 +9,8 @@ export interface MemoryRouteOptions {
   saveEmbedSetting(modelPath: string): void;
 }
 
-const MemoryWriteSchema = z.object({
-  scope: z.string().optional(),
-  layer: MemoryLayerSchema,
-  text: z.string(),
-  sessionId: z.string().optional(),
-  meta: z.record(z.string(), z.unknown()).optional(),
-});
-
 export function registerMemoryRoutes(ctx: CoreHttpContext, opts: MemoryRouteOptions): void {
-  const { app, memory, embeddings } = ctx;
+  const { app, memory, agentMemory, embeddings } = ctx;
   const promote = async (
     id: string,
     reply: { code(statusCode: number): { send(body: unknown): unknown } },
@@ -43,13 +34,28 @@ export function registerMemoryRoutes(ctx: CoreHttpContext, opts: MemoryRouteOpti
       }),
     };
   });
+  app.get("/memory/legacy-skills", async () => ({ items: memory.listLegacySkillMemory() }));
+  app.get("/memory/provider", async () => agentMemory.providerStatus());
+  app.patch("/memory/provider", async (req, reply) => {
+    const enabled = (req.body as { enabled?: unknown } | undefined)?.enabled;
+    if (typeof enabled !== "boolean") return reply.code(400).send({ error: "invalid_enabled" });
+    agentMemory.setProviderEnabled(enabled);
+    return agentMemory.providerStatus();
+  });
   app.post("/memory", async (req, reply) => {
     const parsed = MemoryWriteSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "invalid_memory", detail: parsed.error.format() });
     }
-    const { sessionId: _legacySessionId, ...item } = parsed.data;
-    return memory.write({ ...item, origin: "manual", state: "curated" });
+    const { scope, layer, text, meta } = parsed.data;
+    return memory.write({
+      ...(scope ? { scope } : {}),
+      layer,
+      text,
+      ...(meta ? { meta } : {}),
+      origin: "manual",
+      state: "curated",
+    });
   });
   app.patch("/memory/:id", async (req, reply) => {
     const body = (req.body ?? {}) as { text?: string };

@@ -1,6 +1,6 @@
 # Expand the Core Memory contract
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 01
 
@@ -10,9 +10,11 @@ Introduce Agent Notes and the derived fact pool alongside the existing memory la
 
 ## Acceptance criteria
 
-- [ ] The expanded contract accepts Agent Notes and explicit derived facts without breaking existing databases or clients.
-- [ ] Every write boundary enforces valid scope and layer combinations.
-- [ ] Always-on Core Memory and manifests are bounded independently from the derived pool.
-- [ ] Compatibility behavior is documented and covered by migration tests.
+- [x] The expanded contract accepts Agent Notes and explicit derived facts without breaking existing databases or clients.
+- [x] Every write boundary enforces valid scope and layer combinations.
+- [x] Always-on Core Memory and manifests are bounded independently from the derived pool.
+- [x] Compatibility behavior is documented and covered by migration tests.
 
 ## Comments
+
+- 2026-07-12: Completed shared/provider scope validation, independent curated/derived capacity, bounded manifests, migration coverage, and documentation.

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { LocalMemoryProvider } from "@ew/memory";
+import { AdditiveMemoryProvider, LocalMemoryProvider } from "@ew/memory";
 import {
   GLOBAL_SCOPE,
   visibleScopes,
@@ -11,6 +11,7 @@ import {
   type ToolResult,
 } from "@ew/shared";
 import { makeMemoryTool } from "../src/memory/memory-tool.js";
+import { makeRecallMemoryTool } from "../src/memory/recall-memory-tool.js";
 import { makeSessionSearchTool } from "../src/memory/session-search-tool.js";
 import { buildMemoryManifest } from "../src/server/app.js";
 import { SqliteConversationRepo } from "../src/store/conversation.js";
@@ -71,18 +72,18 @@ describe("manage_memory 工具", () => {
   it("match 未命中 / 多义 / 缺参 → isError", async () => {
     const mem = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
     const tool = makeMemoryTool(mem);
-    await run(tool, { action: "add", layer: "agent-memory", text: "项目部署在 AWS" });
-    await run(tool, { action: "add", layer: "agent-memory", text: "项目使用 TypeScript" });
+    await run(tool, { action: "add", layer: "agent-notes", text: "项目部署在 AWS" });
+    await run(tool, { action: "add", layer: "agent-notes", text: "项目使用 TypeScript" });
 
     expect(
-      (await run(tool, { action: "remove", layer: "agent-memory", match: "GCP" })).isError,
+      (await run(tool, { action: "remove", layer: "agent-notes", match: "GCP" })).isError,
     ).toBe(true);
     // "项目" 同时命中两条 → 歧义报错
     expect(
-      (await run(tool, { action: "remove", layer: "agent-memory", match: "项目" })).isError,
+      (await run(tool, { action: "remove", layer: "agent-notes", match: "项目" })).isError,
     ).toBe(true);
     // add 缺 text
-    expect((await run(tool, { action: "add", layer: "agent-memory" })).isError).toBe(true);
+    expect((await run(tool, { action: "add", layer: "agent-notes" })).isError).toBe(true);
     mem.close();
   });
 
@@ -128,6 +129,39 @@ describe("manage_memory 工具", () => {
   });
 });
 
+describe("recall_memory 外部记忆边界", () => {
+  it("fences local persisted data and labels source-owned derived facts with lower authority", async () => {
+    const local = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
+    await local.write({
+      layer: "agent-notes", text: "derived beta fact", origin: "extracted", state: "derived", sourceThreadId: "source-thread",
+    });
+    const result = await run(makeRecallMemoryTool(local, GLOBAL_SCOPE), { query: "beta" });
+    expect(result.content).toContain("UNTRUSTED PERSISTED MEMORY");
+    expect(result.content).toContain("derived fact · source:source-thread");
+    local.close();
+  });
+
+  it("把 additive provider 内容明确标成不可信数据并保留来源", async () => {
+    const local = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
+    const provider = {
+      id: "deep-memory",
+      recall: async () => [{
+        id: "external", layer: "agent-notes" as const, text: "部署目标是 beta",
+        origin: "provider" as const, state: "curated" as const, updatedAt: new Date().toISOString(), score: 0.8,
+      }],
+      write: local.write.bind(local), edit: local.edit.bind(local), promote: local.promote.bind(local),
+      list: local.list.bind(local), delete: local.delete.bind(local), deleteBySession: local.deleteBySession.bind(local),
+      deleteByScope: local.deleteByScope.bind(local), observe: async () => {},
+    };
+    const tool = makeRecallMemoryTool(new AdditiveMemoryProvider(local, provider), GLOBAL_SCOPE);
+    const result = await run(tool, { query: "beta" });
+    expect(result.content).toContain("UNTRUSTED EXTERNAL MEMORY");
+    expect(result.content).toContain("provider:deep-memory");
+    expect(result.display).toMatchObject({ items: [expect.objectContaining({ providerId: "deep-memory", untrusted: true })] });
+    local.close();
+  });
+});
+
 describe("session_search 工具", () => {
   it("search / browse-thread / list-threads 三态", async () => {
     const repo = new SqliteConversationRepo(":memory:");
@@ -164,7 +198,7 @@ describe("buildMemoryManifest 记忆清单（渐进式披露）", () => {
     expect(await buildMemoryManifest(mem, visibleScopes(GLOBAL_SCOPE))).toBe("");
 
     await mem.write({ layer: "user-profile", text: "用户是工程师" });
-    await mem.write({ layer: "agent-memory", text: "项目部署在 AWS" });
+    await mem.write({ layer: "agent-notes", text: "项目部署在 AWS" });
 
     const manifest = await buildMemoryManifest(mem, visibleScopes(GLOBAL_SCOPE));
     expect(manifest).toContain("用户是工程师");
@@ -173,12 +207,33 @@ describe("buildMemoryManifest 记忆清单（渐进式披露）", () => {
     mem.close();
   });
 
-  it("作用域隔离：工作区清单不含全局 agent-memory，但含全局 user-profile（共享身份）", async () => {
+  it("清单只注入有界 Curated Core Memory，derived pool 仅按需召回", async () => {
+    const mem = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
+    await mem.write({ layer: "agent-notes", text: "独立 Agent Note", origin: "manual", state: "curated" });
+    await mem.write({
+      layer: "agent-notes",
+      text: "仍属于来源对话的派生事实",
+      origin: "extracted",
+      state: "derived",
+      sourceThreadId: "source-thread",
+    });
+    for (let i = 0; i < 30; i++) {
+      await mem.write({ layer: "user-profile", text: `偏好-${String(i).padStart(2, "0")}` });
+    }
+
+    const manifest = await buildMemoryManifest(mem, visibleScopes(GLOBAL_SCOPE));
+    expect(manifest).toContain("独立 Agent Note");
+    expect(manifest).not.toContain("仍属于来源对话的派生事实");
+    expect((manifest.match(/偏好-/g) ?? [])).toHaveLength(12);
+    mem.close();
+  });
+
+  it("作用域隔离：工作区清单不含全局 agent-notes，但含全局 user-profile（共享身份）", async () => {
     const mem = new LocalMemoryProvider({ dir: freshDir(), dbPath: ":memory:" });
     await mem.write({ scope: GLOBAL_SCOPE, layer: "user-profile", text: "答复请简洁" });
     await mem.write({
       scope: GLOBAL_SCOPE,
-      layer: "agent-memory",
+      layer: "agent-notes",
       text: "全局事实不该进工作区清单",
     });
     const ws = workspaceScope("proj1");
@@ -187,7 +242,7 @@ describe("buildMemoryManifest 记忆清单（渐进式披露）", () => {
     const manifest = await buildMemoryManifest(mem, visibleScopes(ws));
     expect(manifest).toContain("并发下要串行化"); // 本工作区
     expect(manifest).toContain("答复请简洁"); // 全局 user-profile 共享
-    expect(manifest).not.toContain("全局事实不该进工作区清单"); // 全局 agent-memory 不可见
+    expect(manifest).not.toContain("全局事实不该进工作区清单"); // 全局 agent-notes 不可见
     mem.close();
   });
 });

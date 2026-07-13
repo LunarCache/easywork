@@ -11,6 +11,7 @@ import type {
   LocalLoadOptions,
   LocalModel,
   LocalModelRuntimeSettings,
+  LearnedSkill,
   MemoryItem,
   ChannelKind,
   ChannelAdapterMeta,
@@ -23,6 +24,11 @@ import type {
   Project,
   SamplingParams,
   Skill,
+  SkillCandidate,
+  SkillCandidateCreate,
+  SkillLearningSettings,
+  SkillLearningStatus,
+  SkillSnapshot,
   SkillSource,
   StoredMessage,
   Thread,
@@ -297,6 +303,16 @@ export class EasyWorkClient {
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`POST ${path} failed: ${res.status} ${await res.text()}`);
+    return res.json() as Promise<T>;
+  }
+
+  private async patchJSON<T>(path: string, body: unknown): Promise<T> {
+    const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method: "PATCH",
+      headers: this.headers({ "content-type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`PATCH ${path} failed: ${res.status} ${await res.text()}`);
     return res.json() as Promise<T>;
   }
 
@@ -808,6 +824,120 @@ export class EasyWorkClient {
     return this.postJSON("/skills/template", name ? { name } : {});
   }
 
+  async listSkillCandidates(): Promise<SkillCandidate[]> {
+    const { candidates } = await this.getJSON<{ candidates: SkillCandidate[] }>("/skill-candidates");
+    return candidates;
+  }
+
+  async getSkillCandidate(id: string): Promise<SkillCandidate> {
+    return this.getJSON(`/skill-candidates/${encodeURIComponent(id)}`);
+  }
+
+  async getSkillCandidateDiff(id: string): Promise<string> {
+    const { diff } = await this.getJSON<{ diff: string }>(`/skill-candidates/${encodeURIComponent(id)}/diff`);
+    return diff;
+  }
+
+  async stageSkillCandidate(input: SkillCandidateCreate): Promise<SkillCandidate> {
+    return this.postJSON("/skill-candidates", input);
+  }
+
+  async reviseSkillCandidate(
+    id: string,
+    patch: Partial<Pick<SkillCandidateCreate, "description" | "triggerConditions" | "proposedSkillMd" | "packageFiles" | "reason">>,
+  ): Promise<SkillCandidate> {
+    const res = await this.fetchImpl(`${this.baseUrl}/skill-candidates/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers: this.headers({ "content-type": "application/json" }),
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    return (await res.json()) as SkillCandidate;
+  }
+
+  async changeSkillCandidateScope(id: string, scope: "global" | "workspace", workspaceId?: string): Promise<SkillCandidate> {
+    return this.postJSON(`/skill-candidates/${encodeURIComponent(id)}/scope`, {
+      scope,
+      ...(workspaceId ? { workspaceId } : {}),
+    });
+  }
+
+  async approveSkillCandidate(id: string): Promise<SkillCandidate> {
+    return this.postJSON(`/skill-candidates/${encodeURIComponent(id)}/approve`, {});
+  }
+
+  async rejectSkillCandidate(id: string, reason?: string): Promise<SkillCandidate> {
+    return this.postJSON(`/skill-candidates/${encodeURIComponent(id)}/reject`, reason ? { reason } : {});
+  }
+
+  async prepareSkillLearning(input: {
+    kind: "text" | "path" | "url" | "conversation";
+    value?: string;
+    threadId?: string;
+    workspaceId?: string;
+  }): Promise<{ prompt: string; workspaceId?: string }> {
+    return this.postJSON("/skill-learning/prepare", input);
+  }
+
+  async skillLearningStatus(): Promise<{ settings: SkillLearningSettings; status: SkillLearningStatus }> {
+    return this.getJSON("/skill-learning/status");
+  }
+
+  async updateSkillLearningSettings(patch: Partial<SkillLearningSettings>): Promise<{ settings: SkillLearningSettings }> {
+    const res = await this.fetchImpl(`${this.baseUrl}/skill-learning/settings`, {
+      method: "PATCH",
+      headers: this.headers({ "content-type": "application/json" }),
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    return (await res.json()) as { settings: SkillLearningSettings };
+  }
+
+  async reviewSkillLearning(threadId?: string): Promise<SkillLearningStatus> {
+    return this.postJSON("/skill-learning/review", threadId ? { threadId } : {});
+  }
+
+  async consolidateLearnedSkills(): Promise<SkillLearningStatus> {
+    return this.postJSON("/skill-learning/consolidate", {});
+  }
+
+  async listLearnedSkills(): Promise<LearnedSkill[]> {
+    const { skills } = await this.getJSON<{ skills: LearnedSkill[] }>("/learned-skills");
+    return skills;
+  }
+
+  async pinLearnedSkill(id: string, pinned: boolean): Promise<LearnedSkill> {
+    return this.postJSON(`/learned-skills/${encodeURIComponent(id)}/pin`, { pinned });
+  }
+
+  async archiveLearnedSkill(id: string): Promise<LearnedSkill> {
+    return this.postJSON(`/learned-skills/${encodeURIComponent(id)}/archive`, {});
+  }
+
+  async restoreLearnedSkill(id: string): Promise<LearnedSkill> {
+    return this.postJSON(`/learned-skills/${encodeURIComponent(id)}/restore`, {});
+  }
+
+  async learnedSkillSnapshots(id: string): Promise<SkillSnapshot[]> {
+    const { snapshots } = await this.getJSON<{ snapshots: SkillSnapshot[] }>(`/learned-skills/${encodeURIComponent(id)}/snapshots`);
+    return snapshots;
+  }
+
+  async rollbackLearnedSkill(id: string, snapshotId: string): Promise<LearnedSkill> {
+    return this.postJSON(`/learned-skills/${encodeURIComponent(id)}/rollback`, { snapshotId });
+  }
+
+  async recordLearnedSkillFeedback(
+    id: string,
+    input: { outcome: "success" | "failure" | "correction"; sourceThreadId?: string; proposedSkillMd?: string; summary?: string },
+  ): Promise<{ candidate: SkillCandidate | null }> {
+    return this.postJSON(`/learned-skills/${encodeURIComponent(id)}/feedback`, input);
+  }
+
+  async curateLearnedSkills(): Promise<{ report: { stale: string[]; archived: string[]; messages: string[] } }> {
+    return this.postJSON("/skill-learning/curate", {});
+  }
+
   async listMcpServers(): Promise<McpServerConfig[]> {
     const { servers } = await this.getJSON<{ servers: McpServerConfig[] }>("/mcp/servers");
     return servers;
@@ -948,6 +1078,14 @@ export class EasyWorkClient {
       `/memory/recall?${qs}`,
     );
     return hits;
+  }
+
+  memoryProviderStatus(): Promise<{ configured: boolean; enabled: boolean; id?: string }> {
+    return this.getJSON("/memory/provider");
+  }
+
+  setMemoryProviderEnabled(enabled: boolean): Promise<{ configured: boolean; enabled: boolean; id?: string }> {
+    return this.patchJSON("/memory/provider", { enabled });
   }
 
   /** 记忆向量召回的 embedding 模型状态。 */

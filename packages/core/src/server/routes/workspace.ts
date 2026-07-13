@@ -148,7 +148,7 @@ function revealDir(dir: string): void {
 }
 
 export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
-  const { app, repo, sessionHost, memory } = ctx;
+  const { app, repo, sessionHost, memory, skillCandidates } = ctx;
 
   // ---- 会话 ----
   app.get("/threads", async (req) => {
@@ -171,6 +171,7 @@ export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
     try {
       await sessionHost.deleteThread(id, async () => {
         facts = await memory.deleteBySession(id);
+        skillCandidates.removeSource(id);
         repo.deleteThread(id); // 删 SQLite 会话 + 消息 + FTS
       });
     } catch (e) {
@@ -222,10 +223,12 @@ export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
       for (const t of repo.listThreads({ projectId: id })) {
         await sessionHost.deleteThread(t.id, async () => {
           await memory.deleteBySession(t.id);
+          skillCandidates.removeSource(t.id);
           repo.deleteThread(t.id);
         });
       }
       await memory.deleteByScope(workspaceScope(id));
+      skillCandidates.deleteWorkspace(id);
       repo.deleteProject(id);
       return { ok: true };
     } catch (e) {

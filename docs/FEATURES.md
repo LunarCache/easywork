@@ -30,9 +30,13 @@
 
 本地文件上传 → 异步解析（带进度）→ 分块 → 嵌入 → **RRF 混合检索**（sqlite-vec 语义 + 词法）→ 多集合作用域 → 首轮自动注入 + 引用来源。**知识库页**：左集合栏（每集合计数 + 处理中指示）+ 右文档卡片网格 + 文档预览（统一 `FileViewer`：md 渲染 / 代码高亮 / 纯文本）；顶部上传先选目标集合、行内新建集合（名规范化为合法 kbId，集合在有文件那一刻诞生）；ingest job 进度轮询。
 
-## 可插拔记忆（作用域化）
+## 记忆与自动学习
 
-**全局池**（所有对话共享）+ **每工作区私有池**（互相隔离、独立于全局，工作区盯约定 / 变动 / 坑）；**渐进式披露**注入（清单常驻 + 按需取全文）+ **批量抽取**（非每轮）；**sqlite-vec ⊕ 词法**混合召回；全局 markdown 可手改回灌；Mem0 适配器。**记忆页（卡片信息流）**：顶部搜索 + 向量召回状态 + 添加；下方**筛选 chips**（作用域 全部 / 全局·你 / 各工作区，带计数 → 选中具体作用域后再现分类层 chips，带语义色点）；**单列卡片流**每条记忆一张卡 = 文本 + 元信息行〔作用域 pill · 分类色点+标签 · 手动 / 自动徽章 · 相对时间〕+ hover 编辑 / 删除，时间倒序；空态居中提示。
+**Core Memory** 只包含全局 `user-profile / agent-notes`，工作区私有池只包含 `conventions / decisions / pitfalls`。自动抽取的事实先进入带 `sourceThreadId` 的 derived pool；删除来源对话会删除仍由它拥有的事实，用户确认、固定或编辑后才提升为独立 Curated Fact。常驻 manifest 只注入每层最多 12 条 curated 要点，derived pool 经 `recall_memory` 按需加载。全局 `user-profile.md / agent-notes.md` 可手改回灌，工作区为 DB-only；sqlite-vec 不可用时降级词法。
+
+旧 `agent-memory` 启动时迁到 Agent Notes；旧 memory-layer `skills` 不再参与召回，程序化内容转为待审核 Skill Candidate，事实转为 Agent Note，歧义项保留在只读迁移池；原 `skills.md` 保留并生成一次性 `skills.legacy-backup.md`。可选 Deep Memory provider 只能追加受限召回：本地仍是唯一写入真相源，provider 失败、禁用或移除不影响 Core Memory；外部内容进入模型前会扫描、限长、标注来源并以不可信数据围栏隔离。
+
+Chat composer 与 Skills 设置提供“学习 Skill”。文本、当前对话、受工作区限制的文件或经 SSRF 防护的 URL 都先组成普通 Agent turn，并只能调用 `stage_skill_candidate` 暂存候选。后台学习只读成功轨迹和 Skill 目录，`Nothing to learn` 是正常结果，且没有 shell、文件写入、网络、MCP、消息或委派能力。所有自动候选必须在 Skills 页查看证据、完整 `SKILL.md`、验证报告和 scope 后明确批准；批准才原子激活并刷新 AgentSession。learned Skills 记录使用/成功/失败/修正/patch，支持乐观锁 patch、固定、stale、可恢复归档、快照和回滚；LLM consolidation 默认关闭且也只能产生待审核 diff。
 
 ## 采样参数
 

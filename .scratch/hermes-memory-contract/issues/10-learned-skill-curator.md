@@ -1,6 +1,6 @@
 # Curate learned Skills safely
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 09
 
@@ -10,10 +10,12 @@ Maintain learned Skills through active, stale, and recoverably archived states w
 
 ## Acceptance criteria
 
-- [ ] Deterministic inactivity rules can mark learned Skills stale and archive them without hard deletion.
-- [ ] Pinning protects a learned Skill from automatic transitions and consolidation proposals.
-- [ ] Archive/restore, pre-run snapshots, reports, and rollback are available from API and UI.
-- [ ] Built-in, external, hub-installed, and user-authored Skills are never curated automatically.
-- [ ] LLM consolidation is off by default and cannot apply changes without approval.
+- [x] Deterministic inactivity rules can mark learned Skills stale and archive them without hard deletion.
+- [x] Pinning protects a learned Skill from automatic transitions and consolidation proposals.
+- [x] Archive/restore, pre-run snapshots, reports, and rollback are available from API and UI.
+- [x] Built-in, external, hub-installed, and user-authored Skills are never curated automatically.
+- [x] LLM consolidation is off by default and cannot apply changes without approval.
 
 ## Comments
+
+- 2026-07-12: Completed deterministic lifecycle maintenance, pre-transition snapshots, readable reports, UI rollback, ownership guards, and opt-in candidate-only consolidation.
