@@ -51,6 +51,14 @@
 - **回归锁定**：Playwright 模拟 Tauri/macOS，打开文件工作台并放大，直接断言标题边界不与 `88px × 46px` traffic-light 区域相交；真实渲染同时检查返回与标题布局。
 - **验证**：UI typecheck / lint / build 全绿；`navigation.spec.ts` = **6 passed**；`npm run test:e2e` = **27 passed**。
 
+## 2026-07-13 — 记忆与 Skill 设置层级收口
+
+- **Skills 主次分离**：已启用 / 待审核 / 已归档导航与学习、新建等主操作保留在工具栏；自动学习改为可折叠摘要，常驻展示启用 / 运行 / 上次结果，展开后以响应式网格配置自动检查、工具调用阈值、学习模型和智能合并提案。
+- **记忆运行状态降噪**：搜索与“添加”继续作为主任务，向量 / 词法召回和 Additive Provider 收成紧凑状态组；旧版 Skill 迁移审计改为次级面板，无歧义项时折叠并只显示完成摘要，有待判断项时自动展开并突出数量。
+- **共享交互与响应式约束**：新增 `ConfigDisclosure` 统一摘要、展开区和 `aria-expanded` 语义；Skills 配置在 1280px 桌面视口无横向溢出，窄屏切成单列，记忆状态组可换行而不挤压搜索。
+- **契约保持不变**：Candidate 审批、迁移分类、Provider 开关、learned Skill 反馈 / 快照等交互只调整信息层级，没有改变后端产品契约。
+- **验证**：`npm run lint`、`npm run typecheck`、`npm run build` 全绿；`npm test` = **343 passed / 1 skipped**；`npm run test:e2e` = **26 passed**；双轴审查均无残留问题。
+
 ## 2026-07-12 — 记忆与 Skill 学习前端闭环
 
 - **记忆管理可见化**：记忆页新增 Additive Memory Provider 配置 / 启用状态与开关，文案明确本地仍是唯一写入真相源；旧 `global.skills` 迁移池以只读审计面板展示 candidate、Agent Note 和 ambiguous 分类。
