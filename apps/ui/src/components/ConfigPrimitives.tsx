@@ -1,5 +1,40 @@
 import type { ReactNode } from "react";
 
+export function ConfigDisclosure({
+  open,
+  onToggle,
+  summary,
+  children,
+  className = "",
+  triggerClassName = "",
+  testId,
+  triggerTestId,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  summary: ReactNode;
+  children: ReactNode;
+  className?: string;
+  triggerClassName?: string;
+  testId?: string;
+  triggerTestId?: string;
+}) {
+  return (
+    <div className={`config-disclosure ${className} ${open ? "open" : ""}`.trim()} data-testid={testId}>
+      <button
+        className={triggerClassName}
+        data-testid={triggerTestId}
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        {summary}
+      </button>
+      {open && children}
+    </div>
+  );
+}
+
 export function ConfigToolbar({
   children,
   actions,

@@ -47,6 +47,35 @@
 .skill-snapshot-layout .skill-detail-body { overflow: auto; }
 .inline-empty-state { padding: 14px; color: var(--text-tertiary); font-size: 12px; }
 .note.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--border)); background: color-mix(in srgb, var(--red) 8%, transparent); }
+.skill-learning-panel { margin-bottom: 16px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--border) 86%, transparent); border-radius: var(--r-lg); background: color-mix(in srgb, var(--color-bg-card) 94%, transparent); }
+.skill-learning-panel.open { border-color: var(--border); }
+.skill-learning-summary { width: 100%; min-height: 62px; display: flex; align-items: center; gap: 12px; padding: 11px 14px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.skill-learning-summary:hover { background: color-mix(in srgb, var(--color-bg-tertiary) 62%, transparent); }
+.skill-learning-icon { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: var(--r); background: var(--accent-soft); color: var(--accent); }
+.skill-learning-summary-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.skill-learning-summary-copy strong { font-size: 13px; font-weight: 700; }
+.skill-learning-summary-copy > span { overflow: hidden; color: var(--text-tertiary); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.config-disclosure-chevron { flex: none; display: grid; place-items: center; color: var(--text-tertiary); transition: transform 0.15s var(--ease); }
+.config-disclosure.open .config-disclosure-chevron { transform: rotate(180deg); }
+.skill-learning-config { padding: 12px; border-top: 1px solid var(--border-soft); background: color-mix(in srgb, var(--surface-2) 54%, transparent); }
+.skill-learning-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.skill-learning-setting { min-width: 0; min-height: 58px; display: flex; align-items: center; gap: 14px; padding: 10px 12px; box-sizing: border-box; border: 1px solid var(--border-soft); border-radius: var(--r); background: var(--color-bg-card); }
+.skill-learning-setting.wide { grid-column: 1 / -1; }
+.skill-learning-setting-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.skill-learning-setting-copy strong { color: var(--text); font-size: 12.5px; font-weight: 650; white-space: nowrap; }
+.skill-learning-setting-copy > span { color: var(--text-tertiary); font-size: 11px; line-height: 1.4; }
+.skill-learning-number { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--text-tertiary); font-size: 11.5px; }
+.skill-learning-number input { width: 64px; height: 32px; }
+.skill-learning-model { width: min(180px, 42%); min-width: 120px; height: 32px; font-family: var(--font-mono); }
+.skill-learning-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 11px 2px 0; }
+.skill-learning-actions > span { flex: 1 1 260px; min-width: 0; color: var(--text-tertiary); font-size: 11.5px; line-height: 1.4; }
+.skill-learning-actions .set-btn { white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .skill-learning-grid { grid-template-columns: 1fr; }
+  .skill-learning-setting.wide { grid-column: auto; }
+  .skill-learning-summary .set-pill.ghost { display: none; }
+}
 
 /* —— MCP 简约卡片（状态点 + 连接状态 + 开关）—— */
 .mcp-list { display: flex; flex-direction: column; gap: 10px; }

@@ -30,14 +30,25 @@ test.describe("knowledge base and skills e2e", () => {
     await expect(page.getByTestId(`kb-doc-${doc.id}`)).toHaveCount(0);
   });
 
-  test("Skills 页支持新建模板并打开详情", async ({ page, openApp, client }) => {
+  test("Skills 页布局稳定，并支持展开自动学习和新建模板", async ({ page, openApp, client }) => {
     const skillName = `pw-skill-${Date.now().toString().slice(-6)}`;
 
+    await page.setViewportSize({ width: 1280, height: 720 });
     await openApp();
     await page.getByTestId("sidebar-settings").click();
     await page.getByTestId("settings-nav-skills").click();
 
     await expect(page.getByTestId("skills-source-builtin")).toBeVisible();
+    await expect(page.getByTestId("skill-learning-summary")).toBeVisible();
+    await expect(page.getByTestId("skill-learning-config")).toHaveCount(0);
+    await page.getByTestId("skill-learning-summary").click();
+    await expect(page.getByTestId("skill-learning-config")).toBeVisible();
+    await expect
+      .poll(async () => {
+        const pageScroller = page.getByTestId("settings-pane-skills").locator(":scope > .page");
+        return await pageScroller.evaluate((element) => element.scrollWidth - element.clientWidth);
+      })
+      .toBeLessThanOrEqual(0);
     await expect(page.getByTestId("skills-source-agents")).toBeVisible();
     await expect(page.getByText("EasyWork 内置全局技能")).toBeVisible();
     await expect(page.getByText(/^主目录\s/)).toHaveCount(0);

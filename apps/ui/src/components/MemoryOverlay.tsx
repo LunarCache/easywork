@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LegacySkillMemory, MemoryItem, Project } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { BrainIcon, TrashIcon, XIcon, EditIcon, CheckIcon, PlusIcon, SearchIcon, UserIcon, FolderClosedIcon } from "../icons.js";
+import { BrainIcon, TrashIcon, XIcon, EditIcon, CheckIcon, PlusIcon, SearchIcon, UserIcon, FolderClosedIcon, SparkIcon, ChevronDownIcon } from "../icons.js";
+import { ConfigDisclosure } from "./ConfigPrimitives.js";
 
 type MemItem = MemoryItem;
 
@@ -209,6 +210,7 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
     .filter((m) => !layerFilter || m.layer === layerFilter)
     .filter((m) => !q || m.text.toLowerCase().includes(q))
     .sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1));
+  const ambiguousLegacyCount = legacySkills.filter((item) => item.disposition === "ambiguous").length;
 
   const originPresentation = (m: MemItem): { label: string; className: string } => {
     const presentation = ORIGIN_PRESENTATION[m.origin];
@@ -240,7 +242,7 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
           </div>
         )}
 
-        {/* 工具栏：搜索 + 向量召回状态 + 添加 */}
+        {/* 工具栏：搜索是主任务，运行状态集中为次级信息。 */}
         <div className="mem-toolbar">
           <div className="mem-search">
             <SearchIcon size={15} />
@@ -251,29 +253,33 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <span className="mem-recall">
-            <span className="mem-recall-dot" data-on={emb?.ready ? "1" : "0"} />
-            {emb?.ready ? `向量召回 · ${emb.dim} 维` : "向量召回未启用"}
-            {!emb?.ready && (
-              <button className="set-btn tiny" onClick={() => void enableEmbedding()} disabled={embBusy}>
-                {embBusy ? "处理中…" : "启用"}
-              </button>
-            )}
-          </span>
-          <div className="mem-provider-status" data-testid="memory-provider-status" title="外部 Provider 只追加受限召回，不接管本地记忆写入">
-            <span className="mem-recall-dot" data-on={provider?.enabled ? "1" : "0"} />
-            <span>{provider?.configured ? `外部记忆 · ${provider.id ?? "已配置"}` : "外部记忆未配置"}</span>
-            {provider?.configured && (
-              <button
-                className={`set-toggle ${provider.enabled ? "on" : ""}`}
-                aria-label={provider.enabled ? "停用外部记忆 Provider" : "启用外部记忆 Provider"}
-                aria-pressed={provider.enabled}
-                disabled={providerBusy}
-                onClick={() => void toggleProvider()}
-              >
-                <span />
-              </button>
-            )}
+          <div className="mem-runtime-statuses">
+            <span className="mem-status-chip mem-recall" title={emb?.ready ? "语义与词法混合召回已启用" : "当前使用纯词法召回"}>
+              <span className="mem-recall-dot" data-on={emb?.ready ? "1" : "0"} />
+              <span>{emb?.ready ? "向量召回" : "词法召回"}</span>
+              <small>{emb?.ready ? `${emb.dim} 维` : "向量未启用"}</small>
+              {!emb?.ready && (
+                <button className="set-btn tiny" onClick={() => void enableEmbedding()} disabled={embBusy}>
+                  {embBusy ? "处理中…" : "启用"}
+                </button>
+              )}
+            </span>
+            <div className="mem-status-chip mem-provider-status" data-testid="memory-provider-status" title="外部 Provider 只追加受限召回，不接管本地记忆写入">
+              <span className="mem-recall-dot" data-on={provider?.enabled ? "1" : "0"} />
+              <span>外部记忆</span>
+              <small>{provider?.configured ? provider.id ?? "已配置" : "未配置"}</small>
+              {provider?.configured && (
+                <button
+                  className={`set-toggle ${provider.enabled ? "on" : ""}`}
+                  aria-label={provider.enabled ? "停用外部记忆 Provider" : "启用外部记忆 Provider"}
+                  aria-pressed={provider.enabled}
+                  disabled={providerBusy}
+                  onClick={() => void toggleProvider()}
+                >
+                  <span />
+                </button>
+              )}
+            </div>
           </div>
           <button className="set-btn primary" data-testid="memory-add-button" onClick={openAddTop}>
             <PlusIcon size={15} /> 添加
@@ -281,35 +287,6 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
         </div>
 
         {note && <div className="mem-ov-note">{note}</div>}
-
-        <section className="legacy-memory" data-testid="legacy-skill-memory">
-          <button className="legacy-memory-head" data-testid="legacy-skill-memory-toggle" onClick={() => setLegacyOpen((value) => !value)} aria-expanded={legacyOpen}>
-            <div>
-              <strong>旧 Skills 记忆迁移</strong>
-              <span>只读审计池；程序性内容需作为 Candidate 审核后才会成为 Skill。</span>
-            </div>
-            <span className="set-pill">待判断 {legacySkills.filter((item) => item.disposition === "ambiguous").length}</span>
-            <span className="legacy-memory-chevron">{legacyOpen ? "收起" : "查看"}</span>
-          </button>
-          {legacyOpen && (
-            <div className="legacy-memory-list">
-              {legacySkills.length === 0 ? (
-                <div className="legacy-memory-empty">没有待人工判断的旧 Skills 记忆。</div>
-              ) : legacySkills.map((item) => (
-                <div key={item.id} className="legacy-memory-item">
-                  <div className="legacy-memory-text">{item.text}</div>
-                  <div className="legacy-memory-meta">
-                    <span className={`set-pill ${item.disposition === "ambiguous" ? "warn" : ""}`}>
-                      {item.disposition === "candidate" ? "已转候选" : item.disposition === "agent-note" ? "已转 Agent Note" : "待人工判断"}
-                    </span>
-                    {item.sourceThreadId && <span title={item.sourceThreadId}>来源 {item.sourceThreadId.slice(0, 8)}</span>}
-                    <span>{relTime(item.updatedAt)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
 
         {/* 筛选 chips：作用域 + （选中具体作用域时）分类层 */}
         <div className="mem-filters">
@@ -354,6 +331,44 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
             </>
           )}
         </div>
+
+        <ConfigDisclosure
+          className="legacy-memory"
+          triggerClassName="legacy-memory-head"
+          testId="legacy-skill-memory"
+          triggerTestId="legacy-skill-memory-toggle"
+          open={legacyOpen}
+          onToggle={() => setLegacyOpen((value) => !value)}
+          summary={(
+            <>
+              <span className="legacy-memory-icon"><SparkIcon size={14} /></span>
+              <span className="legacy-memory-heading">
+                <strong>旧版 Skill 迁移</strong>
+                <span>{ambiguousLegacyCount > 0 ? `${ambiguousLegacyCount} 条内容需要人工判断` : "迁移审计已完成，无待判断项"}</span>
+              </span>
+              {ambiguousLegacyCount > 0 && <span className="set-pill warn">待判断 {ambiguousLegacyCount}</span>}
+              <span className="config-disclosure-chevron"><ChevronDownIcon size={15} /></span>
+            </>
+          )}
+        >
+          <div className="legacy-memory-list">
+              <div className="legacy-memory-explainer">这里只保留旧数据的只读审计结果；程序性内容需转为 Candidate 并经审核后才能成为 Skill。</div>
+              {legacySkills.length === 0 ? (
+                <div className="legacy-memory-empty">没有待人工判断的旧 Skills 记忆。</div>
+              ) : legacySkills.map((item) => (
+                <div key={item.id} className="legacy-memory-item">
+                  <div className="legacy-memory-text">{item.text}</div>
+                  <div className="legacy-memory-meta">
+                    <span className={`set-pill ${item.disposition === "ambiguous" ? "warn" : ""}`}>
+                      {item.disposition === "candidate" ? "已转候选" : item.disposition === "agent-note" ? "已转 Agent Note" : "待人工判断"}
+                    </span>
+                    {item.sourceThreadId && <span title={item.sourceThreadId}>来源 {item.sourceThreadId.slice(0, 8)}</span>}
+                    <span>{relTime(item.updatedAt)}</span>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </ConfigDisclosure>
 
         {/* 单列卡片信息流 */}
         {feed.length === 0 ? (

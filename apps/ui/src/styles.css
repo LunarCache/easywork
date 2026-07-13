@@ -727,23 +727,28 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 /* —— 记忆页（档案 Dossier）—— */
 .mem-ov-note { margin: 10px 18px 0; font-size: 12px; color: var(--text-2); background: var(--color-bg-tertiary); border-radius: var(--r); padding: 8px 12px; }
 .mem-toolbar { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--border-soft); }
-.mem-provider-status { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: var(--text-tertiary); font-size: 12px; white-space: nowrap; }
+.mem-runtime-statuses { flex: none; display: flex; align-items: center; gap: 6px; }
+.mem-status-chip { min-width: 0; height: 30px; display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box; padding: 0 9px; border: 1px solid var(--border-soft); border-radius: 999px; background: color-mix(in srgb, var(--surface-2) 78%, transparent); color: var(--text-2); white-space: nowrap; }
+.mem-status-chip small { max-width: 120px; overflow: hidden; color: var(--text-tertiary); font: 10.5px var(--font-mono); text-overflow: ellipsis; }
+.mem-provider-status { color: var(--text-2); font-size: 11.5px; }
 .mem-provider-status .set-toggle { transform: scale(.82); transform-origin: center; }
-.legacy-memory { flex: none; margin: 12px 18px 0; border: 1px solid var(--border-soft); border-radius: var(--r-lg); background: color-mix(in srgb, var(--color-bg-card) 92%, transparent); }
-.legacy-memory-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
-.legacy-memory-head > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.legacy-memory { flex: none; max-width: none; margin: 10px 18px 0; padding: 0; overflow: hidden; border: 1px solid var(--border-soft); border-radius: var(--r-lg); background: color-mix(in srgb, var(--surface-2) 62%, transparent); box-shadow: none; }
+.legacy-memory-head { width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 7px 11px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.legacy-memory-head:hover { background: color-mix(in srgb, var(--color-bg-tertiary) 58%, transparent); }
+.legacy-memory-icon { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px; background: var(--color-bg-card); color: var(--text-tertiary); }
+.legacy-memory-heading { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .legacy-memory-head strong { font-size: 13px; }
-.legacy-memory-head div > span { color: var(--text-tertiary); font-size: 11.5px; }
-.legacy-memory-chevron { color: var(--text-tertiary); font-size: 11.5px; }
+.legacy-memory-heading > span { overflow: hidden; color: var(--text-tertiary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .legacy-memory-list { display: flex; flex-direction: column; border-top: 1px solid var(--border-soft); }
+.legacy-memory-explainer { padding: 9px 12px; border-bottom: 1px solid var(--border-soft); color: var(--text-tertiary); font-size: 11px; line-height: 1.45; }
 .legacy-memory-item { padding: 11px 14px; }
 .legacy-memory-item + .legacy-memory-item { border-top: 1px solid var(--border-soft); }
 .legacy-memory-text { color: var(--text); font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; }
 .legacy-memory-meta { display: flex; align-items: center; gap: 8px; margin-top: 7px; color: var(--text-tertiary); font-size: 11px; }
 .legacy-memory-empty { padding: 14px; color: var(--text-tertiary); font-size: 12px; }
-.mem-search { flex: 1; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; background: var(--color-bg-card); border: 1px solid var(--border); border-radius: 9px; color: var(--text-tertiary); }
+.mem-search { flex: 1 1 320px; min-width: 220px; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; background: var(--color-bg-card); border: 1px solid var(--border); border-radius: 9px; color: var(--text-tertiary); }
 .mem-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; color: var(--text); font-size: 13px; font-family: var(--font); }
-.mem-recall { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-family: var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
+.mem-recall { font-size: 11.5px; }
 .mem-recall-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary); }
 .mem-recall-dot[data-on="1"] { background: var(--ok, #3FB950); }
 .mem-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
@@ -786,6 +791,13 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .mem-fcard:hover .mem-card-act { opacity: 1; }
 .mem-empty.feed { flex: 1; min-height: 0; }
 .set-pane .mem-filters, .set-pane .mem-feed { padding-left: var(--set-x); padding-right: var(--set-x); }
+.set-pane .legacy-memory { margin-left: var(--set-x); margin-right: var(--set-x); }
+
+@media (max-width: 1100px) {
+  .set-pane .mem-toolbar { flex-wrap: wrap; }
+  .set-pane .mem-search { flex: 1 1 calc(100% - 90px); }
+  .set-pane .mem-runtime-statuses { order: 2; flex: 1 1 auto; }
+}
 
 /* ================================================================
    聊天

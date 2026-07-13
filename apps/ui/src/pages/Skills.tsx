@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LearnedSkill, Project, Skill, SkillCandidate, SkillLearningSettings, SkillLearningStatus, SkillSnapshot, SkillSource } from "@ew/shared";
 import { getClient } from "../lib/client.js";
-import { ConfigEmptyState, ConfigToolbar } from "../components/ConfigPrimitives.js";
+import { ConfigDisclosure, ConfigEmptyState, ConfigToolbar } from "../components/ConfigPrimitives.js";
 import { loadDisabledSkills, saveDisabledSkills } from "../lib/prefs.js";
-import { SparkIcon, FolderIcon, PlusIcon, ArrowLeftIcon, CheckIcon, XIcon } from "../icons.js";
+import { SparkIcon, FolderIcon, PlusIcon, ArrowLeftIcon, CheckIcon, XIcon, ChevronDownIcon } from "../icons.js";
 import { deriveSkillAttention } from "../components/SkillAttentionBadge.js";
 
 function shortPath(p: string): string {
@@ -37,6 +37,7 @@ export function Skills({ active = true }: { active?: boolean }) {
   const [learned, setLearned] = useState<LearnedSkill[]>([]);
   const [learningSettings, setLearningSettings] = useState<SkillLearningSettings | null>(null);
   const [learningStatus, setLearningStatus] = useState<SkillLearningStatus | null>(null);
+  const [learningConfigOpen, setLearningConfigOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tab, setTab] = useState<"active" | "pending" | "archived">("active");
   const [loading, setLoading] = useState(true);
@@ -479,46 +480,120 @@ export function Skills({ active = true }: { active?: boolean }) {
         <div className="note danger" data-testid="skill-learning-error">自动学习上次检查失败：{learningStatus.lastError ?? "未知错误"}</div>
       )}
       {learningSettings && (
-        <div className="row gap" data-testid="skill-learning-controls">
-          <label className="row gap">
-            <input type="checkbox" checked={learningSettings.enabled} onChange={(event) => void updateLearning({ enabled: event.target.checked })} />
-            自动学习
-          </label>
-          <label className="row gap">
-            <input type="checkbox" checked={learningSettings.automaticReview} onChange={(event) => void updateLearning({ automaticReview: event.target.checked })} />
-            自动检查
-          </label>
-          <label className="row gap">
-            最少工具调用
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={learningSettings.minToolCalls}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                if (Number.isInteger(value) && value >= 1 && value <= 100) void updateLearning({ minToolCalls: value });
-              }}
-              style={{ width: 64 }}
-            />
-          </label>
-          <label className="row gap">
-            学习模型
-            <input
-              value={learningSettings.learnerModel ?? ""}
-              placeholder="Auto / 当前模型"
-              onChange={(event) => void updateLearning({ learnerModel: event.target.value.trim() || undefined })}
-            />
-          </label>
-          <label className="row gap">
-            <input type="checkbox" checked={learningSettings.consolidationEnabled} onChange={(event) => void updateLearning({ consolidationEnabled: event.target.checked })} />
-            LLM consolidation（仅提案）
-          </label>
-          <button className="set-btn ghost soft" onClick={() => void reviewNow()} disabled={learningStatus?.running}>立即检查</button>
-          <button className="set-btn ghost soft" data-testid="skill-curate-button" onClick={() => void curateLearned()}>执行维护</button>
-          <button className="set-btn ghost soft" disabled={!learningSettings.consolidationEnabled} onClick={() => void consolidateLearned()}>Consolidation dry-run</button>
-          {learningStatus?.lastResult && <span className="set-pill">上次：{learningStatus.lastResult}</span>}
-        </div>
+        <ConfigDisclosure
+          className="skill-learning-panel"
+          triggerClassName="skill-learning-summary"
+          testId="skill-learning-controls"
+          triggerTestId="skill-learning-summary"
+          open={learningConfigOpen}
+          onToggle={() => setLearningConfigOpen((value) => !value)}
+          summary={(
+            <>
+              <span className="skill-learning-icon"><SparkIcon size={17} /></span>
+              <span className="skill-learning-summary-copy">
+                <strong>自动学习</strong>
+                <span>
+                  {learningSettings.enabled
+                    ? learningSettings.automaticReview
+                      ? `已开启 · 工具型任务达到 ${learningSettings.minToolCalls} 次调用后自动检查`
+                      : "已开启 · 由你手动发起检查"
+                    : "已关闭 · 仍可手动学习和维护 Skill"}
+                </span>
+              </span>
+              <span className={`set-pill ${learningSettings.enabled ? "" : "ghost"}`}>
+                {learningStatus?.running ? "运行中" : learningSettings.enabled ? "已启用" : "已关闭"}
+              </span>
+              {learningStatus?.lastResult && <span className="set-pill ghost">上次 {learningStatus.lastResult}</span>}
+              <span className="config-disclosure-chevron"><ChevronDownIcon size={16} /></span>
+            </>
+          )}
+        >
+          <div className="skill-learning-config" data-testid="skill-learning-config">
+              <div className="skill-learning-grid">
+                <div className="skill-learning-setting">
+                  <div className="skill-learning-setting-copy">
+                    <strong>自动学习</strong>
+                    <span>任务完成后记录可复用流程，但只生成待审核候选。</span>
+                  </div>
+                  <button
+                    className={`set-toggle ${learningSettings.enabled ? "on" : ""}`}
+                    type="button"
+                    aria-label="自动学习"
+                    aria-pressed={learningSettings.enabled}
+                    onClick={() => void updateLearning({ enabled: !learningSettings.enabled })}
+                  ><span /></button>
+                </div>
+
+                <div className="skill-learning-setting">
+                  <div className="skill-learning-setting-copy">
+                    <strong>自动检查</strong>
+                    <span>在后台检查完成的工具型任务是否值得沉淀。</span>
+                  </div>
+                  <button
+                    className={`set-toggle ${learningSettings.automaticReview ? "on" : ""}`}
+                    type="button"
+                    aria-label="自动检查"
+                    aria-pressed={learningSettings.automaticReview}
+                    onClick={() => void updateLearning({ automaticReview: !learningSettings.automaticReview })}
+                  ><span /></button>
+                </div>
+
+                <label className="skill-learning-setting">
+                  <span className="skill-learning-setting-copy">
+                    <strong>检查阈值</strong>
+                    <span>至少发生多少次工具调用才进入自动检查。</span>
+                  </span>
+                  <span className="skill-learning-number">
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={learningSettings.minToolCalls}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        if (Number.isInteger(value) && value >= 1 && value <= 100) void updateLearning({ minToolCalls: value });
+                      }}
+                    />
+                    <span>次</span>
+                  </span>
+                </label>
+
+                <label className="skill-learning-setting">
+                  <span className="skill-learning-setting-copy">
+                    <strong>学习模型</strong>
+                    <span>留空时跟随当前会话模型。</span>
+                  </span>
+                  <input
+                    className="skill-learning-model"
+                    value={learningSettings.learnerModel ?? ""}
+                    placeholder="自动 / 当前模型"
+                    onChange={(event) => void updateLearning({ learnerModel: event.target.value.trim() || undefined })}
+                  />
+                </label>
+
+                <div className="skill-learning-setting wide">
+                  <div className="skill-learning-setting-copy">
+                    <strong>智能合并提案</strong>
+                    <span>对相似 Learned Skills 生成合并建议，不会直接改写已启用内容。</span>
+                  </div>
+                  <button
+                    className={`set-toggle ${learningSettings.consolidationEnabled ? "on" : ""}`}
+                    type="button"
+                    aria-label="智能合并提案"
+                    aria-pressed={learningSettings.consolidationEnabled}
+                    onClick={() => void updateLearning({ consolidationEnabled: !learningSettings.consolidationEnabled })}
+                  ><span /></button>
+                </div>
+              </div>
+
+              <div className="skill-learning-actions">
+                <span>{learningStatus?.running ? "正在检查最近任务…" : "所有自动结果都需要你在“待审核”中确认。"}</span>
+                <button className="set-btn ghost soft" onClick={() => void reviewNow()} disabled={learningStatus?.running}>立即检查</button>
+                <button className="set-btn ghost soft" data-testid="skill-curate-button" onClick={() => void curateLearned()}>执行维护</button>
+                <button className="set-btn ghost soft" disabled={!learningSettings.consolidationEnabled} onClick={() => void consolidateLearned()}>预览合并方案</button>
+              </div>
+          </div>
+        </ConfigDisclosure>
       )}
       {learning && (
         <div className="confirm-mask" onClick={() => setLearning(false)}>
