@@ -122,9 +122,15 @@ curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh
 
 > 当前 macOS 包为 ad-hoc 未签名版本。若手动下载 dmg 遇到 Gatekeeper 提示，可在「系统设置 -> 隐私与安全性」选择仍要打开，或执行 `xattr -dr com.apple.quarantine /Applications/EasyWork.app`。
 
-### 其他平台
+### Windows x64
 
-Intel Mac、Windows、Linux 安装包仍在后续发布计划中。源码开发已按跨平台路径设计，Windows 需要额外安装 Git for Windows。
+```powershell
+irm https://raw.githubusercontent.com/LunarCache/easywork/main/install.ps1 | iex
+```
+
+也可以从 Releases 下载 NSIS `.exe` 或 MSI 安装包。安装包内置 Windows SEA daemon 与 `vec0.dll`，运行无需系统 Node；当前未做 Authenticode 签名。
+
+Intel Mac、Windows ARM64、Linux 安装包仍在后续发布计划中。源码开发时 Windows 需要额外安装 Git for Windows。
 
 ---
 
@@ -182,7 +188,7 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 349 passed / 1 skipped
+npm test               # vitest: 356 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
@@ -200,15 +206,18 @@ npm run dev:desktop    # Tauri dev: Rust 壳 + Vite + daemon sidecar
 ```bash
 node scripts/build-daemon-sea.mjs
 npm run app:build --workspace @ew/desktop
+npm run smoke:daemon-sea
+npm run release:check-artifacts -- windows
 ```
 
-发布流程：推送 `v*` tag 触发 [`release.yml`](.github/workflows/release.yml)，先运行 `npm run release:check-version` 校验 npm / Tauri / Cargo 版本与 tag 一致，再由 macOS Apple Silicon runner 构建 dmg 并上传到 GitHub Releases。Desktop WebView 启用显式 CSP，保留 Tauri IPC、本地 daemon 与沙盒预览所需来源，同时禁止远程脚本、对象插件和表单提交。
+发布流程：推送 `v*` tag 触发 [`release.yml`](.github/workflows/release.yml)，先运行 `npm run release:check-version` 校验 npm / Tauri / Cargo 版本与 tag 一致；macOS Apple Silicon runner 构建 dmg，Windows x64 runner 构建 NSIS + MSI，两端都先对 SEA daemon `/health` 做真实冒烟，Windows 还会检查 sidecar、`vec0.dll` 与安装包完整性后再上传 Releases。普通 CI 也会执行 Windows NSIS 关键路径构建。Desktop WebView 启用显式 CSP，保留 Tauri IPC、本地 daemon 与沙盒预览所需来源，同时禁止远程脚本、对象插件和表单提交。
 
 ---
 
 ## 测试覆盖
 
-- Vitest：349 passed / 1 skipped。
+- Vitest：356 passed / 1 skipped。
+- 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
 - Playwright UI e2e：29 条，覆盖设置页、模型模板跨协议元数据继承、推理模型默认思考档位、默认工作区直达、渠道/知识库/Skills/记忆入口与设置层级、Chat / Workspace composer 无边框控件与上下文用量悬停详情、联网工具门控、图片上传与粘贴、搜索导航、文件页、macOS 工作台安全区、来源事实、记忆 CRUD、知识库、Skills 模板/候选 diff/审批与显式学习。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
 

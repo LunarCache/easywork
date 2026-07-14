@@ -1,8 +1,7 @@
 // EasyWork 桌面外壳（Tauri 2）：启动 Node core daemon 子进程，解析其 stdout 首行
 // {baseUrl, token} 连接信息并暴露给 webview；退出时回收 daemon。
 //
-// 注意：本环境无 Rust 工具链，未能编译验证；如有小的 API 差异，按 `npm run dev:desktop`
-// 的编译报错修正即可（标准 Tauri 2 写法）。
+// macOS / Windows 共用同一壳层；平台差异只留在资源内的 SEA 文件名与系统目录解析。
 
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
@@ -57,7 +56,7 @@ fn data_dir() -> String {
 }
 
 /// 构造启动 core daemon 的命令。
-/// - 打包：随附的单文件二进制 `daemon/easywork serve`（Node SEA，免 Node；vec0.dylib 同目录自动解析）。
+/// - 打包：随附的单文件二进制 `daemon/easywork[.exe] serve`（Node SEA，免 Node；vec0 动态库同目录自动解析）。
 /// - 开发：`node $EW_DAEMON_ENTRY serve`（由 npm 脚本设为 cli.js 绝对路径）。
 fn build_daemon_command(app: &tauri::AppHandle) -> Command {
     let exe_name = if cfg!(windows) { "easywork.exe" } else { "easywork" };

@@ -91,7 +91,7 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 | 记忆 / RAG | 本地 Core Memory + 可选 additive provider；独立 `llama serve --embedding`（默认 nomic）+ **sqlite-vec**；记忆按 `0.75 × 语义 + 0.25 × 词法` 加权，知识库用 dense / lexical RRF；向量或 provider 不可用时本地词法链路仍工作 |
 | UI | React 19 + Vite + react-markdown |
 | 桌面 | Tauri 2（Rust 外壳 + TS 前端；Rust 启动并持有 daemon child） |
-| 打包 | daemon Node SEA 单文件二进制；Tauri dmg；`release:check-version` 强制 npm/Tauri/Cargo 与 `v*` tag 一致后进入 GitHub Releases |
+| 打包 | daemon Node SEA 单文件二进制；Tauri macOS dmg + Windows x64 NSIS/MSI；版本、SEA `/health` 与平台产物契约通过后进入 GitHub Releases |
 | 库构建 / 测试 | tsup（esbuild）/ Vitest |
 | Monorepo | npm workspaces + Turborepo |
 

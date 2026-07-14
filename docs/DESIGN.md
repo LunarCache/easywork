@@ -325,7 +325,7 @@ router 默认 `127.0.0.1`。切 `0.0.0.0` **强制 api-key**：`POST /settings/l
 
 ## 11. CLI —— `easywork`
 
-SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端**，经 `@ew/sdk` 打 HTTP，**后端零改动**（唯一例外：`models rm` 的 `POST /models/local/delete`）。当前 macOS DMG 把它作为 desktop 私有 sidecar 资源，并不会自动安装到用户 `PATH`；从源码使用 CLI 需先构建 daemon，再执行 `node apps/daemon/dist/cli.js`。
+SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端**，经 `@ew/sdk` 打 HTTP，**后端零改动**（唯一例外：`models rm` 的 `POST /models/local/delete`）。macOS DMG 与 Windows x64 NSIS/MSI 都把它作为 desktop 私有 sidecar 资源，并不会自动安装到用户 `PATH`；从源码使用 CLI 需先构建 daemon，再执行 `node apps/daemon/dist/cli.js`。
 
 - **命令**：无命令 + TTY→`repl`；`serve/status/stop`；`models [ls|pull|rm]`、`thread [ls|show|rm]`、`mem [ls|search|rm]`、`kb [ls|search|add|rm]`；`run <prompt>`；`repl|chat`。选项 `-m/-w/-t/-y`，环境 `EW_BASEURL/EW_TOKEN`（连远端、抑制自启）、`EW_MODEL`。
 - **守护发现/自启**（`cli/daemon.ts`）：读 `~/.easywork/daemon.json`（`{baseUrl,token,pid}`）→ **HTTP 探活 `/health`（1.5s，而非信 pid，因文件易 crash-stale）** → 没活且 autostart 则 detached spawn `serve`、轮询直到 20s。`EW_BASEURL` 时永不自启。
@@ -423,9 +423,10 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 
 ## 14. 打包与发布
 
-- **daemon → Node SEA 单文件二进制**（`scripts/build-daemon-sea.mjs`）：turbo build（SEA 内联各包 dist）→ tsup 全内联 CJS → `--experimental-sea-config` 生成 blob → 复制 node + postject 注入（macOS 必须先去签名、注入后 ad-hoc 重签）→ 捆 `sqlite-vec` 各平台 `vec0.{dylib|dll|so}`。**运行免 Node**。
+- **daemon → Node SEA 单文件二进制**（`scripts/build-daemon-sea.mjs`）：turbo build（SEA 内联各包 dist）→ tsup 全内联 CJS → `--experimental-sea-config` 生成 blob → 复制 node + postject 注入（macOS 必须先去签名、注入后 ad-hoc 重签）→ 捆 `sqlite-vec` 各平台 `vec0.{dylib|dll|so}`。所有 CLI 都通过 Node + 参数数组调用，避免 Windows `.cmd` 与带空格路径的 shell 转义问题；SEA 参数解析兼容 Node 24/26 的 argv 形态。**运行免 Node**。
 - **llama runtime**：缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime`）。
-- **发布**：`v*` tag 触发 `.github/workflows/release.yml`，先用 `scripts/check-release-version.mjs` 校验 root npm、desktop npm、Tauri config、Cargo.toml/Cargo.lock 与 tag 一致，再由 macOS-14（Apple Silicon）runner `npm run app:build` 出 dmg 发到公开 Releases（初版 ad-hoc 未签名；Intel/Windows/Linux 后续）。
+- **关键路径门禁**：`scripts/smoke-daemon-sea.mjs` 启动注入后的真实 sidecar 并请求 `/health`；`scripts/check-release-artifacts.mjs windows` 要求 `easywork.exe`、`vec0.dll` 与当前版本、x64 架构的所选 NSIS/MSI 安装包同时存在，构建前清除 Cargo 缓存内可能残留的旧 bundle。普通 CI 在 `windows-latest` 实际构建并验证 NSIS。
+- **发布**：`v*` tag 触发 `.github/workflows/release.yml`，先用 `scripts/check-release-version.mjs` 校验 root npm、desktop npm、Tauri config、Cargo.toml/Cargo.lock 与 tag 一致；macOS-14（Apple Silicon）runner出 dmg，`windows-latest` 出 Windows x64 NSIS + MSI，均通过 SEA smoke 后发到公开 Releases（当前未做 Apple/Windows 正式签名；Intel/ARM64 Windows/Linux 后续）。
 
 ---
 

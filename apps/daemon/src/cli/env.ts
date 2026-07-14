@@ -9,7 +9,11 @@ export const VERSION: string = typeof __EW_VERSION__ !== "undefined" ? __EW_VERS
 
 /** 去掉 runner（node + 脚本，或 SEA 可执行）后的用户参数。 */
 export function userArgv(): string[] {
-  return process.argv.slice(IS_SEA ? 1 : 2);
+  if (!IS_SEA) return process.argv.slice(2);
+  const args = process.argv.slice(1);
+  // Node SEA 的 argv 形态随运行时版本有两种：
+  // [exe, ...args] 或 [exe, exe, ...args]。只在重复项确为当前可执行文件时剔除。
+  return args[0] === process.execPath ? args.slice(1) : args;
 }
 
 /** 自启 daemon 时 spawn 自己的参数：SEA 直接传子命令；dev 走 `node <script> serve`。 */

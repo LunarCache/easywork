@@ -1,17 +1,23 @@
 # EasyWork 一键安装（Windows）。用法：
 #   irm https://raw.githubusercontent.com/LunarCache/easywork/main/install.ps1 | iex
 #
-# 注：首个发布版本仅含 macOS。Windows 安装包（.msi/.exe）发布后本脚本将自动下载安装。
+# Windows x64 发布流程产出 NSIS (.exe) 与 MSI 安装包；默认优先 NSIS。
 $ErrorActionPreference = "Stop"
 $Repo = if ($env:EASYWORK_REPO) { $env:EASYWORK_REPO } else { "LunarCache/easywork" }
 
-$arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
+if (-not [Environment]::Is64BitOperatingSystem) {
+  Write-Host "EasyWork Windows 版当前仅支持 x64。"
+  return
+}
+$arch = "x64"
 Write-Host "→ 查询最新版本…"
 $rel = Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/$Repo/releases/latest"
-$asset = $rel.assets | Where-Object { $_.name -match "_$arch.*\.(msi|exe)$" } | Select-Object -First 1
+$matching = $rel.assets | Where-Object { $_.name -match "_$arch.*\.(msi|exe)$" }
+$asset = $matching | Where-Object { $_.name -match "\.exe$" } | Select-Object -First 1
+if (-not $asset) { $asset = $matching | Where-Object { $_.name -match "\.msi$" } | Select-Object -First 1 }
 
 if (-not $asset) {
-  Write-Host "尚未发布 Windows 版（当前仅 macOS）。"
+  Write-Host "最新 Release 中没有 Windows x64 安装包。"
   Write-Host "请关注 https://github.com/$Repo/releases"
   return
 }
@@ -20,7 +26,16 @@ $tmp = Join-Path $env:TEMP $asset.name
 Write-Host "→ 下载 $($asset.browser_download_url)"
 Invoke-WebRequest -UseBasicParsing $asset.browser_download_url -OutFile $tmp
 Write-Host "→ 启动安装程序"
-Start-Process -FilePath $tmp -Wait
+if ($tmp.EndsWith(".msi")) {
+  $installerProcess = Start-Process -FilePath "msiexec.exe" -ArgumentList @("/i", "`"$tmp`"") -Wait -PassThru
+} else {
+  $installerProcess = Start-Process -FilePath $tmp -Wait -PassThru
+}
+$successfulExitCodes = @(0, 3010) # 3010 = MSI 成功，但建议重启。
+if ($successfulExitCodes -notcontains $installerProcess.ExitCode) {
+  throw "EasyWork 安装程序退出码: $($installerProcess.ExitCode)"
+}
+if ($installerProcess.ExitCode -eq 3010) { Write-Host "→ 安装成功；请重启 Windows 完成配置。" }
 
 # 本地推理运行时：统一 `llama`（llama.app，router 模式必需）。未检测到则自动经官方脚本安装。
 # 注：经典 `llama-server` 不再被采用（router 模式只认统一 `llama`）。

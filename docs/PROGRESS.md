@@ -19,13 +19,13 @@
 - **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/知识库/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；WebView 启用显式 CSP，保留 IPC/daemon/预览来源并禁止远程脚本、对象插件与表单提交。
 - **外部渠道**：`@ew/im-connectors` Channel Gateway（adapter registry + 配置/状态 + allowlist + webhook 分发），core 侧 `ChannelOperations` 统一连接器生命周期、Feishu/WeChat 扫码 setup session、收件箱 read model 与 SSE invalidation；Telegram 已迁入同一抽象并支持可取消 long-poll；Feishu/Lark 默认走官方 SDK WebSocket 长连接并支持扫码创建应用，高级模式保留 webhook（URL verification、token/signature、加密回调解密、文本收发），且 public webhook 只在 `transport:webhook` + 验证 secret 配置完整时启用；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；渠道 secret 已迁到 macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI，旧 SQLite 明文自动迁移并去敏；Discord / 企业微信待补平台 adapter。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP / IM 非敏感配置）+ 系统渠道密钥存储。
-- **命令行（CLI）**：SEA daemon 二进制同时也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性；无位置参数时可从 stdin 读取，`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `kb ls·search·add·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。当前 macOS DMG 仅把该二进制作为 desktop sidecar，不会把 `easywork` 命令安装到 `PATH`。
-- **打包发布（macOS）**：daemon 打成单文件原生二进制（Node SEA，运行免 Node）；Tauri 出 dmg（Apple Silicon，内置 daemon + sqlite-vec）；`install.sh` 一键安装并自动备齐 llama 运行时（缺失经 llama.app 装）；当前版本清单统一为 `0.4.4`，`v*` tag 构建前强制校验 npm/Tauri/Cargo 版本一致，再发布到 Releases。
+- **命令行（CLI）**：SEA daemon 二进制同时也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性；无位置参数时可从 stdin 读取，`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `kb ls·search·add·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。macOS / Windows 安装包仅把该二进制作为 desktop sidecar，不会把 `easywork` 命令安装到 `PATH`。
+- **打包发布（macOS / Windows）**：daemon 打成单文件原生二进制（Node SEA，运行免 Node）；Tauri 出 macOS Apple Silicon dmg 与 Windows x64 NSIS/MSI（内置 daemon + sqlite-vec）；`install.sh` / `install.ps1` 安装后自动备齐 llama 运行时；版本、SEA `/health` 与 Windows 产物契约均为 CI 门禁。
 
 ### 🚧 待做
 
 - **渠道 adapter**：Discord / 企业微信待补（需实盘凭证联调）；Channel Gateway 抽象、Telegram adapter、Feishu/Lark WebSocket + webhook adapter、WeChat iLink QR + long-poll adapter 已落地。个人微信走腾讯 iLink bot 身份，群聊默认关闭；企业微信仍走后续 WeCom adapter。
-- **打包发布收尾**：macOS（Apple Silicon）dmg 已发；Intel / Windows / Linux 安装包 + 代码签名 / 公证 + 自动更新待做。
+- **打包发布收尾**：macOS Apple Silicon 与 Windows x64 构建链已落地；Intel / Windows ARM64 / Linux 安装包 + 代码签名 / 公证 + 自动更新待做。
 - **代码执行沙箱**：python / terminal 的独立 OS 级隔离（当前经 pi `bash` 工具 + 审批 4 档把守，无独立沙箱）。
 - **密钥存储**：渠道 secret 已迁系统安全存储；provider / MCP key 仍在 SQLite `settings`，待后续迁移。
 - **工作区 v2**：多会话回放 / 提交历史 / push-pull / per-hunk 暂存均已完成；仅剩内嵌可编辑编辑器（按需）。
@@ -36,6 +36,14 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-13 — Windows x64 构建与发布关键路径门禁
+
+- **Windows 构建**：普通 CI 在 `windows-latest` 构建 NSIS；`v*` release 同时构建 NSIS + MSI 并上传，sidecar 为 `easywork.exe`，随包携带 `vec0.dll`。
+- **跨平台 SEA**：构建脚本从 shell 字符串改为 Node CLI + 参数数组调用，并固定本地 `postject`；兼容 Windows 路径及 Node 24/26 SEA argv 差异。
+- **关键路径测试**：新增 Windows workflow、发布产物契约和 daemon smoke 测试；真实 SEA 冒烟会启动打包二进制、请求 `/health` 后回收进程。
+- **安装器**：`install.ps1` 启用 Windows x64 Release 下载，优先 NSIS，MSI 回退走 `msiexec`。
+- **验证**：本机真实 macOS SEA 重建与 `/health` smoke 已通过；Windows 原生 NSIS/MSI 由新增 GitHub Actions runner 验证。
 
 ## 2026-07-13 — SSE 断流、渠道密钥、Desktop CSP 与发布版本收口
 
