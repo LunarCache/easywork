@@ -5,6 +5,7 @@ import { getClient } from "../lib/client.js";
 import { autoGrowComposer, focusComposerEnd, resetComposer } from "../lib/composer.js";
 import {
   appendUserTurn,
+  finishAssistantTurn,
   findLastUser,
   markLastAssistantCancelled,
   replaceLastAssistantTurn,
@@ -193,7 +194,7 @@ export function Chat({
         "✓ export › preserves CSV download path (31ms)\n\n" +
         "Test Files  1 passed (1)\n     Tests  12 passed (12)\n  Duration  1.92s";
       setMsgs([
-        { role: "user", raw: "/api/export 在大工作区会 504。改成流式 NDJSON + 游标分页，保留 CSV 下载。", reasoning: "", tools: [], at: Date.now() },
+        { role: "user", raw: "/api/export 在大工作区会 504。改成流式 NDJSON + 游标分页，保留 CSV 下载。", reasoning: "", tools: [], displayAt: Date.now() },
         {
           role: "assistant",
           raw: "完成。`/api/export` 现在流式 NDJSON、按 `?cursor=` 分页，CSV 仍走缓冲路径（封顶 10k 行）。50k 行工作区峰值内存 **~480 MB → ~12 MB**。",
@@ -269,7 +270,7 @@ export function Chat({
       .then((r) => setNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
       .catch(() => setNotice("压缩失败"));
   }, [threadId]);
-  const contextUsage = composerUsageState(usage, contexts[model]);
+  const contextUsage = composerUsageState(usage, contexts[model], msgs);
   const contextPct = contextUsage.pct;
   const contextTitle = contextUsage.title;
 
@@ -354,7 +355,7 @@ export function Chat({
       if (!ac.signal.aborted)
         apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
     } finally {
-      apply((m) => (m.end ? m : { ...m, end: Date.now() })); // 盖本轮结束时刻 → 「已工作 N 分」
+      apply((m) => finishAssistantTurn(m)); // 盖本轮结束时刻 → 「已工作 N 分」+ 助手消息时间戳
       setBusy(false);
       setNotice(null); // 本轮收尾即清掉瞬态提示（重试/压缩），避免以工具/错误结尾时残留
     }
@@ -550,7 +551,14 @@ export function Chat({
               </div>
               <div className="composer-bar-right">
                 <ModelSelect models={models} sources={modelSources} value={model} onChange={setModel} up align="right" variant="strip" />
-                {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} testId="chat-context-usage" />}
+                {contextPct != null && (
+                  <ComposerUsagePill
+                    pct={contextPct}
+                    title={contextTitle}
+                    parts={contextUsage.parts}
+                    testId="chat-context-usage"
+                  />
+                )}
                 {busy ? (
                   <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
                     <StopIcon size={15} fill="currentColor" />

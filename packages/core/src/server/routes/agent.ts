@@ -129,6 +129,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     let sawFinal = false;
 
     const userText = lastUser?.role === "user" ? messageText(lastUser.content) : "";
+    const runStartedAt = new Date().toISOString();
     // 多模态：从本轮用户消息抽出图片片段（base64）→ 透传给 pi（视觉模型 mmproj）。
     // 仅取当前轮；历史轮的图片由 pi 会话上下文自持（按 threadId resume）。
     const userImages =
@@ -187,7 +188,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
             role: "user",
             seq: repo.nextSeq(threadId),
             parts: normalizeContent(lastUser.content),
-            createdAt: new Date().toISOString(),
+            createdAt: runStartedAt,
           });
         }
         for (const m of recorded) {

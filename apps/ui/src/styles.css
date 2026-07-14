@@ -1036,8 +1036,24 @@ details.toolcard[open] > summary .chev { transform: rotate(90deg); }
 .composer-strip-pill.usage.warn .ctx-ring svg circle:last-child { stroke: var(--color-warning); }
 .composer-strip-pill.usage.hot { color: var(--err); }
 .composer-strip-pill.usage.hot .ctx-ring svg circle:last-child { stroke: var(--err); }
-.composer-usage-tooltip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 60; width: max-content; max-width: min(320px, 70vw); padding: 7px 9px; border-radius: var(--r); background: var(--tx-0); color: var(--bg); box-shadow: var(--shadow-2); font: 500 11.5px/1.4 var(--font); white-space: normal; opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; transition: opacity var(--ease) 0.12s, transform var(--ease) 0.12s, visibility 0s linear 0.12s; }
+.composer-usage-tooltip { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 60; width: max-content; min-width: 268px; max-width: min(340px, 80vw); padding: 10px 11px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-elev); color: var(--tx-0); box-shadow: var(--shadow-2); font: 500 11.5px/1.4 var(--font); white-space: normal; opacity: 0; visibility: hidden; transform: translateY(3px); pointer-events: none; transition: opacity var(--ease) 0.12s, transform var(--ease) 0.12s, visibility 0s linear 0.12s; }
 .composer-usage:hover .composer-usage-tooltip, .composer-usage:focus-within .composer-usage-tooltip { opacity: 1; visibility: visible; transform: translateY(0); transition-delay: 0s; }
+.composer-usage-summary { display: block; padding: 0 2px 8px; color: var(--tx-0); font-weight: 600; border-bottom: 1px solid var(--border-soft); }
+.composer-usage-parts { display: grid; gap: 6px; padding: 8px 2px 1px; }
+.composer-usage-part { display: grid; grid-template-columns: 8px minmax(84px, 1fr) auto 42px; align-items: center; column-gap: 7px; }
+.composer-usage-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tx-2); }
+.composer-usage-dot.unclassified { background: var(--accent); }
+.composer-usage-dot.user { background: var(--grn); }
+.composer-usage-dot.assistant { background: var(--color-warning); }
+.composer-usage-dot.tools { background: var(--tx-1); }
+.composer-usage-dot.output { background: var(--color-warning); }
+.composer-usage-dot.other { background: var(--tx-1); }
+.composer-usage-dot.available { background: var(--border); }
+.composer-usage-label { color: var(--tx-1); }
+.composer-usage-tokens, .composer-usage-pct { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.composer-usage-tokens { color: var(--tx-0); }
+.composer-usage-pct { color: var(--tx-2); }
+.composer-usage-note { display: block; padding: 7px 2px 0; color: var(--tx-2); font-size: 10.5px; border-top: 1px solid var(--border-soft); }
 
 /* 上下文下拉菜单（项目 / 分支）。 */
 .ctx-menu { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 50; min-width: 280px; max-width: 360px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); padding: 5px; display: flex; flex-direction: column; animation: pop 0.16s var(--ease); }

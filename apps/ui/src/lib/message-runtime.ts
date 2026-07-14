@@ -19,7 +19,7 @@ export function toUserContent(text: string, images: UiImage[]): ChatMessage["con
 export function appendUserTurn(msgs: UiMsg[], text: string, images: UiImage[]) {
   return [
     ...msgs,
-    { role: "user" as const, raw: text, reasoning: "", tools: [], at: Date.now(), ...(images.length ? { images } : {}) },
+    { role: "user" as const, raw: text, reasoning: "", tools: [], displayAt: Date.now(), ...(images.length ? { images } : {}) },
     { role: "assistant" as const, raw: "", reasoning: "", tools: [] },
   ];
 }
@@ -42,6 +42,11 @@ export function updateLastAssistant(msgs: UiMsg[], fn: (msg: UiMsg) => UiMsg) {
   const next = msgs.slice();
   next[next.length - 1] = fn(next[next.length - 1]!);
   return next;
+}
+
+export function finishAssistantTurn(msg: UiMsg, endedAt = Date.now()): UiMsg {
+  if (msg.end) return msg;
+  return { ...msg, end: endedAt, displayAt: endedAt };
 }
 
 export function markLastAssistantCancelled(msgs: UiMsg[]) {

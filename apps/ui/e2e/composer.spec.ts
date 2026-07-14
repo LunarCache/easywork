@@ -57,7 +57,7 @@ test.describe("composer e2e", () => {
     await expectBorderless(page.getByTestId("workspace-image-strip").locator("img"));
   });
 
-  test("聊天与工作区的上下文圆环隐藏数字，并在悬停时显示用量详情", async ({ page, openApp, client, info, workspaceDir }) => {
+  test("聊天与工作区的上下文圆环隐藏数字，并在悬停时显示内容分布", async ({ page, openApp, client, info, workspaceDir }) => {
     const project = await client.createProject({ name: "Context Usage Workspace", workspaceDir });
     await page.route(`${info.baseUrl}/models`, async (route) => {
       await route.fulfill({
@@ -81,7 +81,11 @@ test.describe("composer e2e", () => {
     await expect(chatUsage).toBeVisible();
     await expect(chatUsage).not.toContainText("25%");
     await chatUsage.hover();
-    await expect(page.getByTestId("chat-context-usage-tooltip")).toHaveText("上下文已用 25% · 8192/32768 tokens");
+    await expect(page.getByTestId("chat-context-usage-tooltip")).toContainText("上下文已用 26.6% · 8,704/32,768 tokens");
+    await expect(page.getByTestId("chat-context-usage-unclassified")).toHaveText("其余输入（系统等）~8,19225%");
+    await expect(page.getByTestId("chat-context-usage-output")).toHaveText("本轮输出5121.6%");
+    await expect(page.getByTestId("chat-context-usage-available")).toHaveText("可用空间24,06473.4%");
+    await expect(page.getByTestId("chat-context-usage-tooltip")).toContainText("内容分类为估算");
     await expect(page.getByTestId("chat-context-usage-tooltip")).toBeVisible();
 
     await page.getByTestId(`sidebar-project-${project.id}`).click();
@@ -89,7 +93,11 @@ test.describe("composer e2e", () => {
     await expect(workspaceUsage).toBeVisible();
     await expect(workspaceUsage).not.toContainText("25%");
     await workspaceUsage.hover();
-    await expect(page.getByTestId("workspace-context-usage-tooltip")).toHaveText("上下文已用 25% · 8192/32768 tokens");
+    await expect(page.getByTestId("workspace-context-usage-tooltip")).toContainText("上下文已用 26.6% · 8,704/32,768 tokens");
+    await expect(page.getByTestId("workspace-context-usage-unclassified")).toHaveText("其余输入（系统等）~8,19225%");
+    await expect(page.getByTestId("workspace-context-usage-output")).toHaveText("本轮输出5121.6%");
+    await expect(page.getByTestId("workspace-context-usage-available")).toHaveText("可用空间24,06473.4%");
+    await expect(page.getByTestId("workspace-context-usage-tooltip")).toContainText("内容分类为估算");
     await expect(page.getByTestId("workspace-context-usage-tooltip")).toBeVisible();
   });
 

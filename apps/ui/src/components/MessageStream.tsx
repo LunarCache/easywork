@@ -25,7 +25,20 @@ import {
 
 function fmtTime(ms: number): string {
   try {
-    return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const date = new Date(ms);
+    const now = new Date();
+    const sameDay = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+    return sameDay
+      ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : date.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
+function fullTime(ms: number): string {
+  try {
+    return new Date(ms).toLocaleString();
   } catch {
     return "";
   }
@@ -632,7 +645,11 @@ export function MessageStream({
               <div className="cv-col">
                 <div className="cv-head">
                   <span className="cv-name">You</span>
-                  {m.at && <span className="cv-time">{fmtTime(m.at)}</span>}
+                  {m.displayAt != null && (
+                    <time className="cv-time" dateTime={new Date(m.displayAt).toISOString()} title={fullTime(m.displayAt)}>
+                      {fmtTime(m.displayAt)}
+                    </time>
+                  )}
                 </div>
                 {m.images && m.images.length > 0 && (
                   <div className="cv-images">
@@ -700,6 +717,7 @@ export function MessageStream({
         const live = busy && isLast;
         const blocks = m.blocks ?? [];
         const lastIdx = blocks.length - 1;
+        const assistantTimestamp = m.displayAt ?? m.end ?? m.start;
         return (
           <div key={i} className="cv-msg assistant">
             <span className="cv-avatar bot">
@@ -806,10 +824,18 @@ export function MessageStream({
                   </details>
                 );
               })()}
-              {answer && !live && (
+              {!live && (answer || assistantTimestamp != null) && (
                 <div className="cv-actions">
-                  <CopyButton text={answer} className="cv-action" label="复制" />
-                  {(m.end ?? m.start) != null && <span className="cv-msg-time">{fmtTime((m.end ?? m.start)!)}</span>}
+                  {answer && <CopyButton text={answer} className="cv-action" label="复制" />}
+                  {assistantTimestamp != null && (
+                    <time
+                      className="cv-msg-time"
+                      dateTime={new Date(assistantTimestamp).toISOString()}
+                      title={fullTime(assistantTimestamp)}
+                    >
+                      {fmtTime(assistantTimestamp)}
+                    </time>
+                  )}
                 </div>
               )}
               {blocks.length === 0 && live && (

@@ -38,8 +38,8 @@ export interface UiMsg {
   /** 有序时间线（渲染源）：思考/工具/文本按发生顺序排列。 */
   blocks?: UiBlock[];
   images?: UiImage[];
-  /** 用户消息发送时刻（epoch ms），用于气泡时间戳；历史消息无此字段。 */
-  at?: number;
+  /** 消息时刻（epoch ms），用于用户气泡与助手回答时间戳。 */
+  displayAt?: number;
   start?: number;
   thinkEnd?: number;
   /** 本轮结束时刻（epoch ms），用于「已工作 N 分」耗时；运行中未设。 */
@@ -82,7 +82,8 @@ export function messageText(content: unknown): string {
 }
 
 export function modelLabel(m: string): string {
-  if (m.includes("/") || m.includes("\\")) return (m.split(/[/\\]/).pop() ?? m).replace(/\.gguf$/i, "");
+  if (m.includes("/") || m.includes("\\"))
+    return (m.split(/[/\\]/).pop() ?? m).replace(/\.gguf$/i, "");
   return m;
 }
 
@@ -108,7 +109,12 @@ export function toolDisplayPatch(display: unknown): Partial<UiTool> {
       patch.html = d.html;
       if (d.title) patch.htmlTitle = d.title;
     } else if (d.kind === "diff" && typeof d.after === "string" && typeof d.path === "string") {
-      patch.diff = { path: d.path, before: d.before ?? null, after: d.after, unified: d.unified ?? null };
+      patch.diff = {
+        path: d.path,
+        before: d.before ?? null,
+        after: d.after,
+        unified: d.unified ?? null,
+      };
     }
   }
   return patch;
@@ -125,6 +131,13 @@ export interface StoredMsg {
   parts: StoredPart[];
   toolCalls?: { id: string; name: string; arguments: string }[];
   toolResults?: { content: unknown; isError?: boolean; display?: unknown }[];
+  createdAt?: string;
+}
+
+function storedTimestamp(createdAt: string | undefined): number | undefined {
+  if (!createdAt) return undefined;
+  const timestamp = Date.parse(createdAt);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
 function imagesOf(parts: StoredPart[]): UiImage[] {
@@ -151,11 +164,21 @@ export function storedToUiMsgs(list: StoredMsg[]): UiMsg[] {
     if (m.role === "user") {
       flush();
       const imgs = imagesOf(m.parts);
-      out.push({ role: "user", raw: text, reasoning: "", tools: [], ...(imgs.length ? { images: imgs } : {}) });
+      const displayAt = storedTimestamp(m.createdAt);
+      out.push({
+        role: "user",
+        raw: text,
+        reasoning: "",
+        tools: [],
+        ...(imgs.length ? { images: imgs } : {}),
+        ...(displayAt != null ? { displayAt } : {}),
+      });
       continue;
     }
     if (m.role === "assistant") {
       if (!bubble) bubble = { role: "assistant", raw: "", reasoning: "", tools: [], blocks: [] };
+      const displayAt = storedTimestamp(m.createdAt);
+      if (displayAt != null) bubble.displayAt = displayAt;
       // 按存档顺序重建时间线块：思考(reasoning) / 文本(text) 交织。
       for (const p of m.parts) {
         if (p.type === "reasoning" && p.text) {
@@ -174,6 +197,8 @@ export function storedToUiMsgs(list: StoredMsg[]): UiMsg[] {
       continue;
     }
     if (m.role === "tool" && bubble) {
+      const displayAt = storedTimestamp(m.createdAt);
+      if (displayAt != null) bubble.displayAt = displayAt;
       const r = m.toolResults?.[0];
       while (pending < bubble.tools.length && bubble.tools[pending]!.result != null) pending++;
       if (pending < bubble.tools.length) {
@@ -205,7 +230,9 @@ function closeReasoning(blocks: UiBlock[], now: number): UiBlock[] {
 
 /** 在时间线上更新某工具块（按 id）。 */
 function patchToolBlock(blocks: UiBlock[], id: string, patch: Partial<UiTool>): UiBlock[] {
-  return blocks.map((b) => (b.kind === "tool" && b.tool.id === id ? { kind: "tool", tool: { ...b.tool, ...patch } } : b));
+  return blocks.map((b) =>
+    b.kind === "tool" && b.tool.id === id ? { kind: "tool", tool: { ...b.tool, ...patch } } : b,
+  );
 }
 
 export function applyAgentEvent(m: UiMsg, ev: AgentEvent): UiMsg {
@@ -215,7 +242,8 @@ export function applyAgentEvent(m: UiMsg, ev: AgentEvent): UiMsg {
       const now = Date.now();
       const raw = m.raw + ev.text;
       const start = m.start ?? now;
-      const ended = raw.includes("</think>") || (!!m.reasoning && splitThink(raw).answer.length > 0);
+      const ended =
+        raw.includes("</think>") || (!!m.reasoning && splitThink(raw).answer.length > 0);
       const thinkEnd = m.thinkEnd ?? (ended ? now : undefined);
       // 时间线：合并进末尾文本块，否则（思考/工具之后）新开文本块。
       const nb = closeReasoning(blocks, now);
@@ -236,14 +264,21 @@ export function applyAgentEvent(m: UiMsg, ev: AgentEvent): UiMsg {
       return { ...m, reasoning: m.reasoning + ev.text, start: m.start ?? now, blocks: blocks2 };
     }
     case "tool-start": {
-      const tool: UiTool = { id: ev.call.id, name: ev.call.name, args: ev.call.arguments, status: "running" };
+      const tool: UiTool = {
+        id: ev.call.id,
+        name: ev.call.name,
+        args: ev.call.arguments,
+        status: "running",
+      };
       const nb = closeReasoning(blocks, Date.now());
       return { ...m, tools: [...m.tools, tool], blocks: [...nb, { kind: "tool", tool }] };
     }
     case "tool-progress":
       return {
         ...m,
-        tools: m.tools.map((t) => (t.id === ev.callId ? { ...t, output: (t.output ?? "") + ev.chunk } : t)),
+        tools: m.tools.map((t) =>
+          t.id === ev.callId ? { ...t, output: (t.output ?? "") + ev.chunk } : t,
+        ),
         blocks: blocks.map((b) =>
           b.kind === "tool" && b.tool.id === ev.callId
             ? { kind: "tool", tool: { ...b.tool, output: (b.tool.output ?? "") + ev.chunk } }

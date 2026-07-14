@@ -5,6 +5,7 @@ import { getClient } from "../lib/client.js";
 import { autoGrowComposer, focusComposerEnd, resetComposer } from "../lib/composer.js";
 import {
   appendUserTurn,
+  finishAssistantTurn,
   findLastUser,
   markLastAssistantCancelled,
   replaceLastAssistantTurn,
@@ -180,7 +181,7 @@ export function Workspace({
       .then((r) => setNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
       .catch(() => setNotice("压缩失败"));
   }, [threadId]);
-  const contextUsage = composerUsageState(usage, contexts[model]);
+  const contextUsage = composerUsageState(usage, contexts[model], msgs);
   const contextPct = contextUsage.pct;
   const contextTitle = contextUsage.title;
   const slash = useSlashPalette(input, setInput, {
@@ -339,7 +340,7 @@ export function Workspace({
       if (!ac.signal.aborted)
         apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
     } finally {
-      apply((m) => (m.end ? m : { ...m, end: Date.now() })); // 盖本轮结束时刻 → 「已工作 N 分」
+      apply((m) => finishAssistantTurn(m)); // 盖本轮结束时刻 → 「已工作 N 分」+ 助手消息时间戳
       setBusy(false);
       setNotice(null); // 本轮收尾即清掉瞬态提示，避免以工具/错误结尾时残留
     }
@@ -528,7 +529,14 @@ export function Workspace({
               </div>
               <div className="composer-bar-right">
                 <ModelSelect models={models} sources={modelSources} value={model} onChange={setModel} up align="right" variant="strip" />
-                {contextPct != null && <ComposerUsagePill pct={contextPct} title={contextTitle} testId="workspace-context-usage" />}
+                {contextPct != null && (
+                  <ComposerUsagePill
+                    pct={contextPct}
+                    title={contextTitle}
+                    parts={contextUsage.parts}
+                    testId="workspace-context-usage"
+                  />
+                )}
                 {busy ? (
                   <button className="csend stop" onClick={stop} title="停止输出（本轮不计入上下文）">
                     <StopIcon size={15} fill="currentColor" />
