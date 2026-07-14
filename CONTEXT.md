@@ -32,6 +32,18 @@ _Avoid_: extracted fact, permanent fact
 The conversation recorded as provenance for an Extracted Fact or Skill Candidate. Deleting it removes artifacts it solely owns and removes its evidence from multi-source candidates.
 _Avoid_: memory scope, workspace
 
+**Agent Turn**:
+A bounded interaction that starts with one user submission and ends with a final result, cancellation, or error. It may include reasoning, tool activity, approvals, usage, and artifacts.
+_Avoid_: conversation, message, agent session
+
+**Workbench View Session**:
+The lifecycle of one open view in the workbench. Different view kinds may have different restoration rules.
+_Avoid_: dock tab, panel, window
+
+**Provider Model Configuration**:
+The provider-scoped description of a model's identity, capabilities, and protocol behavior that authoritatively determines its runtime model.
+_Avoid_: model preference, catalog entry, runtime model
+
 **Skill Candidate**:
 A proposed reusable procedure learned from one or more completed tasks. It is not discoverable or executable as a Skill until it passes review and is approved.
 _Avoid_: draft memory, global skill
