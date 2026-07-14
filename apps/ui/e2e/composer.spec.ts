@@ -148,6 +148,53 @@ test.describe("composer e2e", () => {
     await expect(page.getByTestId("file-viewer-name")).toHaveText("summary.md");
   });
 
+  test("绝对路径目标与相对文件列表指向同一文件时不重复显示", async ({ page, openApp, info }) => {
+    const absolutePath = "/Users/test/.easywork/workspace/chats/thread/shanghai-weather.html";
+    await page.route(`${info.baseUrl}/models`, async (route) => {
+      await route.fulfill({
+        json: {
+          routed: ["test-model"],
+          modelSources: [{ id: "test-model", kind: "engine", label: "Test", modelId: "test-model" }],
+          context: { "test-model": 32768 },
+          engines: [],
+        },
+      });
+    });
+    await page.route(`${info.baseUrl}/chat/*/files?*`, async (route) => {
+      await route.fulfill({ json: { entries: [{ path: "shanghai-weather.html", type: "file", size: 1024 }] } });
+    });
+    await page.route(`${info.baseUrl}/files/meta?*`, async (route) => {
+      await route.fulfill({
+        json: { name: "shanghai-weather.html", mime: "text/html", kind: "html", size: 1024, text: "<h1>上海天气</h1>" },
+      });
+    });
+    await page.route(`${info.baseUrl}/agent/run`, async (route) => {
+      const call = { id: "write-1", name: "write", arguments: JSON.stringify({ path: absolutePath, content: "<h1>上海天气</h1>" }) };
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: [
+          `data: ${JSON.stringify({ type: "tool-start", call })}\n\n`,
+          `data: ${JSON.stringify({ type: "tool-end", call, result: { content: "ok", display: { kind: "diff", path: absolutePath, before: null, after: "<h1>上海天气</h1>" } } })}\n\n`,
+          `data: ${JSON.stringify({ type: "text", text: "页面已生成。" })}\n\n`,
+          `data: ${JSON.stringify({ type: "final", message: { role: "assistant", content: "页面已生成。" } })}\n\n`,
+          `data: ${JSON.stringify({ type: "artifacts", artifacts: [{ path: "shanghai-weather.html", kind: "created", size: 1024 }] })}\n\n`,
+          "data: [DONE]\n\n",
+        ].join(""),
+      });
+    });
+
+    await openApp();
+    await page.getByTestId("chat-composer-input").fill("生成上海天气页面");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect(page.locator(".cv-changes-row")).toHaveCount(1);
+    await page.locator(".cv-changes-row").evaluate((element: HTMLElement) => element.click());
+
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(1);
+    await expect(page.locator(".side-dock .af-path")).toHaveText("shanghai-weather.html");
+    await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.html");
+  });
+
   test("聊天页关闭联网后从请求中排除 explore_web 和 http_get", async ({ page, openApp, info }) => {
     let requestBody: { excludeTools?: string[] } | null = null;
     await page.route(`${info.baseUrl}/models`, async (route) => {

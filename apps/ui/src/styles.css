@@ -1179,7 +1179,7 @@ details.toolcard[open] > summary .chev { transform: rotate(90deg); }
 /* 参数预览：单行省略、悬停看全（title），淡灰 mono，无重框 */
 .approval-arg { margin: 6px 0 0 23px; font-family: var(--font-mono); font-size: 12px; color: var(--tx-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* HTML 工件 */
+/* 旧会话 HTML 工件回放 */
 .artifact { margin: 6px 0 12px; border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-1); }
 .artifact-head { display: flex; align-items: center; gap: 6px; padding: 7px 11px; font-size: 12px; color: var(--text-2); background: var(--surface-2); border-bottom: 1px solid var(--border); }
 .artifact-head svg { color: var(--accent); }

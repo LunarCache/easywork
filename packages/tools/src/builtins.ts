@@ -133,31 +133,9 @@ export const exploreWebTool = defineTool({
   },
 });
 
-/**
- * 渲染 HTML 工件（仿 Unsloth render_html）。本轮只能调用一次（agent loop 的 one-shot 集合含本工具）。
- * HTML 通过 display 载荷送到 UI 的沙箱 iframe 渲染；content 仅回喂一句确认（避免模型重复调用）。
- */
-export const renderHtmlTool = defineTool({
-  name: "render_html",
-  description:
-    "渲染一段 HTML 工件给用户预览（如图表、表格、小页面）。在沙箱中展示。本轮只调用一次；用户要求修改时才再次调用。",
-  schema: z.object({
-    code: z.string().describe("完整的 HTML 文档或片段"),
-    title: z.string().optional().describe("工件标题"),
-  }),
-  requiresApproval: "never",
-  run({ code, title }) {
-    return {
-      content: `已渲染 HTML 工件${title ? `「${title}」` : ""}并展示给用户。请勿重复调用本工具，除非用户要求修改。`,
-      display: { kind: "html", html: code, ...(title ? { title } : {}) },
-    };
-  },
-});
-
 export const builtinTools: Tool[] = [
   getTimeTool,
   calculatorTool,
   httpGetTool,
   exploreWebTool,
-  renderHtmlTool,
 ];

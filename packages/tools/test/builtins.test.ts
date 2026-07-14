@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolExecContext } from "@ew/shared";
-import { exploreWebTool } from "../src/builtins.js";
+import { builtinTools, exploreWebTool } from "../src/builtins.js";
 
 function ctx(): ToolExecContext {
   return {
@@ -49,5 +49,11 @@ describe("explore_web", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content).toContain("参数校验失败");
+  });
+});
+
+describe("builtin tools", () => {
+  it("does not expose the retired render_html tool", () => {
+    expect(builtinTools.map((tool) => tool.definition.name)).not.toContain("render_html");
   });
 });

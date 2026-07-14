@@ -4,6 +4,7 @@ import { getClient } from "../lib/client.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { FileViewer } from "./FileViewer.js";
 import { fileType, formatFileSize } from "../lib/filetype.js";
+import { matchFileTarget } from "../lib/file-target.js";
 import type { UiMsg } from "../lib/agent-stream.js";
 import {
   ArrowLeftIcon,
@@ -224,11 +225,15 @@ function FilesTab({
 }) {
   const [sel, setSel] = useState<string | null>(null);
   const handledRef = useRef<number | null>(null);
+  const targetFile = useMemo(
+    () => (openTarget ? matchFileTarget(files, openTarget.path) : undefined),
+    [files, openTarget],
+  );
   // 交付卡可能指向超过列表默认深度的文件；合成一条可预览项，点击不依赖 FilesTab 是否已列到它。
   const visibleFiles = useMemo(() => {
-    if (!openTarget || files.some((file) => file.path === openTarget.path)) return files;
+    if (!openTarget || targetFile) return files;
     return [{ path: openTarget.path, type: "file" as const }, ...files];
-  }, [files, openTarget]);
+  }, [files, openTarget, targetFile]);
 
   // 选中文件刷新后消失（被删/改名）→ 收起预览。
   useEffect(() => {
@@ -238,13 +243,9 @@ function FilesTab({
   // 外部请求打开某文件（文件改动卡）→ 选中。按 nonce 去重（防文件列表轮询重复触发；连点同一文件 nonce 变 → 重新打开）。
   useEffect(() => {
     if (!openTarget || handledRef.current === openTarget.nonce) return;
-    // 路径优先精确匹配；不中（相对/绝对形式不一）则退化到 basename 匹配，避免静默无反应。
-    const want = openTarget.path;
-    const base = want.split(/[/\\]/).pop();
-    const hit = files.find((f) => f.path === want) ?? files.find((f) => f.path.split(/[/\\]/).pop() === base);
     handledRef.current = openTarget.nonce;
-    setSel(hit?.path ?? want);
-  }, [openTarget, files]);
+    setSel(targetFile?.path ?? openTarget.path);
+  }, [openTarget, targetFile]);
 
   if (visibleFiles.length === 0) return <DockEmpty>{emptyHint}</DockEmpty>;
   return (

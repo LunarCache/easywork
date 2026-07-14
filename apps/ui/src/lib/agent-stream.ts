@@ -89,8 +89,8 @@ export function modelLabel(m: string): string {
   return m;
 }
 
-/** 从工具结果的 display 载荷解析出 UI 富渲染补丁（来源/引用/HTML 工件/diff）。流式与历史回放共用。 */
-export function toolDisplayPatch(display: unknown): Partial<UiTool> {
+/** 从工具结果的 display 载荷解析 UI 富渲染补丁；HTML 仅在恢复旧会话历史时允许。 */
+export function toolDisplayPatch(display: unknown, allowHistoricalHtml = false): Partial<UiTool> {
   const patch: Partial<UiTool> = {};
   if (Array.isArray(display)) {
     patch.sources = (display as { title?: string; url?: string }[])
@@ -107,7 +107,7 @@ export function toolDisplayPatch(display: unknown): Partial<UiTool> {
       after?: string;
       unified?: string | null;
     };
-    if (d.kind === "html" && typeof d.html === "string") {
+    if (allowHistoricalHtml && d.kind === "html" && typeof d.html === "string") {
       patch.html = d.html;
       if (d.title) patch.htmlTitle = d.title;
     } else if (d.kind === "diff" && typeof d.after === "string" && typeof d.path === "string") {
@@ -209,7 +209,7 @@ export function storedToUiMsgs(list: StoredMsg[]): UiMsg[] {
         const t = bubble.tools[pending]!;
         t.result = text || (typeof r?.content === "string" ? r.content : "");
         t.status = r?.isError ? "error" : "done";
-        Object.assign(t, toolDisplayPatch(r?.display));
+        Object.assign(t, toolDisplayPatch(r?.display, true));
         pending++;
       }
     }

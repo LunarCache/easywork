@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyAgentEvent, storedToUiMsgs } from "./agent-stream.js";
+import { applyAgentEvent, storedToUiMsgs, toolDisplayPatch } from "./agent-stream.js";
 
 describe("storedToUiMsgs", () => {
   it("preserves stored timestamps on user and assistant conversation turns", () => {
@@ -22,6 +22,13 @@ describe("storedToUiMsgs", () => {
         displayAt: Date.parse(assistantAt),
       },
     ]);
+  });
+
+  it("renders HTML display only while restoring historical messages", () => {
+    const display = { kind: "html", html: "<h1>legacy</h1>", title: "Legacy" };
+
+    expect(toolDisplayPatch(display)).toEqual({});
+    expect(toolDisplayPatch(display, true)).toEqual({ html: "<h1>legacy</h1>", htmlTitle: "Legacy" });
   });
 
   it("uses the final stored entry time for an assistant turn containing tool messages", () => {

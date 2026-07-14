@@ -6,7 +6,6 @@ export {
   calculatorTool,
   httpGetTool,
   exploreWebTool,
-  renderHtmlTool,
 } from "./builtins.js";
 export { assertUrlAllowed, safeFetch, type SafeFetchOptions } from "./ssrf.js";
 export { resolveWorkspacePath, assertInsideWorkspace } from "./path-sandbox.js";

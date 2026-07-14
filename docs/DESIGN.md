@@ -130,7 +130,7 @@ POST /agent/run (packages/core/src/server/app.ts)
 
 ### 4.3 事件映射唯一边界
 
-`mapSessionEvent(ev): AgentEvent[]`（`session-host.ts`）是 pi→SSE 的**唯一**翻译边界（另一个边界是 `pi-adapt.ts` 给 `/v1` 网关）。映射：`message_update`→text/reasoning/error；`tool_execution_start`→tool-start；`tool_execution_end`→tool-end（把 `result.details` 提到 `result.display` 供 UI 渲染来源/引用/HTML 工件/diff）；`message_end`→usage；`agent_end`→final；`auto_retry_start`→retry（重试中提示）；`compaction_start/end`→compaction（end 带 `ok`〔中止/失败=false，不谎报成功〕+ token 增减）；`agent_end{willRetry}` **不发 final**（重试/压缩续写在即），`agent_end` 末条 assistant `stopReason:"error"` → **冒泡 `error`**（provider 在 loop 内报错时 pi 不发流式 error delta，否则会被吞成空 final）。`error` pi 事件必须映成 `AgentEvent.error`，**绝不伪装成正常结束**。
+`mapSessionEvent(ev): AgentEvent[]`（`session-host.ts`）是 pi→SSE 的**唯一**翻译边界（另一个边界是 `pi-adapt.ts` 给 `/v1` 网关）。映射：`message_update`→text/reasoning/error；`tool_execution_start`→tool-start；`tool_execution_end`→tool-end（把 `result.details` 提到 `result.display` 供 UI 渲染来源/引用/diff；旧会话的 HTML display 仅保留回放兼容）；`message_end`→usage；`agent_end`→final；`auto_retry_start`→retry（重试中提示）；`compaction_start/end`→compaction（end 带 `ok`〔中止/失败=false，不谎报成功〕+ token 增减）；`agent_end{willRetry}` **不发 final**（重试/压缩续写在即），`agent_end` 末条 assistant `stopReason:"error"` → **冒泡 `error`**（provider 在 loop 内报错时 pi 不发流式 error delta，否则会被吞成空 final）。`error` pi 事件必须映成 `AgentEvent.error`，**绝不伪装成正常结束**。
 
 `/v1` 的本地 proxy、云端 pi 与 OpenAI / Anthropic engine fallback 流全部复用同一断流纪律：监听 `raw.on("error")`，每次写入与结束前检查 `writableEnded/destroyed`，客户端中途断开只触发 abort，不再向已关闭 response 写 error / DONE / message_stop 帧。
 
@@ -403,7 +403,7 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 
 ### 12.8 瘦客户端连接 + Tauri sidecar
 
-连接解析优先级（`client.ts`）：Tauri runtime config（守护每次随机端口，不可持久化）> URL `?baseUrl=&token=`（持久化到 localStorage）> localStorage > `window.ewConfig` > Vite env / 默认 `127.0.0.1:8788`。**Tauri 壳启动时把守护当子进程拉起**（打包→Node-SEA 单文件 `daemon/easywork serve --port 0`，dev→`node $EW_DAEMON_ENTRY serve`），读其 stdout 首行 JSON `{baseUrl,token,pid}` 供 `get_config`；前端 `initRuntimeConfig()` 轮询拿到后 pin。WebView CSP 显式放行 `ipc:` / `http://ipc.localhost`、本地 daemon、data/blob 媒体和沙盒 frame，禁止远程脚本、object、form 与外部 `frame-ancestors`；现有 HTML 工件脚本因沙盒预览保留受控 inline 能力。
+连接解析优先级（`client.ts`）：Tauri runtime config（守护每次随机端口，不可持久化）> URL `?baseUrl=&token=`（持久化到 localStorage）> localStorage > `window.ewConfig` > Vite env / 默认 `127.0.0.1:8788`。**Tauri 壳启动时把守护当子进程拉起**（打包→Node-SEA 单文件 `daemon/easywork serve --port 0`，dev→`node $EW_DAEMON_ENTRY serve`），读其 stdout 首行 JSON `{baseUrl,token,pid}` 供 `get_config`；前端 `initRuntimeConfig()` 轮询拿到后 pin。WebView CSP 显式放行 `ipc:` / `http://ipc.localhost`、本地 daemon、data/blob 媒体和沙盒 frame，禁止远程脚本、object、form 与外部 `frame-ancestors`；HTML 文件预览及旧会话 HTML display 的沙盒渲染保留受控 inline 能力。
 
 ---
 
