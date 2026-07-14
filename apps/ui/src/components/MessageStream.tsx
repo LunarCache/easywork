@@ -16,7 +16,6 @@ import {
   SquareTerminalIcon,
   EditIcon,
   FileIcon,
-  CodeIcon,
   SparkIcon,
   LoaderIcon,
   CopyIcon,
@@ -584,14 +583,6 @@ export function ToolView({ t, onOpenUrl }: { t: UiTool; onOpenUrl?: (url: string
           )}
         </div>
       </details>
-      {t.html && (
-        <div className="artifact">
-          <div className="artifact-head">
-            <CodeIcon size={13} /> {t.htmlTitle || "HTML 工件"}
-          </div>
-          <iframe className="artifact-frame" sandbox="allow-scripts" title={t.htmlTitle || "artifact"} srcDoc={t.html} />
-        </div>
-      )}
     </div>
   );
 }

@@ -10,8 +10,6 @@ export interface UiTool {
   output?: string;
   status: "running" | "done" | "error";
   sources?: { title: string; url: string }[];
-  html?: string;
-  htmlTitle?: string;
   /** 工作区 fs_write/fs_edit 的 diff 载荷。 */
   diff?: { path: string; before: string | null; after: string; unified: string | null };
 }
@@ -89,8 +87,8 @@ export function modelLabel(m: string): string {
   return m;
 }
 
-/** 从工具结果的 display 载荷解析 UI 富渲染补丁；HTML 仅在恢复旧会话历史时允许。 */
-export function toolDisplayPatch(display: unknown, allowHistoricalHtml = false): Partial<UiTool> {
+/** 从工具结果的 display 载荷解析 UI 富渲染补丁。 */
+export function toolDisplayPatch(display: unknown): Partial<UiTool> {
   const patch: Partial<UiTool> = {};
   if (Array.isArray(display)) {
     patch.sources = (display as { title?: string; url?: string }[])
@@ -99,18 +97,13 @@ export function toolDisplayPatch(display: unknown, allowHistoricalHtml = false):
   } else if (display && typeof display === "object") {
     const d = display as {
       kind?: string;
-      html?: string;
-      title?: string;
       sources?: unknown;
       path?: string;
       before?: string | null;
       after?: string;
       unified?: string | null;
     };
-    if (allowHistoricalHtml && d.kind === "html" && typeof d.html === "string") {
-      patch.html = d.html;
-      if (d.title) patch.htmlTitle = d.title;
-    } else if (d.kind === "diff" && typeof d.after === "string" && typeof d.path === "string") {
+    if (d.kind === "diff" && typeof d.after === "string" && typeof d.path === "string") {
       patch.diff = {
         path: d.path,
         before: d.before ?? null,
@@ -209,7 +202,7 @@ export function storedToUiMsgs(list: StoredMsg[]): UiMsg[] {
         const t = bubble.tools[pending]!;
         t.result = text || (typeof r?.content === "string" ? r.content : "");
         t.status = r?.isError ? "error" : "done";
-        Object.assign(t, toolDisplayPatch(r?.display, true));
+        Object.assign(t, toolDisplayPatch(r?.display));
         pending++;
       }
     }

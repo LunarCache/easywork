@@ -24,11 +24,26 @@ describe("storedToUiMsgs", () => {
     ]);
   });
 
-  it("renders HTML display only while restoring historical messages", () => {
+  it("ignores retired HTML display payloads", () => {
     const display = { kind: "html", html: "<h1>legacy</h1>", title: "Legacy" };
 
     expect(toolDisplayPatch(display)).toEqual({});
-    expect(toolDisplayPatch(display, true)).toEqual({ html: "<h1>legacy</h1>", htmlTitle: "Legacy" });
+    const restored = storedToUiMsgs([
+      { role: "user", parts: [{ type: "text", text: "show legacy output" }] },
+      {
+        role: "assistant",
+        parts: [],
+        toolCalls: [{ id: "call-1", name: "render_html", arguments: "{}" }],
+      },
+      {
+        role: "tool",
+        parts: [{ type: "text", text: "legacy result" }],
+        toolResults: [{ content: "legacy result", display }],
+      },
+    ]);
+
+    expect(restored[1]?.tools[0]).not.toHaveProperty("html");
+    expect(restored[1]?.tools[0]).not.toHaveProperty("htmlTitle");
   });
 
   it("uses the final stored entry time for an assistant turn containing tool messages", () => {

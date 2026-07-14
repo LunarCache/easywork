@@ -519,7 +519,7 @@ export function mapSessionEvent(ev: AgentSessionEvent): AgentEvent[] {
         },
       ];
     case "tool_execution_end": {
-      // toPiTool 把 display 放进 pi 的 details；带回去供 UI 渲染来源/引用/diff（HTML 仅兼容旧历史）。
+      // toPiTool 把 display 放进 pi 的 details；带回去供 UI 渲染来源/引用/diff。
       const details = (ev.result as { details?: unknown } | undefined)?.details;
       return [
         {
