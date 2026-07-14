@@ -55,7 +55,6 @@ struct TerminalSession {
     info: TerminalSessionInfo,
     order: u64,
     title_index: usize,
-    #[cfg(windows)]
     shell_pid: Option<u32>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
@@ -187,7 +186,6 @@ impl TerminalSessionManager {
             .slave
             .spawn_command(command)
             .map_err(|error| format!("启动 shell 失败：{error}"))?;
-        #[cfg(windows)]
         let shell_pid = child.process_id();
         drop(pair.slave);
 
@@ -211,7 +209,6 @@ impl TerminalSessionManager {
             info: info.clone(),
             order,
             title_index,
-            #[cfg(windows)]
             shell_pid,
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
@@ -343,9 +340,11 @@ impl TerminalSessionManager {
             let Ok(master) = session.master.lock() else {
                 return true;
             };
-            if let (Some(fd), Some(shell_group)) =
-                (master.as_raw_fd(), master.process_group_leader())
-            {
+            let shell_group = session.shell_pid.and_then(|pid| {
+                let group = unsafe { libc::getpgid(pid as libc::pid_t) };
+                (group > 0).then_some(group)
+            });
+            if let (Some(fd), Some(shell_group)) = (master.as_raw_fd(), shell_group) {
                 let foreground_group = unsafe { libc::tcgetpgrp(fd) };
                 return foreground_group > 0 && foreground_group != shell_group;
             }
@@ -545,5 +544,61 @@ mod tests {
             .expect("create third terminal");
         assert_eq!(third.title, "终端 3");
         manager.close_all();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn active_foreground_process_requires_close_confirmation() {
+        let manager = TerminalSessionManager::default();
+        let cwd = std::env::current_dir().expect("current dir");
+        let session_info = manager
+            .create(
+                "workspace:foreground".to_string(),
+                cwd.to_string_lossy().into_owned(),
+                80,
+                24,
+            )
+            .expect("create terminal");
+
+        // The marker is encoded so the PTY input echo cannot satisfy the wait;
+        // seeing it proves the foreground child has started executing.
+        manager
+            .write(
+                &session_info.session_id,
+                concat!(
+                    r#"sh -c 'printf "\105\127\137\106\117\122\105\107\122\117\125\116\104\137\122\105\101\104\131\n"; sleep 30'"#,
+                    "\r"
+                ),
+            )
+            .expect("start foreground task");
+
+        let session = manager
+            .session(&session_info.session_id)
+            .expect("terminal session");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut captured = String::new();
+        while Instant::now() < deadline {
+            captured =
+                String::from_utf8_lossy(&session.stream.output.lock().expect("terminal output"))
+                    .into_owned();
+            if captured.contains("EW_FOREGROUND_READY") {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            captured.contains("EW_FOREGROUND_READY"),
+            "foreground task did not start; PTY output: {captured:?}"
+        );
+
+        let outcome = manager
+            .close(&session_info.session_id, false)
+            .expect("request terminal close");
+        if outcome == TerminalCloseOutcome::ConfirmationRequired {
+            manager
+                .close(&session_info.session_id, true)
+                .expect("force close terminal after confirmation check");
+        }
+        assert_eq!(outcome, TerminalCloseOutcome::ConfirmationRequired);
     }
 }
