@@ -1,18 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatMessage, Skill, ThinkLevel } from "@ew/shared";
+import type { Skill, ThinkLevel } from "@ew/shared";
 import type { ModelSourceInfo, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { autoGrowComposer, focusComposerEnd, resetComposer } from "../lib/composer.js";
-import {
-  appendUserTurn,
-  finishAssistantTurn,
-  findLastUser,
-  markLastAssistantCancelled,
-  replaceLastAssistantTurn,
-  toRunHistory,
-  toUserContent,
-  updateLastAssistant,
-} from "../lib/message-runtime.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
 import { ComposerContextPill, ComposerContextStrip, ComposerUsagePill } from "../components/ComposerContextStrip.js";
@@ -20,16 +10,7 @@ import { SideDock, type BrowserTarget } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
 import { THINK_LABEL, nextThink } from "../lib/slash.js";
-import {
-  applyAgentEvent,
-  isIncrementalAssistantEvent,
-  messageText,
-  storedToUiMsgs,
-  type StoredMsg,
-  type PendingApproval,
-  type UiImage,
-  type UiMsg,
-} from "../lib/agent-stream.js";
+import { storedToUiMsgs, type StoredMsg, type UiImage } from "../lib/agent-stream.js";
 import {
   loadDisabledSkills,
   loadThink,
@@ -39,6 +20,7 @@ import { composerUsageState } from "../lib/context-usage.js";
 import { useAvailableModel } from "../hooks/useAvailableModel.js";
 import { useComposerImages } from "../hooks/useComposerImages.js";
 import { useMessageScroll } from "../hooks/useMessageScroll.js";
+import { useAgentTurn } from "../hooks/useAgentTurn.js";
 import {
   ArrowUpIcon,
   BrainIcon,
@@ -72,6 +54,7 @@ const QUICK_ACTIONS: { label: string; action: "search" | "workspace" | "settings
 // 工具卡 / 消息渲染已抽到 components/MessageStream.tsx（聊天与工作区共用）。
 
 const DEMO = !!new URLSearchParams(location.search).get("demo");
+const FILE_TOOLS = new Set(["fs_write", "fs_edit", "run_command"]);
 
 export function Chat({
   models,
@@ -93,7 +76,6 @@ export function Chat({
   setDockOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const { model, setModel } = useAvailableModel(models);
-  const [msgs, setMsgs] = useState<UiMsg[]>([]);
   const [input, setInput] = useState("");
 
   useEffect(() => {
@@ -104,24 +86,56 @@ export function Chat({
     window.addEventListener("ew:set-composer-prompt", setPrompt);
     return () => window.removeEventListener("ew:set-composer-prompt", setPrompt);
   }, []);
-  const [busy, setBusy] = useState(false);
   const [thinkLevel, setThinkLevel] = useState<ThinkLevel>("off");
-  const [notice, setNotice] = useState<string | null>(null); // 重试/压缩等瞬态状态提示
   const [web, setWeb] = useState(true);
+  const [pageNotice, setPageNotice] = useState<string | null>(null);
+
+  const {
+    messages: msgs,
+    busy,
+    notice: turnNotice,
+    approval,
+    usage,
+    send: runTurn,
+    retry,
+    editRetry,
+    stop,
+    respondApproval,
+    restore,
+    setUsage,
+  } = useAgentTurn({
+    buildRequest: (history, regenerate) => {
+      if (!model) return null;
+      const excludeSkills = loadDisabledSkills();
+      return {
+        threadId,
+        model,
+        history,
+        excludeTools: web ? [] : ["explore_web", "http_get"],
+        thinkingLevel: thinkLevel,
+        ...(regenerate ? { regenerate: true } : {}),
+        ...(excludeSkills.length ? { excludeSkills } : {}),
+      };
+    },
+    onToolEnd: (event) => {
+      if (FILE_TOOLS.has(event.call.name)) void refreshFiles();
+    },
+    onComplete: () => {
+      onSaved();
+      void refreshFiles();
+    },
+  });
+  const notice = turnNotice ?? pageNotice;
 
   const learnCurrentConversation = async () => {
     try {
       const prepared = await getClient().prepareSkillLearning({ kind: "conversation", threadId });
       window.dispatchEvent(new CustomEvent("ew:learn-skill-compose", { detail: prepared }));
-      setNotice("已生成 Skill 学习提示，请检查后发送");
+      setPageNotice("已生成 Skill 学习提示，请检查后发送");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "无法从当前对话学习");
+      setPageNotice(error instanceof Error ? error.message : "无法从当前对话学习");
     }
   };
-  const [usage, setUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(
-    null,
-  );
-  const [approval, setApproval] = useState<PendingApproval | null>(null);
   const { images, setImages, fileRef, onPickImages, onPasteImages } = useComposerImages();
   // 右侧「工件」面板：本会话目录下产出的文件（fs 工具写入 / 命令生成的网页/构建物）。
   const [files, setFiles] = useState<WsEntry[]>([]);
@@ -131,10 +145,6 @@ export function Chat({
   const autoOpenedRef = useRef(false);
   const { scrollRef, showJump, onMessagesScroll, jumpToBottom } = useMessageScroll(msgs);
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  // 卸载（切换会话会因 key 重挂载）时中断在途的 agent 流。
-  useEffect(() => () => abortRef.current?.abort(), []);
 
   const refreshFiles = useCallback(async () => {
     if (DEMO) return;
@@ -194,7 +204,7 @@ export function Chat({
         "✓ export › paginates with cursor token (44ms)\n" +
         "✓ export › preserves CSV download path (31ms)\n\n" +
         "Test Files  1 passed (1)\n     Tests  12 passed (12)\n  Duration  1.92s";
-      setMsgs([
+      restore([
         { role: "user", raw: "/api/export 在大工作区会 504。改成流式 NDJSON + 游标分页，保留 CSV 下载。", reasoning: "", tools: [], displayAt: Date.now() },
         {
           role: "assistant",
@@ -232,14 +242,15 @@ export function Chat({
       try {
         const list = await getClient().threadMessages(threadId);
         if (cancelled) return;
-        setMsgs(storedToUiMsgs(list as unknown as StoredMsg[]));
+        const messages = storedToUiMsgs(list as unknown as StoredMsg[]);
+        restore(messages);
         // 回填该会话最后一轮的上下文用量 → 打开历史长会话即显示进度环（实测 token，含 system/记忆/工具开销）。
         const u = await getClient()
           .threadUsage(threadId)
           .catch(() => ({ usage: null }));
         if (!cancelled && u.usage) setUsage(u.usage);
       } catch {
-        if (!cancelled) setMsgs([]);
+        if (!cancelled) restore([]);
       }
     })();
     return () => {
@@ -265,11 +276,11 @@ export function Chat({
 
   // /compact：手动压缩上下文。
   const doCompact = useCallback(() => {
-    setNotice("压缩上下文中…");
+    setPageNotice("压缩上下文中…");
     void getClient()
       .compactThread(threadId)
-      .then((r) => setNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
-      .catch(() => setNotice("压缩失败"));
+      .then((r) => setPageNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
+      .catch(() => setPageNotice("压缩失败"));
   }, [threadId]);
   const contextUsage = composerUsageState(usage, contexts[model], msgs);
   const contextPct = contextUsage.pct;
@@ -287,111 +298,18 @@ export function Chat({
     onCompact: doCompact,
   });
 
-  const send = async (over?: { text: string; images: UiImage[]; regenerate?: boolean }) => {
+  const send = (over?: { text: string; images: UiImage[]; regenerate?: boolean }) => {
     const text = (over?.text ?? input).trim();
     const sentImages = over?.images ?? images;
     if ((!text && sentImages.length === 0) || !model || busy) return;
+    setPageNotice(null);
     if (!over) {
       // 普通发送才清空 composer；重试用上一次输入、不动输入框。
       setInput("");
       setImages([]);
       resetComposer(taRef.current);
     }
-    setBusy(true);
-    const history: ChatMessage[] = toRunHistory(msgs);
-    // 含图片时用多模态 content parts（走 mmproj 视觉模型）。
-    const userContent: ChatMessage["content"] = toUserContent(text, sentImages);
-    // 始终把本轮用户消息推进 history —— 后端据 history 末条取本轮 text/images（重新生成也要带原文）。
-    history.push({ role: "user", content: userContent });
-    if (over?.regenerate) {
-      // 重新生成：UI 保留末条用户消息（编辑场景把其文本更新为本轮 text；普通重试 text 不变），
-      // 移除其后旧助手回答，换成新的空助手（流式目标）。
-      setMsgs((cur) => replaceLastAssistantTurn(cur, text));
-    } else {
-      setMsgs((current) => appendUserTurn(current, text, sentImages));
-    }
-
-    const apply = (fn: (m: UiMsg) => UiMsg) => setMsgs((current) => updateLastAssistant(current, fn));
-
-    const excludeTools = web ? [] : ["explore_web", "http_get"];
-    const excludeSkills = loadDisabledSkills();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    const FS_TOOLS = new Set(["fs_write", "fs_edit", "run_command"]);
-    let pendingUsage: typeof usage = null;
-    try {
-      for await (const ev of getClient().runAgent(
-        {
-          threadId,
-          model,
-          history,
-          excludeTools,
-          thinkingLevel: thinkLevel,
-          ...(over?.regenerate ? { regenerate: true } : {}),
-          ...(excludeSkills.length ? { excludeSkills } : {}),
-        },
-        { signal: ac.signal },
-      )) {
-        if (ev.type === "usage") pendingUsage = ev.usage;
-        else if (ev.type === "approval-request")
-          setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });
-        else if (ev.type === "retry") setNotice(`重试中 (${ev.attempt}/${ev.maxAttempts})…`);
-        else if (ev.type === "compaction")
-          setNotice(ev.phase === "start" ? "压缩上下文中…" : ev.ok === false ? "压缩未完成" : "已压缩上下文");
-        else if (isIncrementalAssistantEvent(ev)) {
-          setNotice(null); // 有新输出即清掉瞬态提示（值未变时 React 自动跳过重渲染）
-          apply((m) => applyAgentEvent(m, ev));
-        } else if (ev.type === "final") {
-          if (pendingUsage) setUsage(pendingUsage);
-          apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
-        } else if (ev.type === "error") apply((m) => ({ ...m, raw: `${m.raw}\n\n[错误] ${ev.message}` }));
-        else if (ev.type === "tool-end") {
-          apply((m) => applyAgentEvent(m, ev));
-          if (FS_TOOLS.has(ev.call.name)) void refreshFiles(); // 文件类工具完成即刷新工件面板
-        } else apply((m) => applyAgentEvent(m, ev));
-      }
-      onSaved();
-      void refreshFiles();
-    } catch (e) {
-      if (!ac.signal.aborted)
-        apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
-    } finally {
-      apply((m) => finishAssistantTurn(m)); // 盖本轮结束时刻 → 「已工作 N 分」+ 助手消息时间戳
-      setBusy(false);
-      setNotice(null); // 本轮收尾即清掉瞬态提示（重试/压缩），避免以工具/错误结尾时残留
-    }
-  };
-
-  // 取消输出：中止在途请求（→ SSE 断开 → 后端回滚 pi 上下文、整轮不落库），并标记本条为已取消。
-  const stop = () => {
-    abortRef.current?.abort();
-    setApproval(null);
-    setMsgs((current) => markLastAssistantCancelled(current));
-  };
-
-  // 重新生成：用最后一条用户输入重跑（不动 composer），UI 替换旧回答，后端回滚上一轮保证上下文正确。
-  const retry = () => {
-    if (busy) return;
-    const lastUser = findLastUser(msgs);
-    if (!lastUser) return;
-    void send({ text: lastUser.raw, images: lastUser.images ?? [], regenerate: true });
-  };
-  // 编辑后重发：用改过的文本重跑（= 带新 text 的重新生成；保留原图）。
-  const editRetry = (text: string) => {
-    if (busy || !text.trim()) return;
-    const lastUser = findLastUser(msgs);
-    void send({ text, images: lastUser?.images ?? [], regenerate: true });
-  };
-
-  const respondApproval = async (verdict: "approve" | "approve-always" | "deny") => {
-    if (!approval) return;
-    const id = approval.id;
-    setApproval(null);
-    try {
-      await getClient().approveTool(id, verdict);
-    } catch {
-      /* 忽略：流可能已结束 */
-    }
+    void runTurn({ text, images: sentImages, regenerate: over?.regenerate });
   };
 
   return (

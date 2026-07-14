@@ -1,18 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApprovalMode, ChatMessage, Project, Skill, ThinkLevel } from "@ew/shared";
+import type { ApprovalMode, Project, Skill, ThinkLevel } from "@ew/shared";
 import type { GitRemoteInfo, GitStatus, ModelSourceInfo, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { autoGrowComposer, focusComposerEnd, resetComposer } from "../lib/composer.js";
-import {
-  appendUserTurn,
-  finishAssistantTurn,
-  findLastUser,
-  markLastAssistantCancelled,
-  replaceLastAssistantTurn,
-  toRunHistory,
-  toUserContent,
-  updateLastAssistant,
-} from "../lib/message-runtime.js";
 import { loadDisabledSkills, loadThink, saveThink } from "../lib/prefs.js";
 import { composerUsageState } from "../lib/context-usage.js";
 import { MessageStream } from "../components/MessageStream.js";
@@ -26,16 +16,8 @@ import { THINK_LABEL, nextThink } from "../lib/slash.js";
 import { useAvailableModel } from "../hooks/useAvailableModel.js";
 import { useComposerImages } from "../hooks/useComposerImages.js";
 import { useMessageScroll } from "../hooks/useMessageScroll.js";
-import {
-  applyAgentEvent,
-  isIncrementalAssistantEvent,
-  messageText,
-  storedToUiMsgs,
-  type PendingApproval,
-  type StoredMsg,
-  type UiMsg,
-  type UiImage,
-} from "../lib/agent-stream.js";
+import { useAgentTurn } from "../hooks/useAgentTurn.js";
+import { storedToUiMsgs, type StoredMsg, type UiImage } from "../lib/agent-stream.js";
 import {
   ArrowUpIcon,
   ShieldIcon,
@@ -68,6 +50,7 @@ const STARTERS: { label: string; prompt: string; Icon: typeof SparkIcon }[] = [
   { label: "改这个功能", prompt: "请直接帮我修改这个功能：", Icon: FileIcon },
   { label: "做个计划", prompt: "先别改代码，先给我一个实现计划：", Icon: SparkIcon },
 ];
+const MUTATING_TOOLS = new Set(["fs_write", "fs_edit", "run_command"]);
 
 export function Workspace({
   project,
@@ -109,7 +92,6 @@ export function Workspace({
   const { model, setModel } = useAvailableModel(models);
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>(project.approvalMode ?? "approve-each");
   const [permOpen, setPermOpen] = useState(false);
-  const [msgs, setMsgs] = useState<UiMsg[]>([]);
   const [input, setInput] = useState("");
 
   useEffect(() => {
@@ -120,11 +102,9 @@ export function Workspace({
     window.addEventListener("ew:set-composer-prompt", setPrompt);
     return () => window.removeEventListener("ew:set-composer-prompt", setPrompt);
   }, [project.id]);
-  const [busy, setBusy] = useState(false);
   const [thinkLevel, setThinkLevel] = useState<ThinkLevel>("off");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [pageNotice, setPageNotice] = useState<string | null>(null);
   const [projectSkills, setProjectSkills] = useState<Skill[]>([]);
-  const [approval, setApproval] = useState<PendingApproval | null>(null);
   const [git, setGit] = useState<GitStatus>({ repo: false, files: [] });
   const [branch, setBranch] = useState<string | undefined>(undefined);
   const [branches, setBranches] = useState<string[]>([]);
@@ -132,12 +112,51 @@ export function Workspace({
   const [browserTarget, setBrowserTarget] = useState<BrowserTarget | null>(null);
   const [dockTarget, setDockTarget] = useState<{ path: string; nonce: number } | null>(null);
   const [wsFiles, setWsFiles] = useState<WsEntry[]>([]);
-  const [usage, setUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(
-    null,
-  );
+  const {
+    messages: msgs,
+    busy,
+    notice: turnNotice,
+    approval,
+    usage,
+    send: runTurn,
+    retry,
+    editRetry,
+    stop,
+    respondApproval,
+    restore,
+    setUsage,
+  } = useAgentTurn({
+    buildRequest: (history, regenerate) => {
+      if (!model) return null;
+      const excludeSkills = loadDisabledSkills();
+      return {
+        threadId,
+        model,
+        history,
+        projectId: project.id,
+        thinkingLevel: thinkLevel,
+        ...(regenerate ? { regenerate: true } : {}),
+        ...(excludeSkills.length ? { excludeSkills } : {}),
+      };
+    },
+    beforeRun: async () => {
+      if (pendingMode.current) await pendingMode.current.catch(() => {});
+    },
+    onToolEnd: (event) => {
+      if (!MUTATING_TOOLS.has(event.call.name)) return;
+      void refreshGit();
+      void refreshWsFiles();
+    },
+    onComplete: () => {
+      onChanged();
+      void refreshGit();
+      void refreshWsFiles();
+      onThreadsChanged();
+    },
+  });
+  const notice = turnNotice ?? pageNotice;
   const { images, setImages, fileRef, onPickImages, onPasteImages } = useComposerImages();
   const { scrollRef, showJump, onMessagesScroll, jumpToBottom } = useMessageScroll(msgs);
-  const abortRef = useRef<AbortController | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -176,11 +195,11 @@ export function Workspace({
   );
   const cycleThink = () => changeThink(nextThink(thinkLevel));
   const doCompact = useCallback(() => {
-    setNotice("压缩上下文中…");
+    setPageNotice("压缩上下文中…");
     void getClient()
       .compactThread(threadId)
-      .then((r) => setNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
-      .catch(() => setNotice("压缩失败"));
+      .then((r) => setPageNotice(r.skipped ? "无活动会话，已跳过压缩" : `已压缩 ${r.tokensBefore ?? "?"}→${r.tokensAfter ?? "?"} tokens`))
+      .catch(() => setPageNotice("压缩失败"));
   }, [threadId]);
   const contextUsage = composerUsageState(usage, contexts[model], msgs);
   const contextPct = contextUsage.pct;
@@ -239,30 +258,27 @@ export function Workspace({
 
   // 切换/初始会话（threadId 由 App/会话列表 控制）→ 中断在途 + 载入历史。
   useEffect(() => {
-    abortRef.current?.abort();
-    setApproval(null);
-    setUsage(null);
+    // 与旧行为一致：加载完成前保留现有画面，只清理上一轮的在途状态和 usage。
+    restore(msgs);
     let cancelled = false;
     void (async () => {
       try {
         const list = await getClient().threadMessages(threadId);
         if (cancelled) return;
-        setMsgs(storedToUiMsgs(list as unknown as StoredMsg[]));
+        const messages = storedToUiMsgs(list as unknown as StoredMsg[]);
+        restore(messages);
         const u = await getClient()
           .threadUsage(threadId)
           .catch(() => ({ usage: null }));
         if (!cancelled && u.usage) setUsage(u.usage);
       } catch {
-        if (!cancelled) setMsgs([]);
+        if (!cancelled) restore([]);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [threadId]);
-
-  // 卸载（切换工作区会因 key 重挂载）时中断在途的 agent 流。
-  useEffect(() => () => abortRef.current?.abort(), []);
 
   // 审批档位变更的在途 PATCH：send() 前 await，避免「切档即发送」用到旧档位（服务端按 project 读取）。
   const pendingMode = useRef<Promise<unknown> | null>(null);
@@ -277,105 +293,18 @@ export function Workspace({
     pendingMode.current = p;
   };
 
-  const send = async (over?: { text: string; images: UiImage[]; regenerate?: boolean }) => {
+  const send = (over?: { text: string; images: UiImage[]; regenerate?: boolean }) => {
     const text = (over?.text ?? input).trim();
     const sentImages = over?.images ?? images;
     if ((!text && sentImages.length === 0) || !model || busy) return;
+    setPageNotice(null);
     if (!over) {
       // 普通发送才清空 composer；重试用上一次输入、不动输入框。
       setInput("");
       setImages([]);
       resetComposer(taRef.current);
     }
-    setBusy(true);
-    const history: ChatMessage[] = toRunHistory(msgs);
-    // 含图片时用多模态 content parts（走视觉模型）。
-    const userContent: ChatMessage["content"] = toUserContent(text, sentImages);
-    // 始终把本轮用户消息推进 history —— 后端据 history 末条取本轮 text/images（重新生成也要带原文）。
-    history.push({ role: "user", content: userContent });
-    if (over?.regenerate) {
-      // 重新生成：UI 保留末条用户消息（编辑场景把其文本更新为本轮 text；普通重试 text 不变），
-      // 移除其后旧助手回答，换成新的空助手（流式目标）。
-      setMsgs((current) => replaceLastAssistantTurn(current, text));
-    } else {
-      setMsgs((current) => appendUserTurn(current, text, sentImages));
-    }
-    const apply = (fn: (m: UiMsg) => UiMsg) => setMsgs((current) => updateLastAssistant(current, fn));
-    const ac = new AbortController();
-    abortRef.current = ac;
-    const excludeSkills = loadDisabledSkills();
-    const MUTATING = new Set(["fs_write", "fs_edit", "run_command"]);
-    let pendingUsage: typeof usage = null;
-    // 确保审批档位的在途 PATCH 已落库，再发起本轮（服务端按 project.approvalMode 把守危险工具）。
-    if (pendingMode.current) await pendingMode.current.catch(() => {});
-    try {
-      for await (const ev of getClient().runAgent(
-        { threadId, model, history, projectId: project.id, thinkingLevel: thinkLevel, ...(over?.regenerate ? { regenerate: true } : {}), ...(excludeSkills.length ? { excludeSkills } : {}) },
-        { signal: ac.signal },
-      )) {
-        if (ev.type === "usage") pendingUsage = ev.usage;
-        else if (ev.type === "approval-request") setApproval({ id: ev.id, toolName: ev.toolName, args: ev.args });
-        else if (ev.type === "retry") setNotice(`重试中 (${ev.attempt}/${ev.maxAttempts})…`);
-        else if (ev.type === "compaction")
-          setNotice(ev.phase === "start" ? "压缩上下文中…" : ev.ok === false ? "压缩未完成" : "已压缩上下文");
-        else if (isIncrementalAssistantEvent(ev)) {
-          setNotice(null);
-          apply((m) => applyAgentEvent(m, ev));
-        } else if (ev.type === "final") {
-          if (pendingUsage) setUsage(pendingUsage);
-          apply((m) => (m.raw ? m : { ...m, raw: messageText(ev.message.content) }));
-        } else if (ev.type === "error") apply((m) => ({ ...m, raw: `${m.raw}\n\n[错误] ${ev.message}` }));
-        else if (ev.type === "tool-end") {
-          apply((m) => applyAgentEvent(m, ev));
-          if (MUTATING.has(ev.call.name)) {
-            void refreshGit(); // 仅改文件/执行命令的工具才刷新 git 面板
-            void refreshWsFiles();
-          }
-        } else apply((m) => applyAgentEvent(m, ev));
-      }
-      onChanged();
-      void refreshGit();
-      void refreshWsFiles();
-      onThreadsChanged();
-    } catch (e) {
-      if (!ac.signal.aborted)
-        apply((m) => ({ ...m, raw: `${m.raw}\n\n[请求失败] ${e instanceof Error ? e.message : String(e)}` }));
-    } finally {
-      apply((m) => finishAssistantTurn(m)); // 盖本轮结束时刻 → 「已工作 N 分」+ 助手消息时间戳
-      setBusy(false);
-      setNotice(null); // 本轮收尾即清掉瞬态提示，避免以工具/错误结尾时残留
-    }
-  };
-
-  // 重新生成：用最后一条用户输入重跑（不动 composer），UI 替换旧回答，后端回滚上一轮保证上下文正确。
-  const retry = () => {
-    if (busy) return;
-    const lastUser = findLastUser(msgs);
-    if (!lastUser) return;
-    void send({ text: lastUser.raw, images: lastUser.images ?? [], regenerate: true });
-  };
-
-  const stop = () => {
-    abortRef.current?.abort();
-    setApproval(null);
-    setMsgs((current) => markLastAssistantCancelled(current));
-  };
-  // 编辑后重发：用改过的文本重跑（= 带新 text 的重新生成；保留原图）。
-  const editRetry = (text: string) => {
-    if (busy || !text.trim()) return;
-    const lastUser = findLastUser(msgs);
-    void send({ text, images: lastUser?.images ?? [], regenerate: true });
-  };
-
-  const respondApproval = async (verdict: "approve" | "approve-always" | "deny") => {
-    if (!approval) return;
-    const id = approval.id;
-    setApproval(null);
-    try {
-      await getClient().approveTool(id, verdict);
-    } catch {
-      /* ignore */
-    }
+    void runTurn({ text, images: sentImages, regenerate: over?.regenerate });
   };
 
   const empty = msgs.length === 0;
@@ -389,15 +318,15 @@ export function Workspace({
   })();
 
   const switchBranch = (name: string) => {
-    setNotice(`切换到分支 ${name}…`);
+    setPageNotice(`切换到分支 ${name}…`);
     void getClient()
       .gitSwitch(project.id, name)
       .then((r) => {
-        setNotice(r.ok ? null : `切换失败：${r.error ?? "未知错误"}`);
+        setPageNotice(r.ok ? null : `切换失败：${r.error ?? "未知错误"}`);
         void refreshGit();
         void refreshWsFiles();
       })
-      .catch(() => setNotice("切换分支失败"));
+      .catch(() => setPageNotice("切换分支失败"));
   };
 
   const startFrom = (prompt: string) => {
