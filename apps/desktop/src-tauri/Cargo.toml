@@ -19,3 +19,9 @@ serde_json = "1"
 portable-pty = "0.9"
 base64 = "0.22.1"
 libc = "0.2.186"
+
+[target.'cfg(windows)'.dependencies]
+sysinfo = "0.39.6"
+
+[dev-dependencies]
+sysinfo = "0.39.6"

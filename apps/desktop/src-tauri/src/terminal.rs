@@ -9,6 +9,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
+#[cfg(any(windows, test))]
+use sysinfo::{Pid, System};
 use tauri::ipc::Channel;
 use tauri::State;
 
@@ -35,6 +37,13 @@ pub enum TerminalEvent {
     Exit { code: Option<u32> },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalCloseOutcome {
+    Closed,
+    ConfirmationRequired,
+}
+
 #[derive(Default)]
 struct TerminalStreamState {
     output: Mutex<Vec<u8>>,
@@ -46,6 +55,8 @@ struct TerminalSession {
     info: TerminalSessionInfo,
     order: u64,
     title_index: usize,
+    #[cfg(windows)]
+    shell_pid: Option<u32>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
@@ -61,6 +72,31 @@ pub struct TerminalSessionManager {
 
 fn lock_error(label: &str) -> String {
     format!("{label} lock poisoned")
+}
+
+#[cfg(any(windows, test))]
+fn has_descendant_process(root_pid: u32) -> bool {
+    let system = System::new_all();
+    let root = Pid::from_u32(root_pid);
+    system.processes().keys().any(|candidate| {
+        if *candidate == root {
+            return false;
+        }
+        let mut current = *candidate;
+        for _ in 0..128 {
+            let Some(parent) = system.process(current).and_then(|process| process.parent()) else {
+                return false;
+            };
+            if parent == root {
+                return true;
+            }
+            if parent == current {
+                return false;
+            }
+            current = parent;
+        }
+        false
+    })
 }
 
 fn broadcast_output(stream: &TerminalStreamState, bytes: &[u8]) {
@@ -151,6 +187,8 @@ impl TerminalSessionManager {
             .slave
             .spawn_command(command)
             .map_err(|error| format!("启动 shell 失败：{error}"))?;
+        #[cfg(windows)]
+        let shell_pid = child.process_id();
         drop(pair.slave);
 
         let reader = pair
@@ -173,6 +211,8 @@ impl TerminalSessionManager {
             info: info.clone(),
             order,
             title_index,
+            #[cfg(windows)]
+            shell_pid,
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
             killer: Mutex::new(killer),
@@ -313,15 +353,19 @@ impl TerminalSessionManager {
         }
         #[cfg(windows)]
         {
-            // ConPTY 不暴露可移植的 foreground process group 查询；存活会话保守确认。
-            true
+            // ConPTY 不暴露 Unix 式 foreground process group；空闲 shell 无后代，
+            // 有仍存活的子孙进程时才视为前台任务并要求确认。
+            session
+                .shell_pid
+                .map(has_descendant_process)
+                .unwrap_or(false)
         }
     }
 
-    fn close(&self, session_id: &str, force: bool) -> Result<String, String> {
+    fn close(&self, session_id: &str, force: bool) -> Result<TerminalCloseOutcome, String> {
         let session = self.session(session_id)?;
         if !force && Self::has_foreground_process(&session) {
-            return Ok("confirmation_required".to_string());
+            return Ok(TerminalCloseOutcome::ConfirmationRequired);
         }
         let exited = session
             .stream
@@ -341,7 +385,7 @@ impl TerminalSessionManager {
             .lock()
             .map_err(|_| lock_error("terminal sessions"))?
             .remove(session_id);
-        Ok("closed".to_string())
+        Ok(TerminalCloseOutcome::Closed)
     }
 
     pub fn close_all(&self) {
@@ -420,7 +464,7 @@ pub fn terminal_close(
     session_id: String,
     force: bool,
     manager: State<'_, TerminalSessionManager>,
-) -> Result<String, String> {
+) -> Result<TerminalCloseOutcome, String> {
     manager.close(&session_id, force)
 }
 
@@ -428,6 +472,28 @@ pub fn terminal_close(
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[cfg(unix)]
+    #[test]
+    fn descendant_detection_distinguishes_idle_processes_from_active_children() {
+        let mut shell = std::process::Command::new("sh")
+            .args(["-c", "sleep 5 & wait"])
+            .spawn()
+            .expect("spawn shell with child");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut detected = false;
+        while Instant::now() < deadline {
+            if has_descendant_process(shell.id()) {
+                detected = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let _ = shell.kill();
+        let _ = shell.wait();
+        assert!(detected, "child process was not detected");
+        assert!(!has_descendant_process(u32::MAX));
+    }
 
     #[test]
     fn real_pty_accepts_input_and_keeps_terminal_titles_unique() {
@@ -468,7 +534,12 @@ mod tests {
         }
         assert!(captured.contains("EW_PTY_OK"), "PTY output: {captured:?}");
 
-        manager.close(&first.session_id, true).expect("close first");
+        assert_eq!(
+            manager
+                .close(&first.session_id, false)
+                .expect("close idle shell"),
+            TerminalCloseOutcome::Closed,
+        );
         let third = manager
             .create(scope.clone(), cwd.to_string_lossy().into_owned(), 80, 24)
             .expect("create third terminal");
