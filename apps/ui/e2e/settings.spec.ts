@@ -1,6 +1,35 @@
 import { test, expect } from "./fixtures.js";
 
 test.describe("settings e2e", () => {
+  test("通用页可启用 HF 镜像并持久化", async ({ page, openApp }) => {
+    await openApp();
+    await page.getByTestId("sidebar-settings").click();
+
+    const toggle = page.getByTestId("hf-mirror-toggle");
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await page.reload();
+    await page.getByTestId("sidebar-settings").click();
+    await expect(page.getByTestId("hf-mirror-toggle")).toHaveAttribute("aria-checked", "true");
+  });
+
+  test("模型搜索失败时显示明确错误", async ({ page, openApp }) => {
+    await page.route("**/models/search?*", async (route) => {
+      await route.fulfill({ status: 502, body: "upstream unavailable" });
+    });
+    await openApp();
+    await page.getByTestId("sidebar-settings").click();
+    await page.getByTestId("settings-nav-models").click();
+    await page.getByTitle("搜索并下载 HuggingFace GGUF 模型").click();
+    await page.getByPlaceholder(/搜索 HuggingFace GGUF 模型/).fill("qwen");
+    await page.getByRole("button", { name: "搜索", exact: true }).click();
+
+    await expect(page.getByTestId("models-search-error")).toContainText("搜索失败");
+    await expect(page.getByTestId("models-search-error")).toContainText("HF 镜像");
+  });
+
   test("可打开设置并记住上次分区", async ({ page, openApp }) => {
     await openApp();
 

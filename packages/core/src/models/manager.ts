@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { DownloadEvent, GGUFVariant, HFModelSummary, LocalModel } from "@ew/shared";
-import { HFClient } from "./hf.js";
+import { HFClient, HF_MIRROR_BASE, HF_OFFICIAL_BASE } from "./hf.js";
 import { downloadVariant, enumerateShards } from "./download.js";
 import { readGGUFHeader } from "./gguf.js";
 
@@ -28,6 +28,15 @@ export class ModelManager {
     this.modelsDir = opts.modelsDir;
     this.extraDirs = opts.extraDirs ?? [];
     this.hf = opts.hf ?? new HFClient({ fetch: opts.fetch });
+  }
+
+  setHfMirrorEnabled(enabled: boolean): void {
+    this.hf.setBaseUrl(enabled ? HF_MIRROR_BASE : HF_OFFICIAL_BASE);
+  }
+
+  hfSettings(): { useMirror: boolean; endpoint: string } {
+    const endpoint = this.hf.getBaseUrl();
+    return { useMirror: endpoint === HF_MIRROR_BASE, endpoint };
   }
 
   search(query: string, opts?: { limit?: number; ggufOnly?: boolean }): Promise<HFModelSummary[]> {

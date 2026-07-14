@@ -30,6 +30,78 @@ function makeCore(overrides: Partial<CreateCoreOptions> = {}): CoreServer {
 }
 
 describe("server route modules", () => {
+  it("persists the HF mirror setting and applies it to model discovery", async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ew-hf-settings-"));
+    const dbPath = path.join(tmpDir, "easywork.db");
+    const externalUrls: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      externalUrls.push(String(input));
+      return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const create = () => createCore({
+      token: "t",
+      dbPath,
+      memoryDbPath: ":memory:",
+      memoryDir: path.join(tmpDir!, "memory"),
+      skillLearningDbPath: ":memory:",
+      agentDir: path.join(tmpDir!, "pi-agent"),
+      fetch: fetchImpl,
+    });
+
+    core = create();
+    const initial = await core.app.inject({
+      method: "GET",
+      url: "/settings/huggingface",
+      headers: { authorization: "Bearer t" },
+    });
+    expect(initial.json()).toEqual({ useMirror: false, endpoint: "https://huggingface.co" });
+
+    const enabled = await core.app.inject({
+      method: "POST",
+      url: "/settings/huggingface",
+      headers: { authorization: "Bearer t" },
+      payload: { useMirror: true },
+    });
+    expect(enabled.json()).toEqual({ ok: true, useMirror: true, endpoint: "https://hf-mirror.com" });
+
+    const search = await core.app.inject({
+      method: "GET",
+      url: "/models/search?q=qwen",
+      headers: { authorization: "Bearer t" },
+    });
+    expect(search.statusCode).toBe(200);
+    expect(externalUrls.at(-1)).toMatch(/^https:\/\/hf-mirror\.com\/api\/models\?/);
+
+    await core.stop();
+    core = create();
+    const restored = await core.app.inject({
+      method: "GET",
+      url: "/settings/huggingface",
+      headers: { authorization: "Bearer t" },
+    });
+    expect(restored.json()).toEqual({ useMirror: true, endpoint: "https://hf-mirror.com" });
+  });
+
+  it("keeps the current HF endpoint when persisting the mirror setting fails", async () => {
+    core = makeCore();
+    vi.spyOn(core.repo, "setSetting").mockImplementation(() => {
+      throw new Error("database is read-only");
+    });
+
+    const response = await core.app.inject({
+      method: "POST",
+      url: "/settings/huggingface",
+      headers: { authorization: "Bearer t" },
+      payload: { useMirror: true },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(core.models.hfSettings()).toEqual({
+      useMirror: false,
+      endpoint: "https://huggingface.co",
+    });
+  });
+
   it("manages MCP server configs through HTTP routes", async () => {
     core = makeCore();
     const config = {

@@ -20,6 +20,7 @@ import {
   CheckIcon,
 } from "../icons.js";
 import { SkillAttentionBadge, type SkillAttention } from "../components/SkillAttentionBadge.js";
+import { getClient } from "../lib/client.js";
 
 export type SettingsSection = "general" | "models" | "channels" | "skills" | "mcp" | "memory";
 
@@ -172,6 +173,39 @@ function GeneralSettingsPane({
   theme: ThemePrefs;
   onThemeChange: (next: ThemePrefs) => void;
 }) {
+  const [hfMirror, setHfMirror] = useState<boolean | null>(null);
+  const [hfBusy, setHfBusy] = useState(false);
+  const [hfError, setHfError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getClient().getHuggingFaceSettings()
+      .then((settings) => {
+        if (active) setHfMirror(settings.useMirror);
+      })
+      .catch((error) => {
+        if (active) setHfError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const toggleHfMirror = async () => {
+    if (hfMirror === null || hfBusy) return;
+    const next = !hfMirror;
+    setHfBusy(true);
+    setHfError(null);
+    try {
+      const settings = await getClient().setHuggingFaceMirror(next);
+      setHfMirror(settings.useMirror);
+    } catch (error) {
+      setHfError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setHfBusy(false);
+    }
+  };
+
   return (
     <div className="set-group">
       <div className="set-row">
@@ -181,6 +215,29 @@ function GeneralSettingsPane({
         </div>
         <AppearanceSelect value={theme.appearance} onChange={(appearance) => onThemeChange({ ...theme, appearance })} />
       </div>
+      <div className="set-row">
+        <div className="set-row-info">
+          <div className="set-row-title">Hugging Face 镜像</div>
+          <div className="set-row-desc">
+            {hfMirror
+              ? "模型搜索、变体查询和下载使用 hf-mirror.com。"
+              : "默认使用 huggingface.co；国内网络访问不稳定时可启用镜像。"}
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-label="使用 Hugging Face 镜像"
+          aria-checked={hfMirror === true}
+          className={`set-toggle ${hfMirror ? "on" : ""}`}
+          data-testid="hf-mirror-toggle"
+          disabled={hfMirror === null || hfBusy}
+          onClick={() => void toggleHfMirror()}
+        >
+          <span />
+        </button>
+      </div>
+      {hfError && <div className="note danger" data-testid="hf-mirror-error">HF 镜像设置失败：{hfError}</div>}
     </div>
   );
 }

@@ -84,6 +84,7 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 |---|---|
 | Agent 内核 | `@earendil-works/pi`（pi-coding-agent）`AgentSession` 无头托管；记忆 / 工具 / 权限经扩展 + customTools 接入 |
 | 本地推理 | llama.app 统一 `llama` 的 `llama serve` **router 模式**（`--models-dir` 单进程多模型路由 + 按需加载 + `--models-max` LRU）；嵌入独立 `llama serve -m --embedding` |
+| HF 模型源 | daemon 统一负责搜索、文件树与 GGUF/embedding 下载；默认 `huggingface.co`，通用设置可持久化切换 `hf-mirror.com`，同一动态端点覆盖全部 HF 请求 |
 | HTTP | Fastify 路由编排；SSE 通过 Node `reply.raw` 手写 |
 | 契约 / 校验 | Zod 共享契约；HTTP handler 通过 `safeParse` 等手动校验请求 |
 | 本地 DB | `node:sqlite`（内置 DatabaseSync，零原生编译） |
@@ -106,6 +107,8 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 | `EW_DATA_DIR` | 数据目录（默认 `~/.easywork`） |
 
 > UI「设置 → 模型 → 本地模型 → 网络访问」持久化的是 `llama serve` router 的绑定 host（`127.0.0.1` / `0.0.0.0`）与 api-key，并重启 router 使设置生效；它暴露的是 router 自带的 `/v1`，**不会改变 core Fastify 网关的监听地址**。Core 仍按 `easywork serve` 的 `--host` / `EW_HOST` 启动（默认 `127.0.0.1`）。router 绑定 `0.0.0.0` 时强制要求 api-key，daemon 的内部调用始终走 `127.0.0.1` 并携带 Bearer。
+
+> UI「设置 → 通用 → Hugging Face 镜像」经 `GET/POST /settings/huggingface` 保存到 SQLite `models.hf.useMirror`。切换立即更新 `HFClient` 的基址，因此模型搜索、变体树、普通 GGUF 下载和记忆 embedding 下载不会出现来源分叉；关闭时恢复官方源。
 
 ## 平台说明
 

@@ -86,7 +86,7 @@ flowchart LR
 
 ### 模型与网关
 
-- 本地模型：HuggingFace 搜索、断点续传下载、GGUF 元数据解析、统一 llama router 运行，并可在模型页按模型配置默认运行采样参数。
+- 本地模型：HuggingFace 搜索、断点续传下载、GGUF 元数据解析、统一 llama router 运行；国内网络可在「设置 → 通用」持久化启用 `hf-mirror.com`，搜索失败会显示明确错误提示；模型页还可按模型配置默认运行采样参数。
 - 云端 provider：内置 pi-ai 支持的 provider 目录；自定义端点可选择 OpenAI Chat/Responses、Anthropic Messages 等 API 协议，支持从 `/models` 获取模型列表，并逐模型配置上下文、模态与推理能力。
 - 模型目录继承：自定义模型可按模型 ID 自动或手动绑定目录模板。运行时可跨 API 协议继承模板的名称、`reasoning`、`thinkingLevelMap` 和 `maxTokens`；上下文窗口与输入模态只在 UI 选定模板时复制并保存到模型配置，不会在运行时覆盖既有配置。报文级 `compat` 仅在模板 API 与当前 API 一致时应用；同名模型始终以 `provider:<providerId>:<modelId>` 隔离。
 - 思考默认值：`/models.modelSources[].reasoning` 将运行时推理能力同步给 Chat / Workspace；推理模型首次使用默认「中」，显式选择「关」后按模型持久化。
@@ -186,11 +186,11 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 345 passed / 1 skipped
+npm test               # vitest: 350 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
-npm run test:e2e       # Playwright UI e2e: 28 条，真 daemon + 真 Vite + 隔离 data dir
+npm run test:e2e       # Playwright UI e2e: 30 条，真 daemon + 真 Vite + 隔离 data dir
 
 npm run dev:daemon     # 仅启动 daemon，首行输出 {baseUrl, token, pid}
 npm run dev:ui         # 仅启动 Vite
@@ -214,7 +214,7 @@ npm run release:check-artifacts -- windows
 
 ## 测试覆盖
 
-- Vitest：345 passed / 1 skipped。
+- Vitest：350 passed / 1 skipped。
 - 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
 - Playwright UI e2e 覆盖设置页、模型模板跨协议元数据继承、推理模型默认思考档位、默认工作区直达、渠道/Skills/记忆入口与设置层级、Chat / Workspace composer 无边框控件与上下文用量悬停详情、联网工具门控、图片上传与粘贴、搜索导航、文件页、macOS 工作台安全区、来源事实、记忆 CRUD、Skills 模板/候选 diff/审批与显式学习。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。

@@ -3,8 +3,19 @@ import { EasyWorkClient, type InboxEvent } from "./index.js";
 
 function makeClient() {
   const calls: { url: string; init?: RequestInit }[] = [];
+  let hfMirrorEnabled = false;
   const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), init });
+    if (String(url).endsWith("/settings/huggingface")) {
+      if (init?.method === "POST") {
+        hfMirrorEnabled = Boolean(JSON.parse(String(init.body ?? "{}") || "{}").useMirror);
+      }
+      return new Response(JSON.stringify({
+        ...(init?.method === "POST" ? { ok: true } : {}),
+        useMirror: hfMirrorEnabled,
+        endpoint: hfMirrorEnabled ? "https://hf-mirror.com" : "https://huggingface.co",
+      }), { status: 200 });
+    }
     if (String(url).endsWith("/im/adapters")) {
       return new Response(JSON.stringify({ adapters: [{ kind: "telegram", label: "Telegram", requiredSecrets: [] }] }), { status: 200 });
     }
@@ -149,6 +160,23 @@ describe("EasyWorkClient IM routes", () => {
         channel: { kind: "wechat", channelId: "wxid_alice" },
       },
     ]);
+  });
+});
+
+describe("EasyWorkClient Hugging Face settings", () => {
+  it("reads and updates the HF mirror setting", async () => {
+    const { client, calls } = makeClient();
+
+    await expect(client.getHuggingFaceSettings()).resolves.toEqual({
+      useMirror: false,
+      endpoint: "https://huggingface.co",
+    });
+    await expect(client.setHuggingFaceMirror(true)).resolves.toEqual({
+      ok: true,
+      useMirror: true,
+      endpoint: "https://hf-mirror.com",
+    });
+    expect(calls.filter((call) => call.url.endsWith("/settings/huggingface"))).toHaveLength(2);
   });
 });
 

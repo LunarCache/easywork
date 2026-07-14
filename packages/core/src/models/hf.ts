@@ -1,6 +1,7 @@
 import type { GGUFVariant, HFModelSummary } from "@ew/shared";
 
-const HF_BASE = "https://huggingface.co";
+export const HF_OFFICIAL_BASE = "https://huggingface.co";
+export const HF_MIRROR_BASE = "https://hf-mirror.com";
 
 export interface HFFile {
   path: string;
@@ -82,15 +83,26 @@ export function groupVariants(repoId: string, files: HFFile[]): GGUFVariant[] {
 export interface HFClientOptions {
   token?: string;
   fetch?: typeof fetch;
+  baseUrl?: string;
 }
 
 export class HFClient {
   private readonly token?: string;
   private readonly fetchImpl: typeof fetch;
+  private baseUrl: string;
 
   constructor(opts: HFClientOptions = {}) {
     this.token = opts.token;
     this.fetchImpl = opts.fetch ?? fetch;
+    this.baseUrl = (opts.baseUrl ?? HF_OFFICIAL_BASE).replace(/\/+$/, "");
+  }
+
+  setBaseUrl(baseUrl: string): void {
+    this.baseUrl = baseUrl.replace(/\/+$/, "");
+  }
+
+  getBaseUrl(): string {
+    return this.baseUrl;
   }
 
   private headers(): Record<string, string> {
@@ -106,7 +118,7 @@ export class HFClient {
       direction: "-1",
     });
     if (opts.ggufOnly !== false) params.set("filter", "gguf");
-    const res = await this.fetchImpl(`${HF_BASE}/api/models?${params}`, { headers: this.headers() });
+    const res = await this.fetchImpl(`${this.baseUrl}/api/models?${params}`, { headers: this.headers() });
     if (!res.ok) throw new Error(`HF search failed: ${res.status}`);
     const list = (await res.json()) as HFModelApiEntry[];
     return list.map((m) => ({
@@ -123,7 +135,7 @@ export class HFClient {
   /** 列出仓库文件树（含大小）。 */
   async listFiles(repoId: string, revision = "main"): Promise<HFFile[]> {
     const res = await this.fetchImpl(
-      `${HF_BASE}/api/models/${repoId}/tree/${revision}?recursive=true`,
+      `${this.baseUrl}/api/models/${repoId}/tree/${revision}?recursive=true`,
       { headers: this.headers() },
     );
     if (!res.ok) throw new Error(`HF tree failed: ${res.status}`);
@@ -141,6 +153,6 @@ export class HFClient {
 
   /** 构造文件下载 URL。 */
   resolveUrl(repoId: string, fileName: string, revision = "main"): string {
-    return `${HF_BASE}/${repoId}/resolve/${revision}/${fileName}`;
+    return `${this.baseUrl}/${repoId}/resolve/${revision}/${fileName}`;
   }
 }

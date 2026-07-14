@@ -13,12 +13,17 @@ import type { CoreHttpContext } from "../context.js";
 export interface ModelRouteOptions {
   llamaBinPath?: string;
   persistLocalNet(bindHost: "127.0.0.1" | "0.0.0.0"): void;
+  persistHfMirror(useMirror: boolean): void;
   clearEmbedSetting(): void;
 }
 
 const LocalNetSchema = z.object({
   bindHost: z.enum(["127.0.0.1", "0.0.0.0"]),
   apiKey: z.string().optional(),
+});
+
+const HuggingFaceSettingsSchema = z.object({
+  useMirror: z.boolean(),
 });
 
 const LocalModelSettingsBodySchema = z.object({
@@ -112,6 +117,18 @@ export function registerModelRoutes(ctx: CoreHttpContext, opts: ModelRouteOption
       lanIp: lanIPv4(),
       endpoints: local.endpoints(),
     };
+  });
+
+  // ---- Hugging Face 下载源：默认官方源，可切换国内镜像；搜索/变体/模型与 embedding 下载共用。 ----
+  app.get("/settings/huggingface", async () => models.hfSettings());
+  app.post("/settings/huggingface", async (req, reply) => {
+    const parsed = HuggingFaceSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid_request", detail: parsed.error.format() });
+    }
+    opts.persistHfMirror(parsed.data.useMirror);
+    models.setHfMirrorEnabled(parsed.data.useMirror);
+    return { ok: true, ...models.hfSettings() };
   });
 
   app.post("/models/load", async (req, reply) => {

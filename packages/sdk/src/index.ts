@@ -133,6 +133,11 @@ export interface LocalNetInfo {
   endpoints: LocalEndpoint[];
 }
 
+export interface HuggingFaceSettings {
+  useMirror: boolean;
+  endpoint: string;
+}
+
 export type ProviderModelModality = "text" | "image";
 export type ProviderCompatibilityMode = "auto" | "generic" | "catalog";
 
@@ -510,6 +515,14 @@ export class EasyWorkClient {
       bindHost,
       ...(apiKey !== undefined ? { apiKey } : {}),
     });
+  }
+
+  getHuggingFaceSettings(): Promise<HuggingFaceSettings> {
+    return this.getJSON<HuggingFaceSettings>("/settings/huggingface");
+  }
+
+  setHuggingFaceMirror(useMirror: boolean): Promise<HuggingFaceSettings & { ok: boolean }> {
+    return this.postJSON<HuggingFaceSettings & { ok: boolean }>("/settings/huggingface", { useMirror });
   }
 
   async listChannelAdapters(): Promise<ChannelAdapterMeta[]> {

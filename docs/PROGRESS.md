@@ -36,6 +36,13 @@
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
 
+## 2026-07-14 — HF 镜像开关与模型搜索错误可见性
+
+- **统一来源切换**：通用设置新增持久化 HF 镜像开关；`HFClient` 动态基址统一覆盖模型搜索、变体文件树、普通 GGUF 下载与记忆 nomic embedding 下载，默认仍为 `huggingface.co`，启用后使用 `hf-mirror.com`。
+- **错误可见性**：模型搜索捕获 SDK/HTTP 异常并显示明确错误与镜像引导，不再静默呈现空白页面；镜像设置读取或保存失败也会就地提示。
+- **回归锁定**：Core 测试覆盖动态 URL 与跨重启持久化，SDK 测试覆盖读写路由，Playwright 覆盖通用页开关跨刷新保持与搜索 502 错误提示。
+- **验证**：`npm run lint`、`npm run typecheck`、`npm run build` 全绿；`npm test` = **350 passed / 1 skipped**；`npm run test:e2e` = **30 passed**；设计文档派生 HTML 已同步。
+
 ## 2026-07-13 — 移除文档知识库 RAG
 
 - **硬删除能力**：移除 `packages/core/src/rag/`、`/kb/*` HTTP 路由、`search_knowledge_base` customTool、SDK/CLI 知识库命令与 Chat 请求字段，不保留 feature flag 或空 adapter seam。

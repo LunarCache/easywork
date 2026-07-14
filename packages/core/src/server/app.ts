@@ -360,6 +360,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   const CHANNELS_KEY = "im.connectors";
   const LOCAL_BIND_KEY = "local.bindHost";
   const LOCAL_APIKEY_KEY = "local.apiKey";
+  const HF_MIRROR_KEY = "models.hf.useMirror";
   const persistProviders = (): void => {
     try {
       repo.setSetting(PROVIDERS_KEY, JSON.stringify(providers.dump()));
@@ -389,6 +390,11 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     if (savedBind || savedKey) void local.applyNet({ bindHost: savedBind, apiKey: savedKey });
   } catch {
     /* 忽略 */
+  }
+  try {
+    models.setHfMirrorEnabled(repo.getSetting(HF_MIRROR_KEY) === "true");
+  } catch {
+    /* 损坏或不可读设置回退官方源 */
   }
   void (async () => {
     try {
@@ -628,6 +634,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       } catch {
         /* 持久化失败不影响运行 */
       }
+    },
+    persistHfMirror: (useMirror) => {
+      repo.setSetting(HF_MIRROR_KEY, String(useMirror));
     },
     clearEmbedSetting: () => {
       try {

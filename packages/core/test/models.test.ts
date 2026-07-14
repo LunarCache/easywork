@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { groupVariants, type HFFile } from "../src/models/hf.js";
+import {
+  HFClient,
+  HF_MIRROR_BASE,
+  groupVariants,
+  type HFFile,
+} from "../src/models/hf.js";
 import { enumerateShards } from "../src/models/download.js";
 import { parseGGUFBuffer } from "../src/models/gguf.js";
 
@@ -33,6 +38,29 @@ describe("groupVariants (分片归组)", () => {
     const variants = groupVariants("x/y", files);
     expect(variants).toHaveLength(1);
     expect(variants[0]!.mmprojFile).toBe("mmproj-model-f16.gguf");
+  });
+});
+
+describe("HFClient endpoint", () => {
+  it("switches search, tree, and download URLs to the HF mirror", async () => {
+    const urls: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const hf = new HFClient({ fetch: fetchImpl });
+
+    hf.setBaseUrl(HF_MIRROR_BASE);
+    await hf.search("qwen");
+    await hf.listFiles("org/model");
+
+    expect(urls).toEqual([
+      expect.stringMatching(/^https:\/\/hf-mirror\.com\/api\/models\?/),
+      "https://hf-mirror.com/api/models/org/model/tree/main?recursive=true",
+    ]);
+    expect(hf.resolveUrl("org/model", "model.gguf")).toBe(
+      "https://hf-mirror.com/org/model/resolve/main/model.gguf",
+    );
   });
 });
 

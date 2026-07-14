@@ -324,6 +324,7 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<HFModelSummary[]>([]);
   const [searched, setSearched] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [variants, setVariants] = useState<Record<string, GGUFVariant[]>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
@@ -493,9 +494,15 @@ export function Models({ onChange }: { onChange: () => void }) {
     if (!query.trim()) return;
     setSearching(true);
     setExpanded(null);
+    setSearchError(null);
     try {
       setResults(await getClient().searchModels(query.trim()));
       setSearched(true);
+    } catch (error) {
+      setResults([]);
+      setSearched(false);
+      const detail = error instanceof Error ? error.message : String(error);
+      setSearchError(`搜索失败：${detail}。请检查网络，或在“设置 → 通用”中启用 HF 镜像。`);
     } finally {
       setSearching(false);
     }
@@ -827,6 +834,7 @@ export function Models({ onChange }: { onChange: () => void }) {
             {searching ? "搜索中…" : "搜索"}
           </button>
         </div>
+        {searchError && <div className="note danger" data-testid="models-search-error">{searchError}</div>}
         {progressNote}
         {searched && (
           <section className="search-panel">
