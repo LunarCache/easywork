@@ -84,7 +84,7 @@ export function Titlebar({
         {showDock && (
           <button
             className={`ad-tb-dock ${dockOpen ? "on" : ""}`}
-            title={dockOpen ? "关闭工作台" : "打开工作台（文件 / 浏览器 / 终端）"}
+            title={dockOpen ? "关闭工作台" : "打开工作台"}
             onClick={onToggleDock}
           >
             {dockOpen ? <PanelRightCloseIcon size={17} /> : <PanelRightIcon size={17} />}

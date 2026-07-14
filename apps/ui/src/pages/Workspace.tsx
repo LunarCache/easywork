@@ -610,8 +610,6 @@ export function Workspace({
         onFilesRefresh={() => void refreshWsFiles()}
         onRevealDir={() => void getClient().wsReveal(project.id)}
         filesEmpty="暂无工作区文件。"
-        msgs={msgs}
-        exec={(c) => getClient().wsExec(project.id, c)}
         browserTarget={browserTarget}
         onClearPreview={() => setBrowserTarget(null)}
         target={dockTarget}

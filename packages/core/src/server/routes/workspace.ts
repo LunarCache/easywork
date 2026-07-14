@@ -23,7 +23,6 @@ const ProjectCreateSchema = z.object({
   instructions: z.string().optional(),
 });
 const ProjectPatchSchema = ProjectCreateSchema.partial();
-const ExecSchema = z.object({ command: z.string().min(1) });
 const GitPathsSchema = z.object({ paths: z.array(z.string()).optional(), all: z.boolean().optional() });
 const HunkSchema = z.object({
   path: z.string().min(1),
@@ -31,8 +30,6 @@ const HunkSchema = z.object({
   op: z.enum(["stage", "unstage", "discard"]),
 });
 
-const EXEC_TIMEOUT = 120_000;
-const EXEC_CAP = 200_000; // 输出字符上限，超出截断并终止
 
 /** 默认工作区下下一个可用的 NewProject{N} 路径（仅计算，不创建目录——真正聊天时才落盘）。 */
 function nextNewProjectDir(repo: SqliteConversationRepo): string {
@@ -102,43 +99,6 @@ function projectSkillSources(workspaceDir: string): SkillSourceConfig[] {
     index += 1;
   }
   return sources;
-}
-
-async function runInDir(
-  cwd: string,
-  command: string,
-): Promise<{ code: number | null; output: string; truncated: boolean }> {
-  fs.mkdirSync(cwd, { recursive: true });
-  const { spawn } = await import("node:child_process");
-  return await new Promise((resolve) => {
-    const child = spawn(command, { cwd, shell: true });
-    let out = "";
-    let truncated = false;
-    const onData = (b: Buffer) => {
-      if (truncated) return;
-      out += b.toString();
-      if (out.length > EXEC_CAP) {
-        out = out.slice(0, EXEC_CAP);
-        truncated = true;
-        child.kill();
-      }
-    };
-    child.stdout?.on("data", onData);
-    child.stderr?.on("data", onData);
-    const timer = setTimeout(() => {
-      truncated = true;
-      out += "\n[已超时，进程被终止]";
-      child.kill("SIGKILL");
-    }, EXEC_TIMEOUT);
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, output: out, truncated });
-    });
-    child.on("error", (e) => {
-      clearTimeout(timer);
-      resolve({ code: -1, output: `${out}\n[启动失败] ${e.message}`, truncated });
-    });
-  });
 }
 
 function revealDir(dir: string): void {
@@ -288,6 +248,19 @@ export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
   // /files/meta：渲染类型 + 文本类内联；/files/raw：原始字节（img/pdf 经 blob 渲染）。路径经 readFileSafe/readRawSafe 限定。
   const previewBase = (scope: string, id: string): string =>
     scope === "workspace" ? projectRoot(id) : chatWorkspaceDir(id);
+  app.get("/terminal/context", async (req, reply) => {
+    const q = req.query as { scope?: string; id?: string };
+    if ((q.scope !== "workspace" && q.scope !== "chat") || !q.id) {
+      return reply.code(400).send({ error: "params_required" });
+    }
+    try {
+      const cwd = previewBase(q.scope, q.id);
+      fs.mkdirSync(cwd, { recursive: true });
+      return { cwd };
+    } catch (e) {
+      return reply.code(400).send({ error: "terminal_context_error", message: e instanceof Error ? e.message : String(e) });
+    }
+  });
   app.get("/files/meta", async (req, reply) => {
     const q = req.query as { scope?: string; id?: string; path?: string };
     if (!q.scope || !q.id || !q.path) return reply.code(400).send({ error: "params_required" });
@@ -322,22 +295,6 @@ export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
     }
   });
 
-  // 工作区/对话目录里执行用户在终端 tab 输入的命令。cwd 限定在该目录；
-  // 与 agent run_command 同为任意 shell，靠 daemon token 把守（0.0.0.0 须 api-key）。
-  app.post("/workspace/:id/exec", async (req, reply) => {
-    const p = ExecSchema.safeParse(req.body ?? {});
-    if (!p.success) return reply.code(400).send({ error: "command_required" });
-    try {
-      return await runInDir(projectRoot((req.params as { id: string }).id), p.data.command);
-    } catch (e) {
-      return reply.code(400).send({ error: "exec_error", message: e instanceof Error ? e.message : String(e) });
-    }
-  });
-  app.post("/chat/:threadId/exec", async (req, reply) => {
-    const p = ExecSchema.safeParse(req.body ?? {});
-    if (!p.success) return reply.code(400).send({ error: "command_required" });
-    return await runInDir(chatWorkspaceDir((req.params as { threadId: string }).threadId), p.data.command);
-  });
   app.post("/workspace/:id/reveal", async (req, reply) => {
     try {
       const dir = projectRoot((req.params as { id: string }).id);

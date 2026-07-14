@@ -19,11 +19,11 @@
                    │          │                 │               │
   ┌────────────────┴─┐  ┌─────┴────────┐  ┌─────┴──────────┐  ┌─┴──────────────┐
   │ Tauri 主进程      │  │ React webview │  │ TG / Feishu /  │  │ Claude Code /  │
-  │（spawn / 退出回收）│  │ 或浏览器 UI   │  │ Lark / WeChat  │  │ 任意 /v1 客户端 │
+  │（daemon + PTY）   │  │ 或浏览器 UI   │  │ Lark / WeChat  │  │ 任意 /v1 客户端 │
   └──────────────────┘  └──────────────┘  └────────────────┘  └────────────────┘
 ```
 
-- **Tauri 主进程（Rust）**：创建窗口并持有 daemon child；读取 child stdout 首行的 `{baseUrl, token}`，保存后通过 `get_config` 返回给 webview，退出时杀掉 child。Rust 层目前没有菜单或自动更新，也不负责 HTTP 探活；React UI 会重试 `get_config`，再请求 `/health`。WebView 使用显式 CSP：放行 Tauri IPC、本地 daemon、data/blob 媒体与沙盒预览来源，禁止远程脚本、对象插件、表单提交和外部页面嵌入主窗口。**打包时启动随附的单文件 daemon 二进制（Node SEA，免 Node）**；开发时运行 `node $EW_DAEMON_ENTRY serve`。
+- **Tauri 主进程（Rust）**：创建窗口并持有 daemon child；读取 child stdout 首行的 `{baseUrl, token}`，保存后通过 `get_config` 返回给 webview，退出时杀掉 child。它还拥有 Desktop 专属的窗口内 PTY 会话：`portable-pty` 启动用户默认 shell，Tauri Channel 把有序字节流送到 xterm，IPC 负责创建 / 附着 / 输入 / resize / 关闭；浏览器 UI 不暴露该能力。PTY 只在应用进程内存活，抽屉隐藏、标签切换或 WebView reload 可重新附着，关闭标签结束会话，应用退出统一回收，不写入 daemon / SQLite，也不与 Agent `bash` 工具混用。Rust 层目前没有菜单或自动更新，也不负责 HTTP 探活；React UI 会重试 `get_config`，再请求 `/health`。WebView 使用显式 CSP：放行 Tauri IPC、本地 daemon、data/blob 媒体与沙盒预览来源，禁止远程脚本、对象插件、表单提交和外部页面嵌入主窗口。**打包时启动随附的单文件 daemon 二进制（Node SEA，免 Node）**；开发时运行 `node $EW_DAEMON_ENTRY serve`。
 - **Core daemon 的三种进程形态**：显式 `easywork serve` 在前台运行；需要 daemon 且启用自动启动的 CLI 命令探测不到服务时，会 detached spawn 自身的 `serve` 并 `unref()`（`status` / `stop` 只检查现有服务，不自启）；Tauri 启动的是由桌面主进程持有、随应用退出回收的 child，不是 detached 自启进程。
 - **本地推理**：统一 `llama`（llama.app）的 **router 模式** —— 1 个 `llama serve --models-dir` 进程，按请求 `model`（即模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰。嵌入模型走独立 `llama serve -m --embedding` 进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，供记忆向量召回；缺失则降级纯词法）。
 
@@ -41,12 +41,12 @@ packages/
   im-connectors/  @ew/im-connectors Channel Gateway + adapter registry（Telegram long-poll；Feishu/Lark WebSocket 默认 + webhook 高级模式；WeChat iLink QR + long-poll；Discord / WeCom 规划中）
   sdk/            @ew/sdk           daemon HTTP API 的类型化客户端
 apps/
-  desktop/        @ew/desktop       Tauri 2 外壳（Rust src-tauri）+ 启动/持有随附 daemon child
+  desktop/        @ew/desktop       Tauri 2 外壳（Rust src-tauri）+ daemon child + 窗口级 PTY 会话
   ui/             @ew/ui            React 19 + Vite 前端
   daemon/         @ew/daemon        CLI 入口 easywork + core daemon 的 serve 宿主
 ```
 
-依赖方向：`shared` 是运行时契约中心；`core` 组合 providers / memory / tools / skills / MCP / IM 等包，并由 `apps/daemon` 直接导入。`apps/desktop` 不直接消费 `@ew/core`，而是把 `@ew/daemon` 的 SEA 产物作为资源启动，再由 webview 通过 HTTP/SSE 访问。
+依赖方向：`shared` 是运行时契约中心；`core` 组合 providers / memory / tools / skills / MCP / IM 等包，并由 `apps/daemon` 直接导入。`apps/desktop` 不直接消费 `@ew/core`，而是把 `@ew/daemon` 的 SEA 产物作为资源启动，再由 webview 通过 HTTP/SSE 访问；仅窗口与操作系统耦合的 PTY 生命周期留在 Rust 壳，通过 Tauri IPC 供同一 webview 使用。
 
 ## Provider Catalog 与模型身份
 
@@ -91,7 +91,7 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 | 渠道密钥 | `ChannelSecretStore`：macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI；SQLite 仅存去密配置 |
 | 记忆 | 本地 Core Memory + 可选 additive provider；独立 `llama serve --embedding`（默认 nomic）+ **sqlite-vec**；按 `0.75 × 语义 + 0.25 × 词法` 加权，向量或 provider 不可用时本地词法链路仍工作 |
 | UI | React 19 + Vite + react-markdown |
-| 桌面 | Tauri 2（Rust 外壳 + TS 前端；Rust 启动并持有 daemon child） |
+| 桌面 | Tauri 2（Rust 外壳 + TS 前端；Rust 启动并持有 daemon child，以 `portable-pty` 托管窗口级真终端） |
 | 打包 | daemon Node SEA 单文件二进制；Tauri macOS dmg + Windows x64 NSIS/MSI；版本、SEA `/health` 与平台产物契约通过后进入 GitHub Releases |
 | 库构建 / 测试 | tsup（esbuild）/ Vitest |
 | Monorepo | npm workspaces + Turborepo |

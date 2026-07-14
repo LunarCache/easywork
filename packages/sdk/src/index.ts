@@ -46,16 +46,6 @@ export interface WsEntry {
   size?: number;
 }
 
-/** 终端命令执行结果。 */
-export interface ExecResult {
-  /** 退出码（信号终止/启动失败为 null 或 -1）。 */
-  code: number | null;
-  /** stdout + stderr 合并输出。 */
-  output: string;
-  /** 输出超上限被截断。 */
-  truncated: boolean;
-}
-
 /** git 改动文件。 */
 export interface GitFile {
   path: string;
@@ -683,6 +673,12 @@ export class EasyWorkClient {
     return this.getJSON(`/files/meta?${q}`);
   }
 
+  /** 解析真终端的初始工作目录；PTY 生命周期由 Desktop Tauri 管理。 */
+  async terminalContext(scope: "workspace" | "chat", id: string): Promise<{ cwd: string }> {
+    const q = new URLSearchParams({ scope, id });
+    return this.getJSON(`/terminal/context?${q}`);
+  }
+
   /** 统一文件预览的原始字节 URL（img/pdf 经 blob 渲染时拼鉴权 fetch）。 */
   fileRawUrl(scope: "workspace" | "chat", id: string, path: string): string {
     const q = new URLSearchParams({ scope, id, path });
@@ -696,14 +692,6 @@ export class EasyWorkClient {
     return res.blob();
   }
 
-  /** 在工作区目录里执行命令（终端 tab）。返回退出码 + 合并输出。 */
-  async wsExec(projectId: string, command: string): Promise<ExecResult> {
-    return this.postJSON(`/workspace/${encodeURIComponent(projectId)}/exec`, { command });
-  }
-  /** 在对话会话工件目录里执行命令（终端 tab）。 */
-  async chatExec(threadId: string, command: string): Promise<ExecResult> {
-    return this.postJSON(`/chat/${encodeURIComponent(threadId)}/exec`, { command });
-  }
   /** 在系统文件管理器中打开工作区目录。 */
   async wsReveal(projectId: string): Promise<{ ok: boolean; dir?: string }> {
     return this.postJSON(`/workspace/${encodeURIComponent(projectId)}/reveal`, {});

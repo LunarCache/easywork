@@ -588,8 +588,6 @@ export function Chat({
         onFilesRefresh={() => void refreshFiles()}
         onRevealDir={() => void getClient().chatReveal(threadId)}
         filesEmpty="暂无会话文件。"
-        msgs={msgs}
-        exec={(c) => getClient().chatExec(threadId, c)}
         browserTarget={browserTarget}
         onClearPreview={() => setBrowserTarget(null)}
         target={dockTarget}

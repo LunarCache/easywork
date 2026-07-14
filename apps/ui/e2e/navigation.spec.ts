@@ -1,6 +1,174 @@
 import { test, expect } from "./fixtures.js";
 
+async function installFakeTerminalRuntime(page: import("@playwright/test").Page, config: { baseUrl: string; token: string }) {
+  await page.addInitScript(({ baseUrl, token }) => {
+    type FakeChannel = { onmessage?: (event: unknown) => void };
+    type FakeSession = { sessionId: string; scope: string; title: string; cwd: string };
+    const sessions: FakeSession[] = JSON.parse(sessionStorage.getItem("fake-terminal-sessions") ?? "[]") as FakeSession[];
+    const attachments = new Map<string, FakeChannel>();
+    const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
+    const state = { busy: false };
+    let nextSession = sessions.reduce((max, session) => {
+      const index = Number(session.sessionId.replace(/^term-/, ""));
+      return Number.isFinite(index) ? Math.max(max, index) : max;
+    }, 0) + 1;
+    let nextAttachment = 1;
+
+    class Channel {
+      onmessage?: (event: unknown) => void;
+    }
+
+    const output = (sessionId: string, text: string) => {
+      const bytes = new TextEncoder().encode(text);
+      let binary = "";
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      const data = btoa(binary);
+      for (const [key, channel] of attachments) {
+        if (key.startsWith(`${sessionId}:`)) channel.onmessage?.({ event: "output", data: { data } });
+      }
+    };
+    const persistSessions = () => sessionStorage.setItem("fake-terminal-sessions", JSON.stringify(sessions));
+
+    Object.defineProperty(window, "__fakeTerminal", {
+      configurable: true,
+      value: { sessions, calls, state },
+    });
+    Object.defineProperty(window, "__TAURI__", {
+      configurable: true,
+      value: {
+        core: {
+          Channel,
+          invoke: async (command: string, rawArgs?: unknown) => {
+            const args = (rawArgs ?? {}) as Record<string, unknown>;
+            if (command === "get_config") return { baseUrl, token };
+            calls.push({ command, args });
+            if (command === "terminal_list") return sessions.filter((session) => session.scope === args.scope);
+            if (command === "terminal_create") {
+              const session: FakeSession = {
+                sessionId: `term-${nextSession}`,
+                scope: String(args.scope),
+                title: `终端 ${nextSession}`,
+                cwd: String(args.cwd),
+              };
+              nextSession += 1;
+              sessions.push(session);
+              persistSessions();
+              return session;
+            }
+            if (command === "terminal_attach") {
+              const attachmentId = `attachment-${nextAttachment++}`;
+              attachments.set(`${String(args.sessionId)}:${attachmentId}`, args.channel as FakeChannel);
+              queueMicrotask(() => output(String(args.sessionId), `ready:${String(args.sessionId)}\r\n`));
+              return attachmentId;
+            }
+            if (command === "terminal_detach") {
+              attachments.delete(`${String(args.sessionId)}:${String(args.attachmentId)}`);
+              return null;
+            }
+            if (command === "terminal_write") {
+              output(String(args.sessionId), String(args.data));
+              return null;
+            }
+            if (command === "terminal_resize") return null;
+            if (command === "terminal_close") {
+              if (state.busy && !args.force) return "confirmation_required";
+              const index = sessions.findIndex((session) => session.sessionId === args.sessionId);
+              if (index >= 0) sessions.splice(index, 1);
+              persistSessions();
+              return "closed";
+            }
+            throw new Error(`unexpected command: ${command}`);
+          },
+        },
+      },
+    });
+  }, config);
+}
+
 test.describe("navigation e2e", () => {
+  test("浏览器运行时不暴露 Desktop PTY 终端", async ({ page, openApp }) => {
+    await openApp();
+    await page.getByTitle("打开工作台").click();
+    await page.getByTestId("side-dock-add-view").click();
+
+    await expect(page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" })).toHaveCount(0);
+  });
+
+  test("Desktop PTY 支持多个终端标签，隐藏工作台保持会话，关闭标签结束会话", async ({ page, openApp, info }) => {
+    await installFakeTerminalRuntime(page, info);
+    await openApp();
+    await page.getByTestId("home-new-workspace").click();
+    await expect(page.getByTestId("workspace-composer-input")).toBeVisible();
+    await page.getByTitle("打开工作台").click();
+
+    for (let index = 0; index < 2; index += 1) {
+      await page.getByTestId("side-dock-add-view").click();
+      await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" }).click();
+    }
+
+    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(2);
+    await expect(page.locator(".side-dock .xterm")).toBeVisible();
+    await expect(page.locator(".side-dock .xterm-screen")).toContainText("ready:term-2");
+    await page.locator(".side-dock .xterm-helper-textarea").focus();
+    await page.keyboard.type("echo hello");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".side-dock .xterm-screen")).toContainText("echo hello");
+    await expect.poll(() => page.evaluate(() => {
+      const calls = (window as unknown as { __fakeTerminal: { calls: Array<{ command: string }> } }).__fakeTerminal.calls;
+      return {
+        wrote: calls.some((call) => call.command === "terminal_write"),
+        resized: calls.some((call) => call.command === "terminal_resize"),
+      };
+    })).toEqual({ wrote: true, resized: true });
+
+    await page.getByTitle("关闭工作台").click();
+    await page.getByTitle("打开工作台").click();
+    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(2);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __fakeTerminal: { sessions: unknown[] } }).__fakeTerminal.sessions.length)).toBe(2);
+
+    await page.getByRole("button", { name: /新对话/ }).click();
+    await expect(page.getByTestId("chat-composer-input")).toBeVisible();
+    await page.locator('button[data-testid^="sidebar-project-"]').first().click();
+    await expect(page.getByTestId("workspace-composer-input")).toBeVisible();
+    await page.getByTitle("打开工作台").click();
+    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(2);
+    await page.locator(".sd-tab-shell").filter({ hasText: "终端 2" }).getByRole("tab").click();
+    await expect(page.locator(".side-dock .xterm-screen")).toContainText("ready:term-2");
+
+    await page.reload();
+    await expect(page.getByTestId("sidebar-settings")).toBeVisible();
+    await page.locator('button[data-testid^="sidebar-project-"]').first().click();
+    await expect(page.getByTestId("workspace-composer-input")).toBeVisible();
+    await page.getByTitle("打开工作台").click();
+    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(2);
+    await page.locator(".sd-tab-shell").filter({ hasText: "终端 2" }).getByRole("tab").click();
+    await expect(page.locator(".side-dock .xterm-screen")).toContainText("ready:term-2");
+
+    await page.getByTitle("关闭终端 2标签").click();
+    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __fakeTerminal: { sessions: unknown[] } }).__fakeTerminal.sessions.length)).toBe(1);
+  });
+
+  test("关闭存在前台任务的终端前需要确认", async ({ page, openApp, info }) => {
+    await installFakeTerminalRuntime(page, info);
+    await openApp();
+    await page.getByTitle("打开工作台").click();
+    await page.getByTestId("side-dock-add-view").click();
+    await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" }).click();
+    await page.evaluate(() => {
+      (window as unknown as { __fakeTerminal: { state: { busy: boolean } } }).__fakeTerminal.state.busy = true;
+    });
+
+    await page.getByTitle("关闭终端 1标签").click();
+    await expect(page.getByRole("dialog")).toContainText("终端中仍有前台任务");
+    await page.getByRole("button", { name: "取消" }).click();
+    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端 1" })).toHaveCount(1);
+
+    await page.getByTitle("关闭终端 1标签").click();
+    await page.getByRole("button", { name: "结束终端" }).click();
+    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端 1" })).toHaveCount(0);
+  });
+
   test("首页新建工作区直接进入默认空白工作区，目录选择保留为后续显式动作", async ({ page, openApp, client }) => {
     let dialogs = 0;
     page.on("dialog", async (dialog) => {
@@ -41,7 +209,7 @@ test.describe("navigation e2e", () => {
     await expect(page.locator(".ad-tb-nav-static")).toHaveCount(2);
     await expect(page.locator(".ad-tb-nav-static").first()).toHaveAttribute("data-tauri-drag-region", "true");
 
-    await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
+    await page.getByTitle("打开工作台").click();
     await expect(page.locator(".sd-titlebar-toolbar")).toHaveAttribute("data-tauri-drag-region", "true");
     await expect(page.locator(".sd-open-tabs")).toHaveAttribute("data-tauri-drag-region", "true");
     await expect(page.locator(".sd-tab-shell").first()).toHaveAttribute("data-tauri-drag-region", "true");
@@ -58,7 +226,7 @@ test.describe("navigation e2e", () => {
     });
     await openApp();
 
-    await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
+    await page.getByTitle("打开工作台").click();
     await page.getByTitle("放大到窗口").click();
 
     const activeTab = page.locator(".ad-titlebar").getByTestId("side-dock-tab-files");
@@ -70,7 +238,7 @@ test.describe("navigation e2e", () => {
 
   test("工作台使用顶层动态标签，并支持输入自定义浏览器地址", async ({ page, openApp }) => {
     await openApp();
-    await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
+    await page.getByTitle("打开工作台").click();
 
     const dock = page.getByTestId("side-dock");
     await expect(dock.locator(".sd-top")).toHaveCount(0);
@@ -100,18 +268,8 @@ test.describe("navigation e2e", () => {
     await expect(page.locator(".side-dock .wpv-frame")).toHaveAttribute("src", "https://example.com/docs");
     await address.fill("https://example.com/docs");
 
-    await page.getByTestId("side-dock-add-view").click();
-    await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" }).click();
-    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveClass(/on/);
-    await expect(page.getByTestId("side-dock-tab-preview")).toBeVisible();
-    await page.getByTestId("side-dock-tab-preview").click();
-    await expect(address).toHaveValue("https://example.com/docs");
-
     await page.getByTitle("关闭浏览器标签").click();
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
-    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveClass(/on/);
-    await page.getByTitle("关闭终端标签").click();
-    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveCount(0);
     await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
 
     await page.setViewportSize({ width: 960, height: 720 });
@@ -123,7 +281,7 @@ test.describe("navigation e2e", () => {
     await page.keyboard.press("Escape");
     await page.getByTitle("关闭文件标签").click();
     await expect(dock).not.toBeVisible();
-    await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
+    await page.getByTitle("打开工作台").click();
     await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
   });
 
@@ -164,8 +322,8 @@ test.describe("navigation e2e", () => {
     await address.fill("example.org/other");
     await address.press("Enter");
     await page.getByTestId("side-dock-add-view").click();
-    await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" }).click();
-    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveClass(/on/);
+    await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "文件" }).click();
+    await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
 
     await link.click();
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveClass(/on/);
@@ -174,7 +332,7 @@ test.describe("navigation e2e", () => {
 
   test("工作台宽度可拖拽并持久化，窄窗口改为浮层而不是消失", async ({ page, openApp }) => {
     await openApp();
-    const toggle = page.getByTitle("打开工作台（文件 / 浏览器 / 终端）");
+    const toggle = page.getByTitle("打开工作台");
     await toggle.click();
 
     const dock = page.getByTestId("side-dock");
@@ -193,7 +351,7 @@ test.describe("navigation e2e", () => {
 
     // reload 强制 SideDock 重挂载，确认宽度来自 localStorage，而不是仍在内存中的 React state。
     await page.reload();
-    await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
+    await page.getByTitle("打开工作台").click();
     await expect.poll(async () => (await dock.boundingBox())?.width ?? 0).toBeGreaterThan(before!.width + 60);
 
     const persistedGrip = await handle.boundingBox();
@@ -219,7 +377,7 @@ test.describe("navigation e2e", () => {
     expect(narrow!.x + narrow!.width).toBeGreaterThanOrEqual(959);
 
     await page.getByTitle("关闭工作台").click();
-    const narrowToggle = page.getByTitle("打开工作台（文件 / 浏览器 / 终端）");
+    const narrowToggle = page.getByTitle("打开工作台");
     await expect(narrowToggle).toBeVisible();
     await narrowToggle.click();
     await expect(dock).toBeVisible();

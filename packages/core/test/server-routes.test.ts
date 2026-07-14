@@ -924,5 +924,38 @@ version: "0.1.0"
     });
     expect(meta.statusCode).toBe(200);
     expect(meta.json()).toMatchObject({ name: "notes.txt", kind: "text", text: "hello workspace" });
+
+    const workspaceTerminal = await core.app.inject({
+      method: "GET",
+      url: `/terminal/context?scope=workspace&id=${encodeURIComponent(project.id)}`,
+      headers: { authorization: "Bearer t" },
+    });
+    expect(workspaceTerminal.statusCode).toBe(200);
+    expect(workspaceTerminal.json()).toEqual({ cwd: workspaceDir });
+
+    const chatTerminal = await core.app.inject({
+      method: "GET",
+      url: "/terminal/context?scope=chat&id=thread%2F..%2Funsafe",
+      headers: { authorization: "Bearer t" },
+    });
+    expect(chatTerminal.statusCode).toBe(200);
+    const chatCwd = chatTerminal.json<{ cwd: string }>().cwd;
+    expect(fs.statSync(chatCwd).isDirectory()).toBe(true);
+    expect(path.basename(chatCwd)).toBe("thread____unsafe");
+
+    const invalidTerminal = await core.app.inject({
+      method: "GET",
+      url: `/terminal/context?scope=other&id=${encodeURIComponent(project.id)}`,
+      headers: { authorization: "Bearer t" },
+    });
+    expect(invalidTerminal.statusCode).toBe(400);
+
+    const retiredExec = await core.app.inject({
+      method: "POST",
+      url: `/workspace/${encodeURIComponent(project.id)}/exec`,
+      headers: { authorization: "Bearer t" },
+      payload: { command: "pwd" },
+    });
+    expect(retiredExec.statusCode).toBe(404);
   });
 });

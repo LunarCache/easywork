@@ -106,25 +106,10 @@
 .wp-term { flex: 1; min-height: 0; margin: 0; border-radius: 0; max-height: none; overflow: auto; }
 .wp-term-cmd { color: #7b8694; margin-bottom: 8px; }
 
-/* 终端 tab：可交互 REPL（看 AI 命令 + 自己跑命令） */
-.term-tab { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #11151b; }
-[data-theme="dark"] .term-tab { background: #0a0c10; }
-.term-scroll { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; font-family: var(--font-mono); font-size: 12px; line-height: 1.55; }
-.term-scroll .rev-empty { color: #8a939e; }
-.term-entry { margin-bottom: 12px; }
-.term-cmd { color: #cdd6e2; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.term-dollar { color: var(--accent); font-weight: 700; }
-.term-tag { background: var(--accent-soft); color: var(--accent); border-radius: var(--r-sm); padding: 0 5px; font-size: 11px; font-weight: 700; }
-.term-code { color: #ef7676; font-size: 11px; margin-left: 4px; }
-.term-out { margin: 3px 0 0; white-space: pre-wrap; word-break: break-word; color: #aeb7c4; background: transparent; padding: 0; }
-.term-ai .term-cmd { color: #9aa4b2; }
-.term-trunc { color: var(--color-warning); font-size: 11px; margin-top: 2px; }
-.term-input { flex: none; display: flex; align-items: center; gap: 7px; padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.08); background: #0d1117; }
-.term-input input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: #e8edf4; font-family: var(--font-mono); font-size: 12px; }
-.term-input input::placeholder { color: #5c6675; }
-.term-input .fv-btn { color: #8a939e; }
-.term-input .fv-btn:hover:not(:disabled) { color: var(--accent); }
-.term-input .fv-btn:disabled { opacity: 0.4; cursor: default; }
+/* 真终端：xterm 直接填充工作台正文，不再叠加伪命令输入栏。 */
+.terminal-view { flex: 1; min-width: 0; min-height: 0; padding: 8px 0 6px 8px; overflow: hidden; background: #0a0c10; }
+.terminal-view .xterm { width: 100%; height: 100%; }
+.terminal-view .xterm-viewport { scrollbar-width: thin; scrollbar-color: #303846 transparent; }
 
 /* 浏览器 tab：可编辑地址栏 + iframe（来源链接仍可自动导航）。 */
 .preview-tab { flex: 1; min-height: 0; display: flex; flex-direction: column; }

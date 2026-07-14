@@ -8,14 +8,15 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import type { ExecResult, GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
+import type { GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { FileViewer } from "./FileViewer.js";
 import { fileType, formatFileSize } from "../lib/filetype.js";
 import { matchFileTarget } from "../lib/file-target.js";
 import { resolvePreviewKind } from "../lib/preview.js";
-import type { UiMsg } from "../lib/agent-stream.js";
+import { getTerminalRuntime, type TerminalSessionInfo } from "../lib/terminal-runtime.js";
+import { TerminalView } from "./TerminalView.js";
 import {
   ChevronIcon,
   CommitIcon,
@@ -44,15 +45,31 @@ export interface GitContext {
   onRefresh: () => Promise<void>;
 }
 
-type Tab = "diff" | "files" | "terminal" | "preview";
+type StaticTab = "diff" | "files" | "preview";
+type DockViewKind = StaticTab | "terminal";
 
-const TAB_META: Record<Tab, { label: string; icon: () => ReactNode }> = {
+const TAB_META: Record<DockViewKind, { label: string; icon: () => ReactNode }> = {
   diff: { label: "改动", icon: () => <FileIcon size={14} /> },
   files: { label: "文件", icon: () => <FolderIcon size={14} /> },
   terminal: { label: "终端", icon: () => <TerminalIcon size={14} /> },
   preview: { label: "浏览器", icon: () => <GlobeIcon size={14} /> },
 };
-const TAB_ORDER: Tab[] = ["diff", "terminal", "preview", "files"];
+const TAB_ORDER: DockViewKind[] = ["diff", "terminal", "preview", "files"];
+
+interface DockView {
+  id: string;
+  kind: DockViewKind;
+  label: string;
+  terminal?: TerminalSessionInfo;
+}
+
+function staticDockView(kind: StaticTab): DockView {
+  return { id: kind, kind, label: TAB_META[kind].label };
+}
+
+function terminalDockView(session: TerminalSessionInfo): DockView {
+  return { id: `terminal-${session.sessionId}`, kind: "terminal", label: session.title, terminal: session };
+}
 
 export interface BrowserTarget {
   url: string;
@@ -116,16 +133,9 @@ function DockEmpty({ children }: { children: ReactNode }) {
 
 /**
  * 统一右侧「工作台坞」：对话区与工作区共用。
- * tab = 改动(git，按需) / 文件(工件+文件树) / 终端(最近命令) / 预览(网页)。
+ * tab = 改动(git，按需) / 文件(工件+文件树) / 多实例真终端 / 预览(网页)。
  * 合并了原 ArtifactsPanel、独立 WebPreview、WorkspacePanel 三套抽屉。
  */
-interface TermEntry {
-  cmd: string;
-  output: string;
-  code: number | null;
-  truncated?: boolean;
-}
-
 export function SideDock({
   open,
   onClose,
@@ -135,8 +145,6 @@ export function SideDock({
   onFilesRefresh,
   onRevealDir,
   filesEmpty,
-  msgs,
-  exec,
   browserTarget,
   onClearPreview,
   git,
@@ -151,8 +159,6 @@ export function SideDock({
   onFilesRefresh: () => void;
   onRevealDir: () => void;
   filesEmpty: ReactNode;
-  msgs: UiMsg[];
-  exec: (command: string) => Promise<ExecResult>;
   /** 消息链接触发的一次浏览器导航；nonce 使重复点击同一 URL 仍能重新激活。 */
   browserTarget: BrowserTarget | null;
   onClearPreview: () => void;
@@ -160,9 +166,9 @@ export function SideDock({
   /** 外部请求查看某文件的改动（点「文件改动」卡）：跳到 改动(工作区)/文件(对话) 视图。 */
   target?: { path: string; nonce: number } | null;
 }) {
-  const initialView: Tab = git ? "diff" : "files";
-  const [view, setView] = useState<Tab>(initialView);
-  const [openViews, setOpenViews] = useState<Tab[]>([initialView]);
+  const initialView: StaticTab = git ? "diff" : "files";
+  const [activeViewId, setActiveViewId] = useState<string>(initialView);
+  const [openViews, setOpenViews] = useState<DockView[]>([staticDockView(initialView)]);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [browserPage, setBrowserPage] = useState<BrowserPage | null>(() => {
     const url = browserTarget ? normalizeBrowserAddress(browserTarget.url) : null;
@@ -170,7 +176,7 @@ export function SideDock({
   });
   const [maxed, setMaxed] = useState(false);
   const [dockWidth, setDockWidth] = useState(readDockWidth);
-  const [termHistory, setTermHistory] = useState<TermEntry[]>([]);
+  const [terminalError, setTerminalError] = useState<string | null>(null);
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const targetHandledRef = useRef<number | null>(null);
@@ -179,10 +185,14 @@ export function SideDock({
   // git 状态后台刷新（repo false→true）不应把用户从当前视图（终端/预览）拽回 diff。
   const repoRef = useRef(repo);
   repoRef.current = repo;
+  const terminalRuntime = useMemo(() => getTerminalRuntime(), []);
+  const { confirm: confirmTerminalClose, dialog: terminalConfirmDialog } = useConfirm();
+  const terminalScope = `${previewScope}:${previewId}`;
+  const activeView = openViews.find((candidate) => candidate.id === activeViewId) ?? openViews[0];
 
-  const activateView = useCallback((next: Tab) => {
-    setOpenViews((current) => (current.includes(next) ? current : [...current, next]));
-    setView(next);
+  const activateView = useCallback((next: StaticTab) => {
+    setOpenViews((current) => (current.some((candidate) => candidate.id === next) ? current : [...current, staticDockView(next)]));
+    setActiveViewId(next);
     setAddMenuOpen(false);
   }, []);
 
@@ -192,24 +202,70 @@ export function SideDock({
 
   useEffect(() => {
     if (!open || openViews.length > 0) return;
-    setOpenViews([initialView]);
-    setView(initialView);
+    setOpenViews([staticDockView(initialView)]);
+    setActiveViewId(initialView);
   }, [initialView, open, openViews.length]);
 
-  const closeView = useCallback((closing: Tab) => {
-    const index = openViews.indexOf(closing);
+  useEffect(() => {
+    if (!terminalRuntime.available) return;
+    let cancelled = false;
+    void terminalRuntime.list(terminalScope).then((sessions) => {
+      if (cancelled || sessions.length === 0) return;
+      setOpenViews((current) => {
+        const known = new Set(current.map((candidate) => candidate.id));
+        return [...current, ...sessions.map(terminalDockView).filter((candidate) => !known.has(candidate.id))];
+      });
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [terminalRuntime, terminalScope]);
+
+  const createTerminal = useCallback(async () => {
+    setAddMenuOpen(false);
+    setTerminalError(null);
+    try {
+      const { cwd } = await getClient().terminalContext(previewScope, previewId);
+      const session = await terminalRuntime.create({ scope: terminalScope, cwd, cols: 80, rows: 24 });
+      const next = terminalDockView(session);
+      setOpenViews((current) => current.some((candidate) => candidate.id === next.id) ? current : [...current, next]);
+      setActiveViewId(next.id);
+    } catch (error) {
+      setTerminalError(error instanceof Error ? error.message : String(error));
+    }
+  }, [previewId, previewScope, terminalRuntime, terminalScope]);
+
+  const closeView = useCallback(async (closingId: string) => {
+    const index = openViews.findIndex((candidate) => candidate.id === closingId);
     if (index < 0) return;
-    const remaining = openViews.filter((tab) => tab !== closing);
+    const closing = openViews[index]!;
+    if (closing.terminal) {
+      try {
+        const outcome = await terminalRuntime.close(closing.terminal.sessionId);
+        if (outcome === "confirmation_required") {
+          const confirmed = await confirmTerminalClose({
+            title: "终端中仍有前台任务",
+            body: "关闭标签会结束该终端及其中正在运行的进程。",
+            danger: true,
+            okLabel: "结束终端",
+          });
+          if (!confirmed) return;
+          await terminalRuntime.close(closing.terminal.sessionId, true);
+        }
+      } catch (error) {
+        setTerminalError(error instanceof Error ? error.message : String(error));
+        return;
+      }
+    }
+    const remaining = openViews.filter((candidate) => candidate.id !== closingId);
     setOpenViews(remaining);
-    if (closing === "preview") {
+    if (closing.kind === "preview") {
       setBrowserPage(null);
       onClearPreview();
     }
-    if (view === closing && remaining.length > 0) {
-      setView(remaining[Math.min(index, remaining.length - 1)]!);
+    if (activeViewId === closingId && remaining.length > 0) {
+      setActiveViewId(remaining[Math.min(index, remaining.length - 1)]!.id);
     }
     if (remaining.length === 0) onClose();
-  }, [onClearPreview, onClose, openViews, view]);
+  }, [activeViewId, confirmTerminalClose, onClearPreview, onClose, openViews, terminalRuntime]);
 
   const openHtmlFile = useCallback(async (path: string) => {
     const resolvedPath = matchFileTarget(files, path)?.path ?? path;
@@ -262,20 +318,6 @@ export function SideDock({
     activateView("preview");
   }, [browserTarget?.nonce, activateView]);
 
-  const runCommand = async (c: string) => {
-    setTermHistory((h) => [...h, { cmd: c, output: "运行中…", code: null }]);
-    const r = await exec(c).catch((e: unknown) => ({
-      code: -1,
-      output: `[请求失败] ${e instanceof Error ? e.message : String(e)}`,
-      truncated: false,
-    }));
-    setTermHistory((h) => {
-      const n = h.slice();
-      n[n.length - 1] = { cmd: c, output: r.output || "（无输出）", code: r.code, truncated: r.truncated };
-      return n;
-    });
-  };
-
   const onResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startX = event.clientX;
@@ -311,24 +353,24 @@ export function SideDock({
       <div className="sd-titlebar-toolbar" data-tauri-drag-region>
         <div className="sd-open-tabs" role="tablist" aria-label="已打开的工作台视图" data-tauri-drag-region>
           {openViews.map((tab) => (
-            <div key={tab} className={`sd-tab-shell ${view === tab ? "on" : ""}`} data-tauri-drag-region>
+            <div key={tab.id} className={`sd-tab-shell ${activeViewId === tab.id ? "on" : ""}`} data-tauri-drag-region>
               <button
-                className={`sd-tab ${view === tab ? "on" : ""}`}
-                data-testid={`side-dock-tab-${tab}`}
+                className={`sd-tab ${activeViewId === tab.id ? "on" : ""}`}
+                data-testid={`side-dock-tab-${tab.id}`}
                 role="tab"
-                aria-selected={view === tab}
-                onClick={() => activateView(tab)}
+                aria-selected={activeViewId === tab.id}
+                onClick={() => setActiveViewId(tab.id)}
               >
-                {TAB_META[tab].icon()}
-                <span>{TAB_META[tab].label}</span>
-                {tab === "files" && files.length > 0 && <span className="rev-count">{files.length}</span>}
+                {TAB_META[tab.kind].icon()}
+                <span>{tab.label}</span>
+                {tab.kind === "files" && files.length > 0 && <span className="rev-count">{files.length}</span>}
               </button>
               <button
                 type="button"
                 className="sd-tab-close"
-                title={`关闭${TAB_META[tab].label}标签`}
-                aria-label={`关闭${TAB_META[tab].label}标签`}
-                onClick={() => closeView(tab)}
+                title={`关闭${tab.label}标签`}
+                aria-label={`关闭${tab.label}标签`}
+                onClick={() => void closeView(tab.id)}
               >
                 <XIcon size={12} />
               </button>
@@ -348,11 +390,16 @@ export function SideDock({
           </button>
           {addMenuOpen && (
             <div className="sd-view-menu" data-testid="side-dock-view-menu" role="menu">
-              {TAB_ORDER.filter((tab) => tab !== "diff" || git).map((tab) => (
-                <button type="button" key={tab} role="menuitem" onClick={() => activateView(tab)}>
+              {TAB_ORDER.filter((tab) => (tab !== "diff" || git) && (tab !== "terminal" || terminalRuntime.available)).map((tab) => (
+                <button
+                  type="button"
+                  key={tab}
+                  role="menuitem"
+                  onClick={() => tab === "terminal" ? void createTerminal() : activateView(tab)}
+                >
                   {TAB_META[tab].icon()}
                   <span>{TAB_META[tab].label}</span>
-                  {openViews.includes(tab) && <CheckIcon size={14} className="sd-menu-check" />}
+                  {tab !== "terminal" && openViews.some((candidate) => candidate.id === tab) && <CheckIcon size={14} className="sd-menu-check" />}
                 </button>
               ))}
             </div>
@@ -396,8 +443,9 @@ export function SideDock({
         }}
       />
       <div className="sd-body">
-        {view === "diff" && git && <DiffTab git={git} />}
-        {view === "files" && (
+        {terminalError && <div className="wpv-error">无法启动终端：{terminalError}</div>}
+        {activeView?.kind === "diff" && git && <DiffTab git={git} />}
+        {activeView?.kind === "files" && (
           <FilesTab
             files={files}
             scope={previewScope}
@@ -410,8 +458,10 @@ export function SideDock({
             onOpenHtml={(path) => void openHtmlFile(path)}
           />
         )}
-        {view === "terminal" && <TerminalTab msgs={msgs} history={termHistory} onRun={runCommand} />}
-        {view === "preview" && (
+        {activeView?.kind === "terminal" && activeView.terminal && (
+          <TerminalView runtime={terminalRuntime} session={activeView.terminal} onError={setTerminalError} />
+        )}
+        {activeView?.kind === "preview" && (
           <PreviewTab
             page={browserPage}
             onNavigate={(url) => setBrowserPage({ kind: "url", url })}
@@ -423,6 +473,7 @@ export function SideDock({
         )}
       </div>
       </aside>
+      {terminalConfirmDialog}
     </>
   );
 }
@@ -536,97 +587,6 @@ function FilesTab({
     );
   }
   return sel ? <div className="files-detail">{fileViewer}</div> : fileList;
-}
-
-// ===== 终端 tab：看 AI 运行的命令 + 自己跑命令 =====
-function TerminalTab({
-  msgs,
-  history,
-  onRun,
-}: {
-  msgs: UiMsg[];
-  history: TermEntry[];
-  onRun: (command: string) => Promise<void>;
-}) {
-  const [cmd, setCmd] = useState("");
-  const [running, setRunning] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // AI 最近一次 run_command（作为上下文展示在顶部）。
-  let aiLast: { output?: string; result?: string; args: string } | undefined;
-  for (const m of msgs) for (const b of m.blocks ?? []) if (b.kind === "tool" && b.tool.name === "run_command") aiLast = b.tool;
-  let aiCmd = "";
-  try {
-    aiCmd = (JSON.parse(aiLast?.args || "{}") as { command?: string }).command ?? "";
-  } catch {
-    /* ignore */
-  }
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [history, running]);
-
-  const submit = async () => {
-    const c = cmd.trim();
-    if (!c || running) return;
-    setCmd("");
-    setRunning(true);
-    try {
-      await onRun(c);
-    } finally {
-      setRunning(false);
-      inputRef.current?.focus();
-    }
-  };
-
-  return (
-    <div className="term-tab">
-      <div className="term-scroll" ref={scrollRef}>
-        {aiLast && (
-          <div className="term-entry term-ai">
-            <div className="term-cmd">
-              <span className="term-tag">AI</span># {aiCmd}
-            </div>
-            <pre className="term-out">{aiLast.output || aiLast.result || "（无输出）"}</pre>
-          </div>
-        )}
-        {history.map((e, i) => (
-          <div key={i} className="term-entry">
-            <div className="term-cmd">
-              <span className="term-dollar">$</span> {e.cmd}
-              {e.code != null && e.code !== 0 && <span className="term-code">exit {e.code}</span>}
-            </div>
-            <pre className="term-out">{e.output}</pre>
-            {e.truncated && <div className="term-trunc">输出过长，已截断。</div>}
-          </div>
-        ))}
-        {!aiLast && history.length === 0 && <DockEmpty>输入命令后，结果会显示在这里。</DockEmpty>}
-      </div>
-      <div className="term-input">
-        <span className="term-dollar">$</span>
-        <input
-          ref={inputRef}
-          value={cmd}
-          placeholder={running ? "执行中…" : "输入命令并回车…"}
-          disabled={running}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          onChange={(e) => setCmd(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              void submit();
-            }
-          }}
-        />
-        <button className="fv-btn" title="运行" disabled={running || !cmd.trim()} onClick={() => void submit()}>
-          <EnterIcon size={14} />
-        </button>
-      </div>
-    </div>
-  );
 }
 
 // ===== 浏览器 tab：消息链接、HTML 文件或用户输入地址 → iframe 浏览 =====
