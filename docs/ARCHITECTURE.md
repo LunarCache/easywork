@@ -4,7 +4,7 @@
 
 ## Core Daemon 模型
 
-一个无头的 Node **核心守护进程（`apps/daemon` 组装 `@ew/core`）拥有全部“大脑”**：托管 pi-coding-agent 内核（`SessionHost`）、推理（统一 `llama serve` router 进程管理 + 云端 provider）、工具 / Skills / MCP、记忆、知识库、SQLite 存储，以及 `ChannelOperations` / `ChannelGateway` / `ConnectorHost`。Core 对外暴露**本地 HTTP API + SSE**（Fastify），并由进程内的渠道模块主动连接或接收 Telegram、Feishu/Lark、WeChat 等平台流量。应用内聊天与 IM 渠道复用同一个 `SessionHost`；OpenAI/Anthropic 兼容 `/v1` 则是直接推理入口，复用本地 router / 云端 provider runtime，但不调用 `SessionHost.run`、不创建带记忆和工具的 `AgentSession`。
+一个无头的 Node **核心守护进程（`apps/daemon` 组装 `@ew/core`）拥有全部“大脑”**：托管 pi-coding-agent 内核（`SessionHost`）、推理（统一 `llama serve` router 进程管理 + 云端 provider）、工具 / Skills / MCP、记忆、SQLite 存储，以及 `ChannelOperations` / `ChannelGateway` / `ConnectorHost`。Core 对外暴露**本地 HTTP API + SSE**（Fastify），并由进程内的渠道模块主动连接或接收 Telegram、Feishu/Lark、WeChat 等平台流量。应用内聊天与 IM 渠道复用同一个 `SessionHost`；OpenAI/Anthropic 兼容 `/v1` 则是直接推理入口，复用本地 router / 云端 provider runtime，但不调用 `SessionHost.run`、不创建带记忆和工具的 `AgentSession`。
 
 ```
                  ┌─────────────────────────────────────────────┐
@@ -12,7 +12,7 @@
                  │  pi-coding-agent 内核（SessionHost 托管）     │
                  │  ew-extensions（记忆 / 权限 / 工具桥接）      │
                  │  ChannelOperations · Gateway · ConnectorHost │
-                 │  llama router host · skills · MCP · RAG      │
+                 │  llama router host · skills · MCP            │
                  │  SQLite · Fastify HTTP/SSE · /v1 网关        │
                  └─────────────────────────────────────────────┘
        owned child ▲          ▲ HTTP+SSE        ▲ 平台协议       ▲ HTTP /v1
@@ -25,14 +25,14 @@
 
 - **Tauri 主进程（Rust）**：创建窗口并持有 daemon child；读取 child stdout 首行的 `{baseUrl, token}`，保存后通过 `get_config` 返回给 webview，退出时杀掉 child。Rust 层目前没有菜单或自动更新，也不负责 HTTP 探活；React UI 会重试 `get_config`，再请求 `/health`。WebView 使用显式 CSP：放行 Tauri IPC、本地 daemon、data/blob 媒体与沙盒预览来源，禁止远程脚本、对象插件、表单提交和外部页面嵌入主窗口。**打包时启动随附的单文件 daemon 二进制（Node SEA，免 Node）**；开发时运行 `node $EW_DAEMON_ENTRY serve`。
 - **Core daemon 的三种进程形态**：显式 `easywork serve` 在前台运行；需要 daemon 且启用自动启动的 CLI 命令探测不到服务时，会 detached spawn 自身的 `serve` 并 `unref()`（`status` / `stop` 只检查现有服务，不自启）；Tauri 启动的是由桌面主进程持有、随应用退出回收的 child，不是 detached 自启进程。
-- **本地推理**：统一 `llama`（llama.app）的 **router 模式** —— 1 个 `llama serve --models-dir` 进程，按请求 `model`（即模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰。嵌入模型走独立 `llama serve -m --embedding` 进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，记忆 / 知识库向量召回用；缺失则降级纯词法）。
+- **本地推理**：统一 `llama`（llama.app）的 **router 模式** —— 1 个 `llama serve --models-dir` 进程，按请求 `model`（即模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰。嵌入模型走独立 `llama serve -m --embedding` 进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，供记忆向量召回；缺失则降级纯词法）。
 
 ## Monorepo 结构（npm workspaces + Turborepo）
 
 ```
 packages/
   shared/         @ew/shared        Zod schema、类型与少量运行时 helper（契约层；运行时依赖 zod）
-  core/           @ew/core          daemon 库：server / routes / SessionHost(托管 pi) / ew-extensions / ChannelOperations / /v1 网关 / RAG / store
+  core/           @ew/core          daemon 库：server / routes / SessionHost(托管 pi) / ew-extensions / ChannelOperations / /v1 网关 / store
   providers/      @ew/providers     LlamaServeEngine（--host/--api-key）/ OpenAICompatibleEngine / harmony 解析
   memory/         @ew/memory        local Core Memory + additive external recall + SqliteVecIndex 语义 ⊕ 词法召回
   tools/          @ew/tools         内置工具 + SSRF 防护
@@ -88,7 +88,7 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 | 契约 / 校验 | Zod 共享契约；HTTP handler 通过 `safeParse` 等手动校验请求 |
 | 本地 DB | `node:sqlite`（内置 DatabaseSync，零原生编译） |
 | 渠道密钥 | `ChannelSecretStore`：macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI；SQLite 仅存去密配置 |
-| 记忆 / RAG | 本地 Core Memory + 可选 additive provider；独立 `llama serve --embedding`（默认 nomic）+ **sqlite-vec**；记忆按 `0.75 × 语义 + 0.25 × 词法` 加权，知识库用 dense / lexical RRF；向量或 provider 不可用时本地词法链路仍工作 |
+| 记忆 | 本地 Core Memory + 可选 additive provider；独立 `llama serve --embedding`（默认 nomic）+ **sqlite-vec**；按 `0.75 × 语义 + 0.25 × 词法` 加权，向量或 provider 不可用时本地词法链路仍工作 |
 | UI | React 19 + Vite + react-markdown |
 | 桌面 | Tauri 2（Rust 外壳 + TS 前端；Rust 启动并持有 daemon child） |
 | 打包 | daemon Node SEA 单文件二进制；Tauri macOS dmg + Windows x64 NSIS/MSI；版本、SEA `/health` 与平台产物契约通过后进入 GitHub Releases |

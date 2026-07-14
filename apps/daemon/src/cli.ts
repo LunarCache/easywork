@@ -7,7 +7,6 @@ import { run } from "./cli/commands/run.js";
 import { repl } from "./cli/commands/repl.js";
 import { threadList, threadRemove, threadShow } from "./cli/commands/thread.js";
 import { memList, memRemove, memSearch } from "./cli/commands/mem.js";
-import { kbAdd, kbList, kbRemove, kbSearch } from "./cli/commands/kb.js";
 
 interface Parsed {
   positionals: string[];
@@ -68,7 +67,6 @@ ${c.bold("命令")}
   ${c.cyan("models rm")} <名/路径片段>  删除本地模型
   ${c.cyan("thread")} [ls]              列出会话；${c.cyan("thread show")} <id> 看历史；${c.cyan("thread rm")} <id> 删除
   ${c.cyan("mem")} [ls]                 列记忆；${c.cyan("mem search")} <词> 召回；${c.cyan("mem rm")} <id> 删除
-  ${c.cyan("kb")} [ls]                  知识库列表；${c.cyan("kb search")} <词>；${c.cyan("kb add")} <文件/文本>；${c.cyan("kb rm")} <docId>
   ${c.cyan("serve")}                    前台启动 core daemon
   ${c.cyan("status")}                   查看 daemon 状态（地址 / pid / 模型）
   ${c.cyan("stop")}                     停止本机 daemon
@@ -79,7 +77,7 @@ ${c.bold("选项")}
   -t, --thread <id>        run/repl 续接已有会话（默认每次新开）
   -y, --yes                自动批准工具调用 / 跳过删除确认（脚本用）
       --quant <q>          models pull 的量化（如 Q4_K_M）
-      --scope <s>          mem ls 限定作用域 · --kb <id> 指定知识库
+      --scope <s>          mem ls 限定作用域
   -p, --port / -H, --host / --token   serve 用
   -h, --help / -v, --version
 
@@ -154,16 +152,6 @@ async function main(): Promise<void> {
       else if (sub === "rm" || sub === "remove" || sub === "delete")
         await memRemove(positionals[2]);
       else die(`未知 mem 子命令: ${sub}（支持 ls / search / rm）`);
-      break;
-    }
-    case "kb": {
-      const sub = positionals[1] ?? "ls";
-      if (sub === "ls" || sub === "list") await kbList();
-      else if (sub === "search") await kbSearch(positionals.slice(2).join(" "));
-      else if (sub === "add" || sub === "ingest")
-        await kbAdd(positionals.slice(2).join(" ") || undefined, str(flags.kb));
-      else if (sub === "rm" || sub === "remove" || sub === "delete") await kbRemove(positionals[2]);
-      else die(`未知 kb 子命令: ${sub}（支持 ls / search / add / rm）`);
       break;
     }
     case "run":

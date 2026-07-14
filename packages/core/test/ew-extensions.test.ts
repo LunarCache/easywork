@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import type { Tool, MemoryProvider, ConversationRepo, SkillCandidateCreate } from "@ew/shared";
-import type { KnowledgeBaseStore } from "../src/rag/store.js";
 import { toPiTool, buildEwCustomTools, turnsForExtraction } from "../src/agent/ew-extensions.js";
 import { ExtractionScheduler } from "../src/memory/extraction-scheduler.js";
 
@@ -71,13 +70,12 @@ describe("toPiTool", () => {
 });
 
 describe("buildEwCustomTools", () => {
-  it("includes memory/session/kb tools per provided deps", async () => {
+  it("includes memory and session tools for the provided deps", async () => {
     const memory = {} as MemoryProvider;
     const repo = {} as ConversationRepo;
-    const kb = {} as KnowledgeBaseStore;
-    const tools = await buildEwCustomTools({ sessionId: "s", cwd: "/tmp", memory, repo, kb });
+    const tools = await buildEwCustomTools({ sessionId: "s", cwd: "/tmp", memory, repo });
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["manage_memory", "recall_memory", "search_knowledge_base", "session_search"]);
+    expect(names).toEqual(["manage_memory", "recall_memory", "session_search"]);
   });
 
   it("empty when no deps", async () => {

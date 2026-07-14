@@ -12,7 +12,6 @@ import type { ProviderManager } from "../providers/manager.js";
 import type { SessionHost } from "../agent/session-host.js";
 import type { SqliteConversationRepo } from "../store/conversation.js";
 import type { EmbeddingService } from "../memory/embedding-service.js";
-import type { KnowledgeBaseStore } from "../rag/store.js";
 import type { SkillCandidateService } from "../skill-learning/candidate-service.js";
 import type { SkillLearningCoordinator } from "../skill-learning/coordinator.js";
 
@@ -35,7 +34,6 @@ export interface CoreHttpContext {
   /** Agent/渠道实际使用的记忆视图：本地 Core Memory + 可禁用的只读外部召回。 */
   agentMemory: AdditiveMemoryProvider;
   embeddings: EmbeddingService;
-  kb: KnowledgeBaseStore;
   repo: SqliteConversationRepo;
   fetchImpl: typeof fetch;
   persistProviders(): void;

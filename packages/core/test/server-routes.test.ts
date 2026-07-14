@@ -23,7 +23,6 @@ function makeCore(overrides: Partial<CreateCoreOptions> = {}): CoreServer {
     dbPath: ":memory:",
     memoryDbPath: ":memory:",
     memoryDir: path.join(tmpDir, "memory"),
-    kbDbPath: ":memory:",
     skillLearningDbPath: ":memory:",
     agentDir: path.join(tmpDir, "pi-agent"),
     ...overrides,
@@ -161,7 +160,7 @@ describe("server route modules", () => {
     insert.run("ambiguous", "蓝色主题", "2026-01-03T00:00:00.000Z");
     db.close();
     core = createCore({
-      token: "t", dbPath: ":memory:", memoryDbPath, memoryDir, kbDbPath: ":memory:",
+      token: "t", dbPath: ":memory:", memoryDbPath, memoryDir,
       skillLearningDbPath: ":memory:", agentDir: path.join(tmpDir, "pi-agent"),
     });
 

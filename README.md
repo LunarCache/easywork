@@ -4,7 +4,7 @@
 
 # EasyWork
 
-### 本地优先的 AI 工作台，把模型、记忆、工具、知识库和外部渠道收进同一个大脑。
+### 本地优先的 AI 工作台，把模型、记忆、工具和外部渠道收进同一个大脑。
 
 [![CI](https://github.com/LunarCache/easywork/actions/workflows/ci.yml/badge.svg)](https://github.com/LunarCache/easywork/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/LunarCache/easywork?sort=semver)](https://github.com/LunarCache/easywork/releases)
@@ -13,7 +13,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)](tsconfig.base.json)
 [![Tauri](https://img.shields.io/badge/Tauri-2.x-24c8db)](apps/desktop/src-tauri/tauri.conf.json)
 
-**本地 GGUF / 云端模型** · **pi Agent 内核** · **Skills / MCP / 内置工具** · **知识库 RAG** · **作用域化记忆** · **桌面 + CLI + `/v1` 网关** · **Telegram / Feishu / Lark / WeChat 渠道**
+**本地 GGUF / 云端模型** · **pi Agent 内核** · **Skills / MCP / 内置工具** · **作用域化记忆** · **桌面 + CLI + `/v1` 网关** · **Telegram / Feishu / Lark / WeChat 渠道**
 
 ```bash
 curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh | sh
@@ -25,14 +25,14 @@ curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh
 
 ## 为什么是 EasyWork
 
-EasyWork 不是一个只包了聊天框的客户端。它的核心是一个本地守护进程：同一个 daemon 托管 agent 会话、模型路由、工具审批、记忆、知识库、外部渠道连接器和 OpenAI/Anthropic 兼容网关。桌面和命令行通过 HTTP/SSE 作为瘦客户端接入；渠道 adapter/host 运行在 core 进程内，直接把外部消息交给同一个 `SessionHost`。`/v1` 客户端则走兼容网关，仅复用 daemon 的模型/provider runtime，不进入 `AgentSession`，也不附带记忆和工具。
+EasyWork 不是一个只包了聊天框的客户端。它的核心是一个本地守护进程：同一个 daemon 托管 agent 会话、模型路由、工具审批、记忆、外部渠道连接器和 OpenAI/Anthropic 兼容网关。桌面和命令行通过 HTTP/SSE 作为瘦客户端接入；渠道 adapter/host 运行在 core 进程内，直接把外部消息交给同一个 `SessionHost`。`/v1` 客户端则走兼容网关，仅复用 daemon 的模型/provider runtime，不进入 `AgentSession`，也不附带记忆和工具。
 
 | 能力 | 说明 |
 |---|---|
 | **本地优先** | 本地 GGUF 通过统一 `llama serve --models-dir` router 运行，按需加载、多模型路由、LRU 淘汰；云端既可直接使用 pi-ai 内置 provider，也可接 OpenAI / Anthropic 等多协议兼容端点。 |
 | **真正的 Agent** | 托管 [`pi-coding-agent`](https://github.com/earendil-works/pi) 的 `AgentSession`，自带 read/bash/edit/write/grep/ls/find、上下文压缩、会话管理。 |
 | **可审计工具流** | 4 档审批策略、工作区路径硬隔离、行内工具调用、git 改动审阅、终端和文件预览都在同一个工作台内。 |
-| **记得住，也查得到** | 作用域化记忆 + sqlite-vec 语义召回 + 词法兜底；知识库文档支持解析、分块、检索和引用。 |
+| **记得住，也查得到** | 作用域化记忆 + sqlite-vec 语义召回 + 词法兜底；会话历史通过 FTS5 检索。 |
 | **多入口一个宿主** | Tauri 桌面、CLI 与 Telegram / Feishu / Lark / WeChat 渠道复用同一套 Agent 宿主能力，渠道生命周期由 core 侧 Channel Operations 统一管理。OpenAI `/v1` 与 Anthropic `/v1/messages` 只共享模型/provider runtime，不经过 AgentSession、记忆或工具。 |
 
 ---
@@ -53,7 +53,7 @@ flowchart LR
     Agent["pi AgentSession"]
     Router["llama router<br/>local GGUF"]
     Tools["Built-in Tools<br/>Skills<br/>MCP"]
-    Memory["Memory + KB<br/>SQLite + sqlite-vec"]
+    Memory["Memory<br/>SQLite + sqlite-vec"]
   end
 
   Cloud["Cloud Providers"]
@@ -79,7 +79,7 @@ flowchart LR
 
 ### Agent 工作台
 
-- 对话模式：适合问答、总结、联网搜索、知识库检索和多模态输入。
+- 对话模式：适合问答、总结、联网搜索和多模态输入。
 - 工作区模式：在本地项目目录内读写文件、运行命令、查看 git diff、预览文件和终端输出。
 - 右侧工作台坞：改动、文件、终端、预览和上下文状态常驻可见。
 - 行内工具调用：思考、探索、编辑、运行、web search 等过程结构化展示。
@@ -92,10 +92,9 @@ flowchart LR
 - 思考默认值：`/models.modelSources[].reasoning` 将运行时推理能力同步给 Chat / Workspace；推理模型首次使用默认「中」，显式选择「关」后按模型持久化。
 - 多协议 API：OpenAI `/v1/chat/completions`、`/v1/embeddings`、`/v1/models`，以及 Anthropic `/v1/messages`。
 
-### 记忆、知识库、Skills、MCP
+### 记忆、Skills、MCP
 
 - Core Memory 只保存 User Profile / Agent Notes；自动事实保留来源所有权，删除来源对话会级联删除未提升事实。工作区记忆隔离，支持语义/词法召回和 markdown 回灌；外部 Deep Memory 只能追加受限召回，不能替换本地真相源。记忆页把搜索和添加保持为主操作，向量 / 外部 Provider 收成紧凑运行状态；旧版 Skill 迁移审计在无歧义项时折叠为次级信息，有待判断项时自动展开并突出数量。
-- 知识库支持上传、解析、分块、混合检索和引用来源。
 - Skills 页面以“已启用 / 待审核 / 已归档”分开全局来源与 learned Skills；自动学习状态常驻摘要，阈值、模型、自动检查和智能合并提案按需展开，避免挤占主要管理流程。Chat 或设置里的“学习 Skill”和受限后台复盘都只生成 Candidate，明确批准后才会激活。候选支持完整 package 验证、工作区 scope、证据、乐观锁 patch；learned Skills 支持遥测、固定、快照、归档、恢复和回滚。
 - MCP 支持 stdio 与 HTTP，工具清单探测、启停、导入和审批一体化。
 
@@ -153,7 +152,6 @@ npm exec --workspace @ew/daemon -- easywork models pull <hf-repo>               
 npm exec --workspace @ew/daemon -- easywork models rm <name>                    # 删除本地模型
 npm exec --workspace @ew/daemon -- easywork thread ls / show <id> / rm <id>     # 会话历史
 npm exec --workspace @ew/daemon -- easywork mem ls / search <query> / rm <id>   # 记忆
-npm exec --workspace @ew/daemon -- easywork kb ls / search <query> / add <file> # 知识库
 npm exec --workspace @ew/daemon -- easywork status / stop                       # daemon 状态 / 停止
 ```
 
@@ -188,11 +186,11 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 356 passed / 1 skipped
+npm test               # vitest: 345 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
-npm run test:e2e       # Playwright UI e2e: 29 条，真 daemon + 真 Vite + 隔离 data dir
+npm run test:e2e       # Playwright UI e2e: 28 条，真 daemon + 真 Vite + 隔离 data dir
 
 npm run dev:daemon     # 仅启动 daemon，首行输出 {baseUrl, token, pid}
 npm run dev:ui         # 仅启动 Vite
@@ -216,9 +214,9 @@ npm run release:check-artifacts -- windows
 
 ## 测试覆盖
 
-- Vitest：356 passed / 1 skipped。
+- Vitest：345 passed / 1 skipped。
 - 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
-- Playwright UI e2e：29 条，覆盖设置页、模型模板跨协议元数据继承、推理模型默认思考档位、默认工作区直达、渠道/知识库/Skills/记忆入口与设置层级、Chat / Workspace composer 无边框控件与上下文用量悬停详情、联网工具门控、图片上传与粘贴、搜索导航、文件页、macOS 工作台安全区、来源事实、记忆 CRUD、知识库、Skills 模板/候选 diff/审批与显式学习。
+- Playwright UI e2e 覆盖设置页、模型模板跨协议元数据继承、推理模型默认思考档位、默认工作区直达、渠道/Skills/记忆入口与设置层级、Chat / Workspace composer 无边框控件与上下文用量悬停详情、联网工具门控、图片上传与粘贴、搜索导航、文件页、macOS 工作台安全区、来源事实、记忆 CRUD、Skills 模板/候选 diff/审批与显式学习。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
 
 ---
@@ -228,7 +226,7 @@ npm run release:check-artifacts -- windows
 | 文档 | 内容 |
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | 系统设计与功能详解：架构、子系统原理、关键数据流和设计取舍。 |
-| [docs/FEATURES.md](docs/FEATURES.md) | 功能说明：模型、Agent、记忆、RAG、UI、`/v1` 端点。 |
+| [docs/FEATURES.md](docs/FEATURES.md) | 功能说明：模型、Agent、记忆、UI、`/v1` 端点。 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Core daemon、monorepo、技术栈、环境变量和平台说明。 |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 状态总览与倒序里程碑日志。 |
 | [AGENTS.md](AGENTS.md) | 开发约定、关键正确性约束和常用命令。 |

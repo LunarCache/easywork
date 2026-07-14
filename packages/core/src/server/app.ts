@@ -34,7 +34,6 @@ import { SessionHost } from "../agent/session-host.js";
 import { SqliteConversationRepo } from "../store/conversation.js";
 import { EmbeddingService } from "../memory/embedding-service.js";
 import { buildFactExtractor } from "../memory/fact-extractor.js";
-import { KnowledgeBaseStore } from "../rag/store.js";
 import { RouterServerManager } from "../engine/router-server-manager.js";
 import { getFreePort } from "../engine/net.js";
 import type { LocalBackend } from "../engine/local-backend.js";
@@ -51,7 +50,7 @@ import { registerAgentRoutes } from "./routes/agent.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerProviderRoutes } from "./routes/providers.js";
 import { registerChannelRoutes } from "./routes/channels.js";
-import { registerKnowledgeRoutes } from "./routes/knowledge.js";
+import { registerSkillRoutes } from "./routes/skills.js";
 import { registerMcpRoutes } from "./routes/mcp.js";
 import { registerMemoryRoutes } from "./routes/memory.js";
 import { registerSkillLearningRoutes } from "./routes/skill-learning.js";
@@ -81,7 +80,6 @@ export interface CoreServer {
   memory: LocalMemoryProvider;
   agentMemory: AdditiveMemoryProvider;
   embeddings: EmbeddingService;
-  kb: KnowledgeBaseStore;
   repo: SqliteConversationRepo;
   token: string;
   start(opts?: { port?: number; host?: string }): Promise<{ port: number; host: string }>;
@@ -109,8 +107,6 @@ export interface CreateCoreOptions {
   memoryDir?: string;
   /** 记忆索引 SQLite 路径（测试可传 ":memory:"）。 */
   memoryDbPath?: string;
-  /** 知识库 SQLite 路径（测试可传 ":memory:"）。 */
-  kbDbPath?: string;
   /** 覆盖 fetch（测试用，拦截 HF / 云端调用）。 */
   fetch?: typeof fetch;
   /** 覆盖 Feishu/Lark 扫码注册（测试用，避免真实外网轮询）。 */
@@ -243,14 +239,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   const stopMemWatch =
     (opts.memoryDbPath ?? "") === ":memory:" ? () => {} : memory.startWatching();
 
-  // 文档知识库 RAG：分块 + 嵌入 + 混合检索（语义走 sqlite-vec，与记忆一致）；非空时暴露 search_knowledge_base 工具。
-  const kb = new KnowledgeBaseStore({
-    dbPath: opts.kbDbPath ?? `${defaultDataDir()}/kb.db`,
-    embed: (texts) => embeddings.embed(texts),
-    ...(vecExtensionPath ? { vecExtensionPath } : {}),
-  });
-  // search_knowledge_base 工具按请求所选集合注入（见 /agent/run），不再全局常驻。
-
   const repo = new SqliteConversationRepo(opts.dbPath ?? defaultDbPath());
   const channelSecretStore = opts.channelSecretStore
     ?? ((opts.dbPath ?? defaultDbPath()) === ":memory:"
@@ -259,7 +247,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   const localModelSettings = new LocalModelSettingsStore(repo);
 
   // 宿主：pi-coding-agent 内核托管 /agent/run。
-  // R3：注入记忆/会话检索/知识库/MCP，使托管会话具备 EasyWork 专有能力。
+  // R3：注入记忆/会话检索/MCP，使托管会话具备 EasyWork 专有能力。
   const sessionHost = new SessionHost({
     local,
     providers,
@@ -267,7 +255,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     globalSkillPaths: skillSources.map((source) => source.dir),
     memory: agentMemory,
     repo,
-    kb,
     mcp,
     builtins: builtinTools,
     localModelSettings,
@@ -286,7 +273,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     archiveDir: fsPath.join(fsPath.dirname(agentDir), "skill-archive"),
     knownTools: () => [
       "read", "write", "edit", "bash", "grep", "find", "ls",
-      "manage_memory", "recall_memory", "session_search", "search_knowledge_base", "stage_skill_candidate",
+      "manage_memory", "recall_memory", "session_search", "stage_skill_candidate",
       ...builtinTools.map((tool) => tool.definition.name),
     ],
   });
@@ -625,7 +612,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     memory,
     agentMemory,
     embeddings,
-    kb,
     repo,
     fetchImpl: opts.fetch ?? fetch,
     persistProviders,
@@ -664,8 +650,8 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   // ---- MCP 服务器管理 ----
   registerMcpRoutes(routeContext);
 
-  // ---- 知识库 RAG + 全局 Skills ----
-  registerKnowledgeRoutes(routeContext);
+  // ---- 全局 Skills ----
+  registerSkillRoutes(routeContext);
 
   // ---- 会话 / 工作区 / 文件 / Git ----
   registerWorkspaceRoutes(routeContext);
@@ -701,7 +687,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     memory,
     agentMemory,
     embeddings,
-    kb,
     repo,
     token,
     async start(startOpts = {}) {
@@ -738,11 +723,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       }
       try {
         memory.close();
-      } catch {
-        /* ignore */
-      }
-      try {
-        kb.close();
       } catch {
         /* ignore */
       }

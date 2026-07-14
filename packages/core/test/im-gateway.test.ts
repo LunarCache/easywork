@@ -48,7 +48,7 @@ describe("IM ChannelGateway HTTP routes", () => {
   });
 
   it("lists built-in channel adapters", async () => {
-    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:" });
     const res = await core.app.inject({ method: "GET", url: "/im/adapters", headers: auth });
 
     expect(res.statusCode).toBe(200);
@@ -75,7 +75,7 @@ describe("IM ChannelGateway HTTP routes", () => {
   });
 
   it("lists channel threads as inbox conversations", async () => {
-    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:" });
     const channelThread = core.repo.resolveThreadForChannel("wechat", "wxid_alice", { modelId: "model-a" });
     core.repo.appendMessage({
       id: "msg-channel-1",
@@ -113,7 +113,7 @@ describe("IM ChannelGateway HTTP routes", () => {
   });
 
   it("streams inbox invalidation events over SSE", async () => {
-    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:" });
     const { host, port } = await core.start({ host: "127.0.0.1", port: 0 });
     const ac = new AbortController();
     const res = await fetch(`http://${host}:${port}/inbox/events`, {
@@ -156,7 +156,7 @@ describe("IM ChannelGateway HTTP routes", () => {
     cleanup.push(dir);
     const channelSecretStore = new MemoryChannelSecretStore();
 
-    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", kbDbPath: ":memory:", channelSecretStore });
+    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", channelSecretStore });
     const upsert = await core.app.inject({
       method: "POST",
       url: "/im/connectors",
@@ -215,7 +215,7 @@ describe("IM ChannelGateway HTTP routes", () => {
     expect(channelSecretStore.get("tg-main")).toEqual({ token: "test-token" });
 
     await core.stop();
-    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", kbDbPath: ":memory:", channelSecretStore });
+    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", channelSecretStore });
     const restored = await core.app.inject({ method: "GET", url: "/im/connectors", headers: auth });
 
     expect(restored.statusCode).toBe(200);
@@ -244,7 +244,7 @@ describe("IM ChannelGateway HTTP routes", () => {
     legacyRepo.close();
     const channelSecretStore = new MemoryChannelSecretStore();
 
-    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", kbDbPath: ":memory:", channelSecretStore });
+    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", channelSecretStore });
 
     expect(channelSecretStore.get("legacy-feishu")).toEqual({ appId: "cli_legacy", appSecret: "legacy-secret" });
     const persisted = core.repo.getSetting("im.connectors") ?? "";
@@ -262,7 +262,7 @@ describe("IM ChannelGateway HTTP routes", () => {
   });
 
   it("requires bearer auth and returns adapter webhook result", async () => {
-    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:" });
     const unauthorized = await core.app.inject({ method: "GET", url: "/im/adapters" });
     expect(unauthorized.statusCode).toBe(401);
 
@@ -301,7 +301,7 @@ describe("IM ChannelGateway HTTP routes", () => {
   });
 
   it("dispatches signed Feishu webhook callbacks without daemon bearer auth", async () => {
-    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:" });
     const upsert = await core.app.inject({
       method: "POST",
       url: "/im/connectors",
@@ -341,7 +341,7 @@ describe("IM ChannelGateway HTTP routes", () => {
   });
 
   it("rejects oversized external webhook payloads before buffering them", async () => {
-    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+    core = createCore({ token: "t", dbPath: ":memory:", memoryDbPath: ":memory:" });
     const webhook = await core.app.inject({
       method: "POST",
       url: "/im/fs-main/webhook",
@@ -360,7 +360,6 @@ describe("IM ChannelGateway HTTP routes", () => {
       token: "t",
       dbPath: ":memory:",
       memoryDbPath: ":memory:",
-      kbDbPath: ":memory:",
       feishuRegister: async (options) => {
         options.onQRCodeReady({ url: "https://accounts.feishu.cn/qr/test", expireIn: 600 });
         return { appId: "cli_scan", appSecret: "scan-secret", tenantBrand: "feishu" };
@@ -420,7 +419,6 @@ describe("IM ChannelGateway HTTP routes", () => {
       token: "t",
       dbPath: ":memory:",
       memoryDbPath: ":memory:",
-      kbDbPath: ":memory:",
       feishuRegister: async (options) => {
         options.onQRCodeReady({ url: "https://accounts.feishu.cn/qr/test", expireIn: 600 });
         return await new Promise((resolve) => {
@@ -465,7 +463,6 @@ describe("IM ChannelGateway HTTP routes", () => {
       token: "t",
       dbPath: ":memory:",
       memoryDbPath: ":memory:",
-      kbDbPath: ":memory:",
       feishuRegister: async (options) => {
         registerSignal = options.signal;
         options.onQRCodeReady({ url: "https://accounts.feishu.cn/qr/test", expireIn: 600 });
@@ -497,7 +494,6 @@ describe("IM ChannelGateway HTTP routes", () => {
       token: "t",
       dbPath: ":memory:",
       memoryDbPath: ":memory:",
-      kbDbPath: ":memory:",
       wechatRegister: async (options) => {
         options.onQRCodeReady({ url: "https://weixin.example/qr", expireIn: 300, rawCode: "qr-1" });
         options.onStatusChange?.({ status: "scaned" });

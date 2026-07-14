@@ -601,8 +601,6 @@ export class EasyWorkClient {
       thinkingLevel?: ThinkLevel;
       regenerate?: boolean;
       sampling?: SamplingParams;
-      kb?: boolean;
-      kbId?: string;
       projectId?: string;
     },
     init?: { signal?: AbortSignal },
@@ -1015,58 +1013,6 @@ export class EasyWorkClient {
     const q = qs.toString();
     const { items } = await this.getJSON<{ items: MemoryItem[] }>(`/memory${q ? `?${q}` : ""}`);
     return items;
-  }
-
-  // ---- 知识库 RAG ----
-  async kbList(): Promise<{ kbs: { kbId: string; docs: number; chunks: number }[] }> {
-    return this.getJSON("/kb/list");
-  }
-
-  async kbDocs(kbId?: string): Promise<{ docs: { id: string; kbId: string; source: string; chunks: number; createdAt: string }[]; chunks: number }> {
-    return this.getJSON(`/kb/docs${kbId ? `?kbId=${encodeURIComponent(kbId)}` : ""}`);
-  }
-
-  async kbIngest(input: { source: string; text: string; kbId?: string }): Promise<{ doc: { id: string; source: string; chunks: number } }> {
-    return this.postJSON("/kb/docs", input);
-  }
-
-  /** 上传本地文件内容（base64），后台异步解析+嵌入，返回 jobId。 */
-  async kbUpload(input: { source: string; contentBase64: string; kbId?: string }): Promise<{ jobId: string }> {
-    return this.postJSON("/kb/upload", input);
-  }
-
-  async kbJobs(): Promise<{
-    jobs: {
-      id: string;
-      source: string;
-      kbId: string;
-      status: string;
-      chunks?: number;
-      done?: number;
-      total?: number;
-      error?: string;
-    }[];
-  }> {
-    return this.getJSON("/kb/jobs");
-  }
-
-  /** 单文档正文（拼接全部分块）+ 元数据，供预览。 */
-  async kbDocContent(
-    id: string,
-  ): Promise<{ doc: { id: string; kbId: string; source: string; createdAt: string; chunks: number; text: string } }> {
-    return this.getJSON(`/kb/docs/${encodeURIComponent(id)}`);
-  }
-
-  async kbDeleteDoc(id: string): Promise<void> {
-    await this.fetchImpl(`${this.baseUrl}/kb/docs/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      headers: this.headers(),
-    });
-  }
-
-  async kbSearch(query: string, topK?: number): Promise<{ hits: { text: string; source: string; score: number }[] }> {
-    const qs = new URLSearchParams({ q: query, ...(topK ? { topK: String(topK) } : {}) });
-    return this.getJSON(`/kb/search?${qs}`);
   }
 
   /** 召回记忆（带相关度分数，调试/检视用；可限定作用域）。 */

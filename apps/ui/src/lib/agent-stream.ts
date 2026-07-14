@@ -12,7 +12,6 @@ export interface UiTool {
   sources?: { title: string; url: string }[];
   html?: string;
   htmlTitle?: string;
-  citations?: { id: number; source: string; score?: number }[];
   /** 工作区 fs_write/fs_edit 的 diff 载荷。 */
   diff?: { path: string; before: string | null; after: string; unified: string | null };
 }
@@ -108,8 +107,6 @@ export function toolDisplayPatch(display: unknown): Partial<UiTool> {
     if (d.kind === "html" && typeof d.html === "string") {
       patch.html = d.html;
       if (d.title) patch.htmlTitle = d.title;
-    } else if (d.kind === "citations" && Array.isArray(d.sources)) {
-      patch.citations = d.sources as { id: number; source: string; score?: number }[];
     } else if (d.kind === "diff" && typeof d.after === "string" && typeof d.path === "string") {
       patch.diff = { path: d.path, before: d.before ?? null, after: d.after, unified: d.unified ?? null };
     }

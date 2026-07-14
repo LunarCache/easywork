@@ -14,12 +14,11 @@
 - **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 终端 / 预览）。
 - **记忆（作用域化）**：Core Memory = User Profile / Agent Notes；每工作区私有 conventions / decisions / pitfalls；derived facts 保留来源所有权，manifest 有界；sqlite-vec ⊕ 词法召回，markdown 可手改回灌；外部 provider 仅 additive、受限且可关闭。
 - **Skill 学习闭环**：Chat/设置显式 Learn + restricted background review → pending Candidate → 用户审核批准 → 全局/工作区原子激活；支持证据、package 安全验证、来源删除、乐观锁 patch、使用反馈、pin、stale、可恢复归档、快照与回滚。
-- **知识库 RAG**：上传 → 解析 → 分块 → 嵌入 → RRF 混合检索 + 引用来源。
 - **思考能力与过程**：`reasoning` 能力由运行时模型投影到 UI，推理模型首次默认中档、显式关闭按模型持久化；reasoning 内容落库并跨会话回放（不回喂模型）。
-- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/知识库/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；WebView 启用显式 CSP，保留 IPC/daemon/预览来源并禁止远程脚本、对象插件与表单提交。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；WebView 启用显式 CSP，保留 IPC/daemon/预览来源并禁止远程脚本、对象插件与表单提交。
 - **外部渠道**：`@ew/im-connectors` Channel Gateway（adapter registry + 配置/状态 + allowlist + webhook 分发），core 侧 `ChannelOperations` 统一连接器生命周期、Feishu/WeChat 扫码 setup session、收件箱 read model 与 SSE invalidation；Telegram 已迁入同一抽象并支持可取消 long-poll；Feishu/Lark 默认走官方 SDK WebSocket 长连接并支持扫码创建应用，高级模式保留 webhook（URL verification、token/signature、加密回调解密、文本收发），且 public webhook 只在 `transport:webhook` + 验证 secret 配置完整时启用；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；渠道 secret 已迁到 macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI，旧 SQLite 明文自动迁移并去敏；Discord / 企业微信待补平台 adapter。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP / IM 非敏感配置）+ 系统渠道密钥存储。
-- **命令行（CLI）**：SEA daemon 二进制同时也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性；无位置参数时可从 stdin 读取，`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `kb ls·search·add·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。macOS / Windows 安装包仅把该二进制作为 desktop sidecar，不会把 `easywork` 命令安装到 `PATH`。
+- **命令行（CLI）**：SEA daemon 二进制同时也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性；无位置参数时可从 stdin 读取，`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。macOS / Windows 安装包仅把该二进制作为 desktop sidecar，不会把 `easywork` 命令安装到 `PATH`。
 - **打包发布（macOS / Windows）**：daemon 打成单文件原生二进制（Node SEA，运行免 Node）；Tauri 出 macOS Apple Silicon dmg 与 Windows x64 NSIS/MSI（内置 daemon + sqlite-vec）；`install.sh` / `install.ps1` 安装后自动备齐 llama 运行时；版本、SEA `/health` 与 Windows 产物契约均为 CI 门禁。
 
 ### 🚧 待做
@@ -36,6 +35,15 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-13 — 移除文档知识库 RAG
+
+- **硬删除能力**：移除 `packages/core/src/rag/`、`/kb/*` HTTP 路由、`search_knowledge_base` customTool、SDK/CLI 知识库命令与 Chat 请求字段，不保留 feature flag 或空 adapter seam。
+- **宿主收口**：`SessionHost`、session resources、Core context 与 `createCore` 不再创建或注入 `KnowledgeBaseStore`；原来和知识库混在同一文件的 Skills 路由独立为 `server/routes/skills.ts`。
+- **UI 与测试清理**：删除知识库设置页、Chat 知识库 pill、引用来源专用渲染与样式；移除 RAG 单测和知识库 e2e，保留并重命名 Skills e2e。
+- **数据安全**：停止读取旧 `kb.db`，但启动和卸载流程都不会主动删除用户已有文件，便于手工备份或回退。
+- **保留能力**：记忆的 sqlite-vec / 词法召回、会话 FTS5 检索、用户图片、多模态聊天和通用文件预览保持不变。
+- **验证**：`npm run lint`、`npm run typecheck`、`npm run build` 全绿；`npm test` = **345 passed / 1 skipped**；`npm run test:e2e` = **28 passed**；设计文档派生 HTML 已同步。
 
 ## 2026-07-13 — Windows x64 构建与发布关键路径门禁
 

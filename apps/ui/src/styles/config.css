@@ -111,15 +111,13 @@
 .set-mbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .set-content { flex: 1; min-height: 0; overflow-y: auto; padding: 18px var(--set-x) 60px; }
 .set-content > *, .set-pane > .page > * { max-width: var(--set-max); }
-/* 管理页（模型/知识库/Skills/MCP/记忆）铺满，keep-alive 切换 */
+/* 管理页（模型/Skills/MCP/记忆）铺满，keep-alive 切换 */
 .set-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .set-pane.hidden { display: none; }
 .set-pane > .page { flex: 1; min-height: 0; overflow-y: auto; padding: 18px var(--set-x) 40px; }
 .set-pane > .ad-page-embed { flex: 1; min-height: 0; display: flex; }
-/* 嵌入设置的双栏页（知识库/记忆）：顶部工具栏左右留白对齐统一标题。 */
+/* 记忆管理页顶部工具栏左右留白对齐统一标题。 */
 .set-pane .mem-toolbar { padding-left: var(--set-x); padding-right: var(--set-x); }
-.set-pane .kb-ov-head.embed { padding: 0 var(--set-x); height: 46px; border-bottom: 1px solid var(--border-soft); }
-.set-pane .kb-ov-head.embed .kb-ov-sub.embed { font-size: 12.5px; color: var(--text-tertiary); }
 .set-title { max-width: var(--set-max); font-size: 24px; font-weight: 720; margin: 0; letter-spacing: -0.015em; }
 /* 设置项下拉（界面主题等）：自绘深色弹层，避免原生 <select> 的 OS 浅色选项菜单。 */
 .set-select-wrap { position: relative; flex: none; }

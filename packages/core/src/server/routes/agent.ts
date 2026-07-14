@@ -42,10 +42,6 @@ const AgentRunSchema = z.object({
   thinkingLevel: ThinkLevelSchema.optional(),
   regenerate: z.boolean().optional(),
   sampling: SamplingParamsSchema.optional(),
-  /** 是否启用知识库 RAG（自动注入 + 暴露 search_knowledge_base）。默认关，由聊天「知识库」开关控制。 */
-  kb: z.boolean().optional(),
-  /** 选用的知识库集合 id；省略=跨全部集合。 */
-  kbId: z.string().optional(),
   /** 工作区项目 id；解析其 workspaceDir + 审批策略，注入 fs/exec 工具。 */
   projectId: z.string().optional(),
 });
@@ -74,7 +70,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     }
 
     // pi 内核托管：会话内自持历史/技能/compaction，并自行加载项目上下文（AGENTS.md）。
-    // 记忆召回/抽取、知识库、MCP、内置工具均由宿主以扩展/customTools 注入（见 SessionHost）。
+    // 记忆召回/抽取、MCP、内置工具均由宿主以扩展/customTools 注入（见 SessionHost）。
     const projectId = parsed.data.projectId ?? repo.getThread(threadId)?.projectId ?? undefined;
     const project = projectId ? repo.getProject(projectId) : null;
     const isWorkspace = !!project?.workspaceDir;

@@ -565,7 +565,7 @@ export function Models({ onChange }: { onChange: () => void }) {
     const activeEmbed = isEmbed && !!embed?.ready && embed.modelId === m.path;
     let body = "将从磁盘删除其 GGUF 文件（含分片与同目录 mmproj），不可恢复。";
     if (activeEmbed) {
-      body += "\n\n⚠ 该模型正用作向量记忆引擎——删除后记忆 / 知识库的向量召回会降级为纯词法，需重新下载并启用嵌入模型才能恢复。";
+      body += "\n\n⚠ 该模型正用作向量记忆引擎——删除后记忆的向量召回会降级为纯词法，需重新下载并启用嵌入模型才能恢复。";
     } else if (isEmbed) {
       body += "\n\n注：这是嵌入模型，若已用于向量记忆，删除后需重新启用。";
     }

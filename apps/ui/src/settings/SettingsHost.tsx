@@ -4,7 +4,6 @@ import { Models } from "../pages/Models.js";
 import { Skills } from "../pages/Skills.js";
 import { Mcp } from "../pages/Mcp.js";
 import { Channels } from "../pages/Channels.js";
-import { KnowledgeBaseOverlay } from "../components/KnowledgeBaseOverlay.js";
 import { MemoryOverlay } from "../components/MemoryOverlay.js";
 import {
   PaletteIcon,
@@ -13,7 +12,6 @@ import {
   MonitorIcon,
   ArrowLeftIcon,
   BoxIcon,
-  BookIcon,
   SparkIcon,
   BrainIcon,
   PluginsIcon,
@@ -23,7 +21,7 @@ import {
 } from "../icons.js";
 import { SkillAttentionBadge, type SkillAttention } from "../components/SkillAttentionBadge.js";
 
-export type SettingsSection = "general" | "models" | "channels" | "kb" | "skills" | "mcp" | "memory";
+export type SettingsSection = "general" | "models" | "channels" | "skills" | "mcp" | "memory";
 
 type SettingsIcon = typeof PaletteIcon;
 
@@ -55,7 +53,6 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "general",
   "models",
   "channels",
-  "kb",
   "skills",
   "mcp",
   "memory",
@@ -217,14 +214,6 @@ function buildSettingsSections({
       kind: "page",
       keepAlive: true,
       render: () => <Channels />,
-    },
-    {
-      id: "kb",
-      label: "知识库",
-      Icon: BookIcon,
-      kind: "page",
-      keepAlive: true,
-      render: () => <KnowledgeBaseOverlay embedded />,
     },
     {
       id: "skills",

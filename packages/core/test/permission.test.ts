@@ -13,7 +13,6 @@ describe("decideTool", () => {
       expect(decideTool("read", m)).toBe("allow");
       expect(decideTool("ls", m)).toBe("allow");
       expect(decideTool("manage_memory", m)).toBe("allow");
-      expect(decideTool("search_knowledge_base", m)).toBe("allow");
     }
   });
   it("write (edit/write)", () => {

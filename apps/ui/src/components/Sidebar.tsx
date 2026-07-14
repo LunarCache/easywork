@@ -49,7 +49,7 @@ function visibleThreadItems(items: ThreadItem[], activeId: string | undefined, e
 /**
  * 展开式侧栏（参考设计）：顶部快捷操作（新对话 / 新建工作区 / 收件箱）+
  * 分区列表「项目」（工作区折叠组）与「对话」（独立聊天线程）+ 底部「设置」。
- * 模型 / 知识库 / Skills / MCP / 记忆 已并入「设置」（齿轮）的左导航。
+ * 模型 / Skills / MCP / 记忆已并入「设置」（齿轮）的左导航。
  */
 export function Sidebar({
   threads,

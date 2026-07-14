@@ -6,7 +6,7 @@ type SqliteDB = InstanceType<typeof NodeSqlite.DatabaseSync>;
 export type VecRepopulate = (add: (rowid: number | bigint, buf: Buffer) => void) => void;
 
 /**
- * sqlite-vec 向量索引（vec0 虚拟表，cosine 距离）的薄封装，供记忆 / 知识库共用。
+ * sqlite-vec 向量索引（vec0 虚拟表，cosine 距离）的薄封装，供本地记忆使用。
  * 用法：DatabaseSync 须以 `{ allowExtension: true }` 创建；构造后调用 `load(path)`（失败抛出——
  * sqlite-vec 是必备依赖，加载失败说明打包缺二进制，应当显式暴露而非静默降级）。
  * 真相源仍是各自表里的 embedding blob；本索引只是查询加速结构，随写/改/删同步。
@@ -92,7 +92,7 @@ export class SqliteVecIndex {
 
   /**
    * cosine KNN：返回 rowid(string) → 相似度（1 - cosine 距离）。k 取索引内向量总数（≤4096 即精确，
-   * 调用方再按需筛选自己的分区——如某个知识库集合；超大库退为近似 top-4096）。
+   * 调用方再按需筛选自己的分区；超大索引退为近似 top-4096）。
    * 维度不符 / 表不存在返回 null（调用方据此降级为纯词法）。
    */
   knn(queryEmb: Float32Array): Map<string, number> | null {

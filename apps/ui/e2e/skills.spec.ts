@@ -1,35 +1,6 @@
 import { test, expect } from "./fixtures.js";
 
-test.describe("knowledge base and skills e2e", () => {
-  test("知识库支持搜索、预览和删除已有文档", async ({ page, openApp, client }) => {
-    const { doc } = await client.kbIngest({
-      kbId: "playwright-docs",
-      source: "kb-guide.md",
-      text: "# KB Guide\n\nKnowledge base document for Playwright e2e.",
-    });
-
-    await openApp();
-    await page.getByTestId("sidebar-settings").click();
-    await page.getByTestId("settings-nav-kb").click();
-
-    await expect(page.getByTestId("kb-overlay")).toBeVisible();
-    await expect(page.getByTestId("kb-collection-playwright-docs")).toBeVisible();
-
-    await page.getByTestId("kb-search-input").fill("kb-guide");
-    await expect(page.getByTestId(`kb-doc-${doc.id}`)).toBeVisible();
-
-    await page.getByTestId(`kb-doc-${doc.id}`).click();
-    await expect(page.getByTestId("file-viewer")).toBeVisible();
-    await expect(page.getByText("Knowledge base document for Playwright e2e.")).toBeVisible();
-
-    await page.getByTestId(`kb-doc-${doc.id}`).hover();
-    await page.getByTestId(`kb-doc-delete-${doc.id}`).click();
-    await page.getByRole("button", { name: "删除" }).click();
-
-    await expect.poll(async () => (await client.kbDocs("playwright-docs")).docs.some((item) => item.id === doc.id)).toBe(false);
-    await expect(page.getByTestId(`kb-doc-${doc.id}`)).toHaveCount(0);
-  });
-
+test.describe("skills e2e", () => {
   test("Skills 页布局稳定，并支持展开自动学习和新建模板", async ({ page, openApp, client }) => {
     const skillName = `pw-skill-${Date.now().toString().slice(-6)}`;
 

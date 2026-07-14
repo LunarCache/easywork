@@ -570,18 +570,6 @@ export function ToolView({ t, onOpenUrl }: { t: UiTool; onOpenUrl?: (url: string
           )}
         </div>
       </details>
-      {t.citations && t.citations.length > 0 && (
-        <div className="citations">
-          <div className="cite-head">引用来源</div>
-          <div className="cite-list">
-            {t.citations.map((c) => (
-              <span key={c.id} className="cite-chip" title={c.source}>
-                <b>[{c.id}]</b> {c.source}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
       {t.html && (
         <div className="artifact">
           <div className="artifact-head">

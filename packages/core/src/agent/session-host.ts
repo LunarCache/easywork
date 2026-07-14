@@ -12,7 +12,6 @@ import type { AgentEvent, MemoryProvider, ConversationRepo, ApprovalGate, Approv
 import type { McpClientManager } from "@ew/mcp";
 import type { LocalBackend } from "../engine/local-backend.js";
 import type { ProviderManager } from "../providers/manager.js";
-import type { KnowledgeBaseStore } from "../rag/store.js";
 import type { RunRuntime } from "./ew-extensions.js";
 import { ExtractionScheduler } from "../memory/extraction-scheduler.js";
 import { promptTokensOf, type AgentTokenUsage } from "./agent-usage.js";
@@ -35,8 +34,6 @@ export interface SessionHostDeps {
   memory?: MemoryProvider;
   /** R3：会话历史 FTS 检索工具 session_search。 */
   repo?: ConversationRepo;
-  /** R3：知识库检索工具 search_knowledge_base。 */
-  kb?: KnowledgeBaseStore;
   /** R3：MCP 工具（桥成 customTools）。 */
   mcp?: McpClientManager;
   /** R5：内置工具（时间/计算器/HTTP/explore_web）桥成 customTools。 */
@@ -211,7 +208,6 @@ export class SessionHost {
       ...(this.deps.globalSkillPaths?.length ? { globalSkillPaths: this.deps.globalSkillPaths } : {}),
       ...(this.deps.memory ? { memory: this.deps.memory } : {}),
       ...(this.deps.repo ? { repo: this.deps.repo } : {}),
-      ...(this.deps.kb ? { kb: this.deps.kb } : {}),
       ...(this.deps.mcp ? { mcp: this.deps.mcp } : {}),
       ...(this.deps.builtins ? { builtins: this.deps.builtins } : {}),
       ...(this.stageSkillCandidate ? { stageSkillCandidate: this.stageSkillCandidate } : {}),

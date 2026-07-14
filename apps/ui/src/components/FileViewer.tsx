@@ -1,5 +1,5 @@
 // 统一文件预览组件：一个 <FileViewer source>，按 kind 选渲染器（开闭：加类型 = 加一个分支）。
-// 数据源四态：fs（dock 文件，走 /files/meta + /files/raw）/ text（KB 文档等已有文本）/ url（网页工件）/ bytes（消息图片）。
+// 数据源四态：fs（dock 文件，走 /files/meta + /files/raw）/ text（已有文本）/ url（网页工件）/ bytes（消息图片）。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";

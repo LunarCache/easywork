@@ -1,7 +1,7 @@
 // R3 — EasyWork 专有能力以 pi 扩展/customTool 形式接入托管的 AgentSession：
 //  - 记忆：渐进式披露（`before_agent_start` 注入「记忆清单」到系统提示词 + recall_memory 工具按需取全文）
 //          + 批量被动抽取（空闲去抖 / 压缩 / 关闭时，非每轮）。作用域化（global 对话池 + 每工作区独立池）。
-//  - 知识库 / session 检索 / MCP：桥成 pi customTools。
+//  - session 检索 / MCP：桥成 pi customTools。
 import path from "node:path";
 import fs from "node:fs";
 import { Type } from "typebox";
@@ -31,12 +31,10 @@ import {
   type ContentPart,
   type ConversationRepo,
 } from "@ew/shared";
-import type { KnowledgeBaseStore } from "../rag/store.js";
 import type { McpClientManager } from "@ew/mcp";
 import { makeMemoryTool } from "../memory/memory-tool.js";
 import { makeRecallMemoryTool } from "../memory/recall-memory-tool.js";
 import { makeSessionSearchTool } from "../memory/session-search-tool.js";
-import { makeSearchKnowledgeBaseTool } from "../rag/tool.js";
 import { makeStageSkillCandidateTool, type StageSkillCandidate } from "../skill-learning/candidate-tool.js";
 
 /** (scope,layer) → 清单里的人类标签。prefixGlobal=true 时给全局层标「全局·」（用于工作区会话里区分共享身份）。 */
@@ -90,7 +88,7 @@ export async function buildMemoryManifest(memory: MemoryProvider, views: ScopeVi
   );
 }
 
-/** 桥接工具默认自动批准：MCP/KB/记忆无需 EW 审批；pi 自带工具的审批由 pi 自身负责。 */
+/** 桥接工具默认自动批准：MCP/记忆无需 EW 审批；pi 自带工具的审批由 pi 自身负责。 */
 const autoApprove: ApprovalGate = { request: async () => "approve" };
 
 /** 我们的 `Tool` → pi customTool（ToolDefinition）。既有 JSON Schema 用 `Type.Unsafe` 包裹。 */
@@ -115,7 +113,7 @@ export function toPiTool(tool: Tool, base: { sessionId: string; cwd: string }): 
   };
 }
 
-/** 组装 EasyWork 专有 customTools（记忆管理/检索 · session 检索 · 知识库 · MCP）。 */
+/** 组装 EasyWork 专有 customTools（记忆管理/检索 · session 检索 · MCP）。 */
 export async function buildEwCustomTools(opts: {
   sessionId: string;
   cwd: string;
@@ -123,7 +121,6 @@ export async function buildEwCustomTools(opts: {
   memoryScope?: string;
   memory?: MemoryProvider;
   repo?: ConversationRepo;
-  kb?: KnowledgeBaseStore;
   mcp?: McpClientManager;
   builtins?: Tool[];
   stageSkillCandidate?: StageSkillCandidate;
@@ -145,7 +142,6 @@ export async function buildEwCustomTools(opts: {
     }));
   }
   if (opts.repo) tools.push(makeSessionSearchTool(opts.repo));
-  if (opts.kb) tools.push(makeSearchKnowledgeBaseTool(opts.kb));
   if (opts.mcp) {
     try {
       const dummy: ToolExecContext = {
@@ -264,7 +260,7 @@ function classify(name: string): ToolClass {
  * | approve-each | 放行 | 审批              | 审批 | 审批  |
  * | auto-edits   | 放行 | 放行              | 审批 | 审批  |
  * | full-auto    | 放行 | 放行              | 放行 | 放行  |
- * 读类工具与 EasyWork 安全 customTools（记忆/检索/KB）一律放行。
+ * 读类工具与 EasyWork 安全 customTools（记忆/检索）一律放行。
  */
 export function decideTool(name: string, mode: ApprovalMode): "allow" | "block" | "approve" {
   const cls = classify(name);

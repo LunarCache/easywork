@@ -223,7 +223,6 @@ whenToUse: tests
         token: "t",
         dbPath: ":memory:",
         memoryDbPath: ":memory:",
-        kbDbPath: ":memory:",
         skillsDirs: [root],
       });
       const res = await core.app.inject({ method: "GET", url: "/skills", headers: { authorization: "Bearer t" } });
@@ -270,7 +269,6 @@ description: git root workspace skill
         token: "t",
         dbPath: ":memory:",
         memoryDbPath: ":memory:",
-        kbDbPath: ":memory:",
       });
       const created = await core.app.inject({
         method: "POST",
@@ -327,7 +325,6 @@ description: user global skill
         token: "t",
         dbPath: ":memory:",
         memoryDbPath: ":memory:",
-        kbDbPath: ":memory:",
       });
       const created = await core.app.inject({
         method: "POST",
@@ -365,7 +362,6 @@ description: user global skill
         token: "t",
         dbPath: ":memory:",
         memoryDbPath: ":memory:",
-        kbDbPath: ":memory:",
       });
       const res = await core.app.inject({ method: "GET", url: "/skills", headers: { authorization: "Bearer t" } });
       expect(res.statusCode).toBe(200);

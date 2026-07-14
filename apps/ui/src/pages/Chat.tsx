@@ -39,7 +39,6 @@ import { useComposerImages } from "../hooks/useComposerImages.js";
 import { useMessageScroll } from "../hooks/useMessageScroll.js";
 import {
   ArrowUpIcon,
-  BoxIcon,
   BrainIcon,
   ChevronDownIcon,
   CodeIcon,
@@ -107,7 +106,6 @@ export function Chat({
   const [thinkLevel, setThinkLevel] = useState<ThinkLevel>("off");
   const [notice, setNotice] = useState<string | null>(null); // 重试/压缩等瞬态状态提示
   const [web, setWeb] = useState(true);
-  const [kb, setKb] = useState(false);
 
   const learnCurrentConversation = async () => {
     try {
@@ -118,7 +116,6 @@ export function Chat({
       setNotice(error instanceof Error ? error.message : "无法从当前对话学习");
     }
   };
-  const [kbId] = useState<string | undefined>(undefined); // undefined = 全部集合
   const [usage, setUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(
     null,
   );
@@ -329,8 +326,6 @@ export function Chat({
           excludeTools,
           thinkingLevel: thinkLevel,
           ...(over?.regenerate ? { regenerate: true } : {}),
-          kb,
-          ...(kb && kbId ? { kbId } : {}),
           ...(excludeSkills.length ? { excludeSkills } : {}),
         },
         { signal: ac.signal },
@@ -485,14 +480,6 @@ export function Chat({
               >
                 <GlobeIcon size={14} />
                 <span>{web ? "联网已开" : "联网已关"}</span>
-              </ComposerContextPill>
-              <ComposerContextPill
-                tone={kb ? "on" : "default"}
-                onClick={() => setKb((v) => !v)}
-                title={kb ? `知识库${kbId ? `·${kbId}` : "·全部"}` : "知识库"}
-              >
-                <BoxIcon size={14} />
-                <span>{kb ? `知识库·${kbId ?? "全部"}` : "知识库已关"}</span>
               </ComposerContextPill>
             </ComposerContextStrip>
             {images.length > 0 && (

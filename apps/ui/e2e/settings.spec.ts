@@ -108,18 +108,12 @@ test.describe("settings e2e", () => {
     await expect(page.getByTestId("settings-title")).toHaveText("渠道");
   });
 
-  test("知识库与记忆页主操作按钮可见", async ({ page, openApp, client, workspaceDir }) => {
+  test("记忆页主操作按钮可见", async ({ page, openApp, client, workspaceDir }) => {
     const project = await client.createProject({ name: "PW Project", workspaceDir });
-    await client.kbIngest({ kbId: "docs", source: "guide.md", text: "# Guide\n\nhello e2e" });
     await client.writeMemory({ scope: `ws:${project.id}`, layer: "conventions", text: "Use playwright for UI e2e." });
 
     await openApp();
     await page.getByTestId("sidebar-settings").click();
-
-    await page.getByTestId("settings-nav-kb").click();
-    await expect(page.getByTestId("kb-overlay")).toBeVisible();
-    await expect(page.getByTestId("kb-upload-button")).toBeVisible();
-    await expect(page.getByText("guide.md")).toBeVisible();
 
     await page.getByTestId("settings-nav-memory").click();
     await expect(page.getByTestId("memory-overlay")).toBeVisible();

@@ -5,7 +5,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ConversationRepo, MemoryProvider, Tool } from "@ew/shared";
 import type { McpClientManager } from "@ew/mcp";
-import type { KnowledgeBaseStore } from "../rag/store.js";
 import type { StageSkillCandidate } from "../skill-learning/candidate-tool.js";
 import {
   buildEwCustomTools,
@@ -19,7 +18,6 @@ interface AgentSessionResourceDeps {
   globalSkillPaths?: string[];
   memory?: MemoryProvider;
   repo?: ConversationRepo;
-  kb?: KnowledgeBaseStore;
   mcp?: McpClientManager;
   builtins?: Tool[];
   stageSkillCandidate?: StageSkillCandidate;
@@ -96,7 +94,6 @@ export async function buildAgentSessionResources(
     modelId: input.modelId,
     ...(deps.memory ? { memory: deps.memory } : {}),
     ...(deps.repo ? { repo: deps.repo } : {}),
-    ...(deps.kb ? { kb: deps.kb } : {}),
     ...(deps.mcp ? { mcp: deps.mcp } : {}),
     ...(deps.builtins ? { builtins: deps.builtins } : {}),
     ...(deps.stageSkillCandidate ? { stageSkillCandidate: deps.stageSkillCandidate } : {}),

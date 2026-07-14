@@ -6,7 +6,7 @@
 
 ## 架构速览
 
-无头 Node **核心由 `apps/daemon` 组装 `@ew/core`，拥有全部 Agent "大脑"**：托管 pi 内核（`SessionHost`）+ 统一 `llama serve` router 进程管理 + 云端 provider + 工具/Skills/MCP + 记忆/知识库 + SQLite。对外提供 **Fastify HTTP + SSE + `/v1` 网关**。Tauri webview 与 CLI 是它的瘦客户端；IM adapter/gateway/host 运行在 core 进程内，直接调用同一个 `SessionHost`。`/v1` 客户端只复用 daemon 的模型/provider runtime，不经过 AgentSession、记忆或工具。
+无头 Node **核心由 `apps/daemon` 组装 `@ew/core`，拥有全部 Agent "大脑"**：托管 pi 内核（`SessionHost`）+ 统一 `llama serve` router 进程管理 + 云端 provider + 工具/Skills/MCP + 记忆 + SQLite。对外提供 **Fastify HTTP + SSE + `/v1` 网关**。Tauri webview 与 CLI 是它的瘦客户端；IM adapter/gateway/host 运行在 core 进程内，直接调用同一个 `SessionHost`。`/v1` 客户端只复用 daemon 的模型/provider runtime，不经过 AgentSession、记忆或工具。
 
 - `core` 是**库**，由 `apps/daemon`（CLI `easywork serve`）直接依赖并组装；`apps/desktop` 不直接依赖 `@ew/core`，而是打包/启动 daemon 单文件 sidecar，webview 再通过 HTTP/SSE 连接它。
 - **包**：`shared`(zod 契约，所有包依赖它) · `core`(daemon) · `providers`(llama/openai 引擎) · `memory` · `tools` · `skills` · `mcp` · `im-connectors` · `sdk`；`apps/{desktop,ui,daemon}`。
@@ -24,7 +24,7 @@
 - `packages/core/src/openai-compat/router.ts` + `pi-adapt.ts` — `/v1` 网关与 pi↔OpenAI/Anthropic 边界翻译。
 - `packages/im-connectors/src/{adapter,registry,gateway,host,telegram,feishu,wechat}.ts` — Channel Gateway：adapter seam + 内置 adapter registry + 连接器配置/状态/allowlist/webhook/target 透传；`ConnectorHost` 把外部消息接到同一个 `SessionHost.run`；Telegram long-poll 支持 abort 停止；Feishu/Lark 默认走官方 SDK WebSocket 长连接（无需公网 webhook），高级模式保留 webhook token/signature、加密回调解密与文本收发；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；webhook 入口在非 webhook transport 或缺少验证 secret 时拒绝。
 - `apps/ui/src/settings/SettingsHost.tsx` — 设置页 page-host module：section registry、上次分区持久化、`ew:open-settings` 定向打开、visited keep-alive 与整页布局契约。`apps/ui/src/pages/Settings.tsx` 只是兼容 re-export。
-- `apps/daemon/src/cli.ts` + `cli/*` — `easywork` CLI（既是 `serve` daemon 入口，也是终端瘦客户端 `repl`/`run`/`models`/`thread`/`mem`/`kb`/`status`/`stop`）。`cli/daemon.ts` 自启/发现本机 daemon；`cli/agent.ts` 渲染 SSE 事件流（助手文本→stdout、装饰→stderr）。复用 `@ew/sdk` 打 HTTP，**后端零改动**（唯一例外：`models rm` 的 `POST /models/local/delete` + `ModelManager.deleteLocal`，含受管目录硬校验）。
+- `apps/daemon/src/cli.ts` + `cli/*` — `easywork` CLI（既是 `serve` daemon 入口，也是终端瘦客户端 `repl`/`run`/`models`/`thread`/`mem`/`status`/`stop`）。`cli/daemon.ts` 自启/发现本机 daemon；`cli/agent.ts` 渲染 SSE 事件流（助手文本→stdout、装饰→stderr）。复用 `@ew/sdk` 打 HTTP，**后端零改动**（唯一例外：`models rm` 的 `POST /models/local/delete` + `ModelManager.deleteLocal`，含受管目录硬校验）。
 - `packages/shared/src/*` — 核心契约（见下）。
 
 ## 核心契约（@ew/shared，OpenAI-shaped 为通用语言）
@@ -55,7 +55,7 @@
 ## 约定
 
 - **统一 npm**（环境无 pnpm）。
-- **测试 356 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 29 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
+- **测试 345 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 28 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
 - **已移除 node-llama-cpp + 经典 `llama-server`**：本地推理走外部统一 `llama`（llama.app）的 router 模式（`resolveLlamaBin` 只解析 `llama`；嵌入子进程也跑 `llama serve`）。**勿重新引入** node-llama-cpp，也**勿回退每模型一进程的经典 `llama-server`**（含 brew llama.cpp，已完全移除）。
 - **打包**：daemon → Node SEA **单文件二进制**（`scripts/build-daemon-sea.mjs`，运行免 Node；必须用参数化子进程调用，兼容 Windows 路径）；llama 运行时缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime` + `install.sh` / `install.ps1`）；Tauri WebView 启用显式 CSP；`v*` tag 先经 `release:check-version` 校验 npm/Tauri/Cargo 版本一致，再由 GitHub Actions 出 macOS dmg 与 Windows x64 NSIS/MSI。两端发布前必须跑 `smoke:daemon-sea`，Windows 还须跑 `release:check-artifacts`。
 - **改 Tauri Rust（`apps/desktop/src-tauri`）**：本环境有 `cargo`，可 `cargo check` 验证。
@@ -65,10 +65,10 @@
 ```bash
 npm install            # 装依赖
 npm run build          # turbo 构建全部包（含 ui/daemon dist）
-npm test               # vitest（356 通过；另 1 个真机 e2e 默认 skip）
+npm test               # vitest（345 通过；另 1 个真机 e2e 默认 skip）
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
-npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 29 条）
+npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 28 条）
 npm run typecheck      # 全量类型检查　·　npm run lint
 npm run release:check-version # 校验发布清单版本一致
 npm run smoke:daemon-sea      # 启动打包后的 SEA daemon 并验证 /health
