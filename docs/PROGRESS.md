@@ -36,6 +36,12 @@
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
 
+## 2026-07-14 — 记忆页收敛外部 Provider 空状态
+
+- **可操作状态优先**：未配置 Additive Memory Provider 时不再显示突兀且无入口可操作的“外部记忆 · 未配置”；Provider 实际由宿主注入后仍显示身份、运行状态与启停开关。
+- **回归锁定**：Playwright 通过真实 daemon 进入记忆页，断言默认未配置场景不存在外部 Provider 状态块；向量 / 词法召回状态与记忆主流程保持不变。
+- **验证**：`npm run lint`、`npm run typecheck`、`npm run build` 全绿；`npm test` = **350 passed / 1 skipped**；`npm run test:e2e` = **30 passed**；设计文档派生 HTML 保持同步。
+
 ## 2026-07-14 — HF 镜像开关与模型搜索错误可见性
 
 - **统一来源切换**：通用设置新增持久化 HF 镜像开关；`HFClient` 动态基址统一覆盖模型搜索、变体文件树、普通 GGUF 下载与记忆 nomic embedding 下载，默认仍为 `huggingface.co`，启用后使用 `hf-mirror.com`。

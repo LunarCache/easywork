@@ -120,7 +120,7 @@ test.describe("skills e2e", () => {
     await page.getByTestId("sidebar-settings").click();
     await expect(page.getByTestId("settings-skill-attention")).toHaveText("1");
     await page.getByTestId("settings-nav-memory").click();
-    await expect(page.getByTestId("memory-provider-status")).toContainText("未配置");
+    await expect(page.getByTestId("memory-provider-status")).toHaveCount(0);
     await page.getByTestId("legacy-skill-memory-toggle").click();
     await expect(page.getByTestId("legacy-skill-memory")).toContainText("没有待人工判断的旧 Skills 记忆");
 

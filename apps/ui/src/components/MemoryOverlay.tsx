@@ -264,11 +264,11 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                 </button>
               )}
             </span>
-            <div className="mem-status-chip mem-provider-status" data-testid="memory-provider-status" title="外部 Provider 只追加受限召回，不接管本地记忆写入">
-              <span className="mem-recall-dot" data-on={provider?.enabled ? "1" : "0"} />
-              <span>外部记忆</span>
-              <small>{provider?.configured ? provider.id ?? "已配置" : "未配置"}</small>
-              {provider?.configured && (
+            {provider?.configured && (
+              <div className="mem-status-chip mem-provider-status" data-testid="memory-provider-status" title="外部 Provider 只追加受限召回，不接管本地记忆写入">
+                <span className="mem-recall-dot" data-on={provider.enabled ? "1" : "0"} />
+                <span>外部记忆</span>
+                <small>{provider.id ?? "已配置"}</small>
                 <button
                   className={`set-toggle ${provider.enabled ? "on" : ""}`}
                   aria-label={provider.enabled ? "停用外部记忆 Provider" : "启用外部记忆 Provider"}
@@ -278,8 +278,8 @@ export function MemoryOverlay({ onClose, embedded }: { onClose?: () => void; emb
                 >
                   <span />
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
           <button className="set-btn primary" data-testid="memory-add-button" onClick={openAddTop}>
             <PlusIcon size={15} /> 添加
