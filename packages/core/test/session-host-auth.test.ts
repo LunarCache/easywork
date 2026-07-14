@@ -291,4 +291,95 @@ describe("SessionHost thread lifecycle barrier", () => {
       fs.rmSync(agentDir, { recursive: true, force: true });
     }
   });
+
+  it("keeps a permanent deletion tombstone when empty-shell discard races behind an active turn", async () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-delete-discard-race-")));
+    const host = new SessionHost({ ...makeDeps([]), agentDir });
+    try {
+      const claim = await host.claimThreadRun("t-race", () => true);
+      expect(claim).not.toBeNull();
+      let turnStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        turnStarted = resolve;
+      });
+      let releaseTurn!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseTurn = resolve;
+      });
+      const activeTurn = host.commitThread("t-race", async () => {
+        turnStarted();
+        await gate;
+      });
+      await started;
+
+      let permanentlyDeleted = false;
+      let transientlyDiscarded = false;
+      const deletion = host.deleteThread("t-race", () => {
+        permanentlyDeleted = true;
+      });
+      const discard = host.discardEmptyThread("t-race", claim!.attempt, {
+        isEmpty: () => true,
+        deletePersistentState: () => {
+          transientlyDiscarded = true;
+        },
+      });
+      releaseTurn();
+
+      await Promise.all([activeTurn, deletion, discard]);
+      expect(permanentlyDeleted).toBe(true);
+      expect(transientlyDiscarded).toBe(false);
+      expect(host.isThreadDeleted("t-race")).toBe(true);
+    } finally {
+      host.disposeAll();
+      fs.rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let an old empty-shell discard delete a newer queued turn", async () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-discard-newer-turn-")));
+    const host = new SessionHost({ ...makeDeps([]), agentDir });
+    try {
+      const firstClaim = await host.claimThreadRun("t-newer", () => true);
+      expect(firstClaim).not.toBeNull();
+      let firstStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        firstStarted = resolve;
+      });
+      let releaseFirst!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const activeFirst = host.commitThread("t-newer", async () => {
+        firstStarted();
+        await gate;
+      });
+      await started;
+
+      const secondClaimPending = host.claimThreadRun("t-newer", () => true);
+      let oldStateDeleted = false;
+      const oldDiscard = host.discardEmptyThread("t-newer", firstClaim!.attempt, {
+        isEmpty: () => true,
+        deletePersistentState: () => {
+          oldStateDeleted = true;
+        },
+      });
+      releaseFirst();
+
+      expect(await activeFirst).toBe(true);
+      const secondClaim = await secondClaimPending;
+      expect(secondClaim).not.toBeNull();
+      let newerCommitted = false;
+      const queuedSecond = host.commitThread("t-newer", () => {
+        newerCommitted = true;
+      });
+      expect(await queuedSecond).toBe(true);
+      expect(await oldDiscard).toBe(false);
+      expect(newerCommitted).toBe(true);
+      expect(oldStateDeleted).toBe(false);
+      expect(host.isThreadDeleted("t-newer")).toBe(false);
+    } finally {
+      host.disposeAll();
+      fs.rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
 });

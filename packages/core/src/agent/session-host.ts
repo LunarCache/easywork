@@ -77,6 +77,13 @@ export interface EwAgentRunInput {
   excludeTools?: string[];
   /** 普通对话是否在本轮串行边界内采集最终新增/修改工件。 */
   trackArtifacts?: boolean;
+  /** HTTP thread shell generation；拒绝其 claim 对应 shell 已被回收的迟到 run。 */
+  threadGeneration?: number;
+}
+
+export interface ThreadRunClaim {
+  generation: number;
+  attempt: number;
 }
 
 interface HostedSession {
@@ -92,6 +99,10 @@ interface HostedSession {
   dispose: () => void;
 }
 
+interface ThreadDeletion {
+  kind: "permanent" | "discard";
+  token: symbol;
+}
 
 /**
  * 进程内会话宿主：每个 (threadId) 复用一个 pi `AgentSession`（保留上下文/compaction）。
@@ -101,7 +112,8 @@ interface HostedSession {
  */
 export class SessionHost {
   private readonly sessions = new Map<string, HostedSession>();
-  private readonly deleting = new Set<string>();
+  private readonly deleting = new Map<string, ThreadDeletion>();
+  private readonly threadClaims = new Map<string, ThreadRunClaim>();
   private stageSkillCandidate?: StageSkillCandidate;
   private readonly sessionStore: AgentSessionStore;
   private readonly agentDir: string;
@@ -289,6 +301,12 @@ export class SessionHost {
     const release = await this.runQueue.acquire(input.threadId);
     try {
       if (this.deleting.has(input.threadId)) throw new Error("thread_deleted");
+      if (
+        input.threadGeneration !== undefined &&
+        input.threadGeneration !== (this.threadClaims.get(input.threadId)?.generation ?? 0)
+      ) {
+        throw new Error("thread_discarded");
+      }
       const turnFilesBefore = input.trackArtifacts ? snapshotTurnFiles(input.cwd) : null;
       let sawFinal = false;
       for await (const event of this.runOne(input)) {
@@ -304,9 +322,24 @@ export class SessionHost {
     }
   }
 
-  /** HTTP 等入口在创建持久化 thread 前调用，拒绝已完成删除的迟到请求。 */
+  /** HTTP 等入口在创建持久化 thread 前调用，拒绝永久删除的迟到请求。 */
   isThreadDeleted(threadId: string): boolean {
-    return this.deleting.has(threadId);
+    return this.deleting.get(threadId)?.kind === "permanent";
+  }
+
+  /** 在 run 屏障内创建/确认持久化 shell 并声明所有权；与永久删除原子排序。 */
+  async claimThreadRun(threadId: string, prepareShell: () => boolean): Promise<ThreadRunClaim | null> {
+    const release = await this.runQueue.acquire(threadId);
+    try {
+      if (this.deleting.has(threadId)) return null;
+      const current = this.threadClaims.get(threadId) ?? { generation: 0, attempt: 0 };
+      if (!prepareShell()) return null;
+      const claim = { generation: current.generation, attempt: current.attempt + 1 };
+      this.threadClaims.set(threadId, claim);
+      return claim;
+    } finally {
+      release();
+    }
   }
 
   /** 把 HTTP 历史落库也纳入 thread 屏障；删除先到时拒绝迟到提交。 */
@@ -439,7 +472,8 @@ export class SessionHost {
    * 成功后保留 tombstone，阻止已排队或迟到的请求重新创建同 id 会话；失败则恢复可用状态。
    */
   async deleteThread(threadId: string, deletePersistentState: () => Promise<void> | void): Promise<void> {
-    this.deleting.add(threadId);
+    const deletion: ThreadDeletion = { kind: "permanent", token: Symbol(threadId) };
+    this.deleting.set(threadId, deletion);
     const release = await this.runQueue.acquire(threadId);
     let persistentDeleted = false;
     try {
@@ -449,9 +483,42 @@ export class SessionHost {
       this.disposeSession(threadId, true);
     } catch (error) {
       // 持久层尚未删除时恢复 thread；若已删而 pi 文件清理失败，保留 tombstone 防止复活并允许重试 DELETE。
-      if (!persistentDeleted) this.deleting.delete(threadId);
+      if (!persistentDeleted && this.deleting.get(threadId)?.token === deletion.token) this.deleting.delete(threadId);
       throw error;
     } finally {
+      release();
+    }
+  }
+
+  /**
+   * 回收首轮未提交的空壳：使用同一 run/extraction/pi 屏障，但不留下永久删除 tombstone。
+   * attempt 防旧轮误删新 claim；generation 防迟到 run 使用已回收 shell，之后仍可复用同一 threadId。
+   */
+  async discardEmptyThread(
+    threadId: string,
+    expectedAttempt: number,
+    discard: {
+      isEmpty: () => Promise<boolean> | boolean;
+      deletePersistentState: () => Promise<void> | void;
+    },
+  ): Promise<boolean> {
+    const release = await this.runQueue.acquire(threadId);
+    let deletion: ThreadDeletion | undefined;
+    try {
+      // Waiters ahead of this discard get to claim first; a newer claim makes this old cleanup a no-op.
+      if (this.deleting.has(threadId)) return false;
+      const claim = this.threadClaims.get(threadId);
+      if (!claim || claim.attempt !== expectedAttempt) return false;
+      if (!(await discard.isEmpty())) return false;
+      deletion = { kind: "discard", token: Symbol(threadId) };
+      this.deleting.set(threadId, deletion);
+      this.threadClaims.set(threadId, { generation: claim.generation + 1, attempt: claim.attempt });
+      await this.extraction.discard(threadId);
+      await discard.deletePersistentState();
+      this.disposeSession(threadId, true);
+      return true;
+    } finally {
+      if (deletion && this.deleting.get(threadId)?.token === deletion.token) this.deleting.delete(threadId);
       release();
     }
   }

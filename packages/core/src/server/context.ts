@@ -14,6 +14,7 @@ import type { SqliteConversationRepo } from "../store/conversation.js";
 import type { EmbeddingService } from "../memory/embedding-service.js";
 import type { SkillCandidateService } from "../skill-learning/candidate-service.js";
 import type { SkillLearningCoordinator } from "../skill-learning/coordinator.js";
+import type { SourceConversationLifecycle } from "../conversations/source-conversation-lifecycle.js";
 
 export interface CoreHttpContext {
   app: FastifyInstance;
@@ -35,6 +36,7 @@ export interface CoreHttpContext {
   agentMemory: AdditiveMemoryProvider;
   embeddings: EmbeddingService;
   repo: SqliteConversationRepo;
+  sourceConversations: SourceConversationLifecycle;
   fetchImpl: typeof fetch;
   persistProviders(): void;
   persistMcp(): void;

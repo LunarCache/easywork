@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import { z } from "zod";
 import {
   ChatMessageSchema,
@@ -53,7 +52,7 @@ const ApproveSchema = z.object({
 });
 
 export function registerAgentRoutes(ctx: CoreHttpContext): void {
-  const { app, registry, providers, repo, sessionHost, skillCandidates, skillLearning } = ctx;
+  const { app, registry, providers, repo, sessionHost, sourceConversations, skillCandidates, skillLearning } = ctx;
   const approvalRegistry = new ApprovalRegistry();
 
   app.post("/agent/run", async (req, reply) => {
@@ -78,25 +77,24 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     // 对话模式 cwd = 每会话工件目录（~/.easywork/workspace/chats/<threadId>），与其他会话隔离；
     // fs 工具读写均限定在此目录内，右侧「工件」面板按此目录展示本会话产出。
     const runWorkspaceDir = project?.workspaceDir ?? chatWorkspaceDir(threadId);
-    // 工作区目录「真正聊天时」才落盘创建（新建工作区时不预建空目录）。
-    try {
-      fs.mkdirSync(runWorkspaceDir, { recursive: true });
-    } catch {
-      /* 目录创建失败由后续 fs 工具报错 */
-    }
-    // 持久化（应用内会话历史）：确保 thread 存在。本轮消息延迟到成功结束才落库——
-    // 用户取消时整轮（用户消息 + 部分助手输出 + 工具往返）一律不计入历史/上下文。
     const lastUser = parsed.data.history[parsed.data.history.length - 1];
-    const threadCreated = !repo.getThread(threadId);
-    if (threadCreated) {
-      const title = lastUser ? messageText(lastUser.content).slice(0, 40) || "新会话" : "新会话";
-      repo.createThread({
-        id: threadId,
-        modelId: parsed.data.model,
-        title,
-        ...(projectId ? { projectId } : {}),
-      });
-    }
+    const title = lastUser ? messageText(lastUser.content).slice(0, 40) || "新会话" : "新会话";
+    // shell 创建与永久删除在同一 thread barrier 内原子排序；本轮消息仍延迟到成功结束才落库。
+    const runClaim = await sourceConversations.claimRun({
+      threadId,
+      modelId: parsed.data.model,
+      title,
+      ...(projectId ? { projectId } : {}),
+      runWorkspaceDir,
+    });
+    if (!runClaim) return reply.code(410).send({ error: "thread_deleted" });
+    const threadCreated = runClaim.created;
+    let emptyShellDiscarded = false;
+    const discardEmptyShell = async (): Promise<void> => {
+      if (emptyShellDiscarded || !threadCreated || repo.history(threadId).length !== 0) return;
+      emptyShellDiscarded = true;
+      await sourceConversations.discardEmpty(threadId, runClaim);
+    };
     let finalContent = "";
 
     const ac = new AbortController();
@@ -144,6 +142,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     try {
       for await (const ev of sessionHost.run({
         threadId,
+        threadGeneration: runClaim.generation,
         modelId: parsed.data.model,
         text: userText,
         ...(userImages.length ? { images: userImages } : {}),
@@ -257,11 +256,16 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
         }
       } else if (threadCreated && repo.history(threadId).length === 0) {
         // 新建会话的首轮即被取消 → 清掉这个空会话，避免侧栏残留空壳。
-        repo.deleteThread(threadId);
+        await discardEmptyShell();
       }
     } catch (err) {
-      if (threadCreated && repo.history(threadId).length === 0) repo.deleteThread(threadId);
-      send({ type: "error", message: err instanceof Error ? err.message : String(err) });
+      let reportedError = err;
+      try {
+        await discardEmptyShell();
+      } catch (cleanupError) {
+        reportedError = cleanupError;
+      }
+      send({ type: "error", message: reportedError instanceof Error ? reportedError.message : String(reportedError) });
     } finally {
       if (!raw.writableEnded && !raw.destroyed) raw.write("data: [DONE]\n\n");
       try {

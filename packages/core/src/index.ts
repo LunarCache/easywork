@@ -40,4 +40,11 @@ export { SessionHost, type SessionHostDeps, type EwAgentRunInput } from "./agent
 
 // 会话存储 + 记忆 embedding
 export { SqliteConversationRepo } from "./store/conversation.js";
+export type {
+  SourceConversationLifecycle,
+  SourceConversationDeleteResult,
+  SourceConversationRunClaim,
+  SourceConversationRunInput,
+  ClaimedSourceConversationRun,
+} from "./conversations/source-conversation-lifecycle.js";
 export { EmbeddingService, type EmbeddingServiceDeps } from "./memory/embedding-service.js";

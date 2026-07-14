@@ -6,7 +6,6 @@ import {
   ApprovalModeSchema,
   mimeForName,
   resolvePreviewKind,
-  workspaceScope,
   type PreviewMeta,
 } from "@ew/shared";
 import { SkillManager, type SkillSourceConfig } from "@ew/skills";
@@ -108,7 +107,7 @@ function revealDir(dir: string): void {
 }
 
 export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
-  const { app, repo, sessionHost, memory, skillCandidates } = ctx;
+  const { app, repo, sessionHost, sourceConversations } = ctx;
 
   // ---- 会话 ----
   app.get("/threads", async (req) => {
@@ -126,29 +125,15 @@ export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
   app.post("/threads/:id/compact", async (req) => sessionHost.compact((req.params as { id: string }).id));
   app.delete("/threads/:id", async (req, reply) => {
     const id = (req.params as { id: string }).id;
-    const projectId = repo.getThread(id)?.projectId;
-    let facts = 0;
     try {
-      await sessionHost.deleteThread(id, async () => {
-        facts = await memory.deleteBySession(id);
-        skillCandidates.removeSource(id);
-        repo.deleteThread(id); // 删 SQLite 会话 + 消息 + FTS
-      });
+      const result = await sourceConversations.delete(id);
+      return { ok: true, factsRemoved: result.factsRemoved };
     } catch (e) {
       return reply.code(500).send({
         error: "thread_delete_failed",
         message: e instanceof Error ? e.message : String(e),
       });
     }
-    // 对话会话（无项目）：删掉其每会话工件目录（软件 scratch；工作区会话用项目目录，不动）。
-    if (!projectId) {
-      try {
-        fs.rmSync(chatWorkspaceDir(id), { recursive: true, force: true });
-      } catch {
-        /* 删工件目录失败不致命 */
-      }
-    }
-    return { ok: true, factsRemoved: facts };
   });
 
   // ---- 工作区项目（Project = 本地目录 + 审批策略） ----
@@ -179,17 +164,7 @@ export function registerWorkspaceRoutes(ctx: CoreHttpContext): void {
   app.delete("/projects/:id", async (req, reply) => {
     const id = (req.params as { id: string }).id;
     try {
-      // 每个来源会话先删其 derived facts 再删对话；随后清除剩余的独立工作区记忆。
-      for (const t of repo.listThreads({ projectId: id })) {
-        await sessionHost.deleteThread(t.id, async () => {
-          await memory.deleteBySession(t.id);
-          skillCandidates.removeSource(t.id);
-          repo.deleteThread(t.id);
-        });
-      }
-      await memory.deleteByScope(workspaceScope(id));
-      skillCandidates.deleteWorkspace(id);
-      repo.deleteProject(id);
+      await sourceConversations.deleteProject(id);
       return { ok: true };
     } catch (e) {
       return reply.code(500).send({

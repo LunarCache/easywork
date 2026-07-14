@@ -65,6 +65,10 @@ import {
 import { SkillCandidateStore } from "../skill-learning/candidate-store.js";
 import { SkillCandidateService } from "../skill-learning/candidate-service.js";
 import { SkillLearningCoordinator } from "../skill-learning/coordinator.js";
+import {
+  createSourceConversationLifecycle,
+  type SourceConversationLifecycle,
+} from "../conversations/source-conversation-lifecycle.js";
 
 export { agentModelUnavailableError } from "./routes/agent.js";
 
@@ -81,6 +85,7 @@ export interface CoreServer {
   agentMemory: AdditiveMemoryProvider;
   embeddings: EmbeddingService;
   repo: SqliteConversationRepo;
+  sourceConversations: SourceConversationLifecycle;
   token: string;
   start(opts?: { port?: number; host?: string }): Promise<{ port: number; host: string }>;
   stop(): Promise<void>;
@@ -277,6 +282,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       ...builtinTools.map((tool) => tool.definition.name),
     ],
   });
+  const sourceConversations = createSourceConversationLifecycle(sessionHost, memory, skillCandidates, repo);
   skills.setOpenListener((skill) => skillCandidates.recordUseByPath(skill.bodyPath));
   sessionHost.setSkillCandidateStager((input) => skillCandidates.stage(input));
   const skillLearning = new SkillLearningCoordinator({
@@ -619,6 +625,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     agentMemory,
     embeddings,
     repo,
+    sourceConversations,
     fetchImpl: opts.fetch ?? fetch,
     persistProviders,
     persistMcp,
@@ -697,6 +704,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     agentMemory,
     embeddings,
     repo,
+    sourceConversations,
     token,
     async start(startOpts = {}) {
       const host = startOpts.host ?? "127.0.0.1";
