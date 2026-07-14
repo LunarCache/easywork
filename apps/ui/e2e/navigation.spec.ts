@@ -51,14 +51,67 @@ test.describe("navigation e2e", () => {
     await openApp();
 
     await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
-    await page.locator(".side-dock .sd-launch-row").filter({ hasText: "文件" }).click();
     await page.getByTitle("放大到窗口").click();
 
     const title = page.locator(".side-dock.max .sd-top-title");
-    await expect(title).toHaveText("文件");
+    await expect(title).toHaveText("工作台");
     const titleBox = await title.boundingBox();
     expect(titleBox).not.toBeNull();
     expect(titleBox!.x >= 88 || titleBox!.y >= 46).toBe(true);
+  });
+
+  test("工作台宽度可拖拽并持久化，窄窗口改为浮层而不是消失", async ({ page, openApp }) => {
+    await openApp();
+    const toggle = page.getByTitle("打开工作台（文件 / 浏览器 / 终端）");
+    await toggle.click();
+
+    const dock = page.getByTestId("side-dock");
+    const handle = page.getByTestId("side-dock-resize-handle");
+    const before = await dock.boundingBox();
+    const grip = await handle.boundingBox();
+    expect(before).not.toBeNull();
+    expect(grip).not.toBeNull();
+
+    await page.mouse.move(grip!.x + grip!.width / 2, grip!.y + 80);
+    await page.mouse.down();
+    await page.mouse.move(grip!.x - 90, grip!.y + 80);
+    await page.mouse.up();
+    const after = await dock.boundingBox();
+    expect(after!.width).toBeGreaterThan(before!.width + 60);
+
+    // reload 强制 SideDock 重挂载，确认宽度来自 localStorage，而不是仍在内存中的 React state。
+    await page.reload();
+    await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
+    await expect.poll(async () => (await dock.boundingBox())?.width ?? 0).toBeGreaterThan(before!.width + 60);
+
+    const persistedGrip = await handle.boundingBox();
+    await page.mouse.move(persistedGrip!.x + persistedGrip!.width / 2, persistedGrip!.y + 80);
+    await page.mouse.down();
+    await page.mouse.move(persistedGrip!.x - 2_000, persistedGrip!.y + 80);
+    await page.mouse.up();
+    await expect.poll(async () => Math.round((await dock.boundingBox())?.width ?? 0)).toBe(760);
+
+    const maxGrip = await handle.boundingBox();
+    await page.mouse.move(maxGrip!.x + maxGrip!.width / 2, maxGrip!.y + 80);
+    await page.mouse.down();
+    await page.mouse.move(maxGrip!.x + 2_000, maxGrip!.y + 80);
+    await page.mouse.up();
+    await expect.poll(async () => Math.round((await dock.boundingBox())?.width ?? 0)).toBe(320);
+
+    await page.setViewportSize({ width: 960, height: 720 });
+    await expect(page.getByTitle("关闭工作台")).toBeVisible();
+    await expect(dock).toBeVisible();
+    await expect.poll(() => dock.evaluate((element) => getComputedStyle(element).position)).toBe("fixed");
+    const narrow = await dock.boundingBox();
+    expect(narrow!.width).toBeLessThanOrEqual(960);
+    expect(narrow!.x + narrow!.width).toBeGreaterThanOrEqual(959);
+
+    await page.getByTitle("关闭工作台").click();
+    const narrowToggle = page.getByTitle("打开工作台（文件 / 浏览器 / 终端）");
+    await expect(narrowToggle).toBeVisible();
+    await narrowToggle.click();
+    await expect(dock).toBeVisible();
+    await expect.poll(() => dock.evaluate((element) => getComputedStyle(element).position)).toBe("fixed");
   });
 
   test("全局搜索可通过快捷键打开并切换到目标工作区", async ({ page, openApp, client, workspaceDir }) => {

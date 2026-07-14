@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import type { ExecResult, GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "./ConfirmDialog.js";
@@ -7,7 +15,6 @@ import { fileType, formatFileSize } from "../lib/filetype.js";
 import { matchFileTarget } from "../lib/file-target.js";
 import type { UiMsg } from "../lib/agent-stream.js";
 import {
-  ArrowLeftIcon,
   ChevronIcon,
   CommitIcon,
   CopyIcon,
@@ -35,6 +42,32 @@ export interface GitContext {
 }
 
 type Tab = "diff" | "files" | "terminal" | "preview";
+
+const DOCK_WIDTH_KEY = "easywork.side-dock.width";
+const DOCK_WIDTH_DEFAULT = 420;
+const DOCK_WIDTH_MIN = 320;
+const DOCK_WIDTH_MAX = 760;
+
+function clampDockWidth(width: number): number {
+  return Math.min(DOCK_WIDTH_MAX, Math.max(DOCK_WIDTH_MIN, width));
+}
+
+function readDockWidth(): number {
+  try {
+    const stored = Number(localStorage.getItem(DOCK_WIDTH_KEY));
+    return Number.isFinite(stored) && stored > 0 ? clampDockWidth(stored) : DOCK_WIDTH_DEFAULT;
+  } catch {
+    return DOCK_WIDTH_DEFAULT;
+  }
+}
+
+function persistDockWidth(width: number): void {
+  try {
+    localStorage.setItem(DOCK_WIDTH_KEY, String(width));
+  } catch {
+    /* ignore */
+  }
+}
 
 function fileIconFor(p: string) {
   const ft = fileType(p);
@@ -90,9 +123,9 @@ export function SideDock({
   /** 外部请求查看某文件的改动（点「文件改动」卡）：跳到 改动(工作区)/文件(对话) 视图。 */
   target?: { path: string; nonce: number } | null;
 }) {
-  // view = null 时显示启动菜单（文件/浏览器/终端/改动 大行）；选中后显示对应内容。
-  const [view, setView] = useState<Tab | null>(null);
+  const [view, setView] = useState<Tab>(() => (git ? "diff" : "files"));
   const [maxed, setMaxed] = useState(false);
+  const [dockWidth, setDockWidth] = useState(readDockWidth);
   const [termHistory, setTermHistory] = useState<TermEntry[]>([]);
   const repo = !!git?.status.repo;
   // repo 经 ref 读取：仅 target.nonce 变化（点击改动卡）才切视图；
@@ -127,17 +160,65 @@ export function SideDock({
 
   const gitAdds = git ? git.status.files.reduce((s, f) => s + f.adds, 0) : 0;
   const gitDels = git ? git.status.files.reduce((s, f) => s + f.dels, 0) : 0;
-  const VIEW_LABEL: Record<Tab, string> = { diff: "改动", files: "文件", terminal: "终端", preview: "浏览器" };
+  const onResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = dockWidth;
+    let width = startWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const move = (moveEvent: MouseEvent) => {
+      width = clampDockWidth(startWidth + startX - moveEvent.clientX);
+      setDockWidth(width);
+    };
+    const up = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      persistDockWidth(width);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
+  const resizeByKeyboard = (delta: number) => {
+    setDockWidth((current) => {
+      const width = clampDockWidth(current + delta);
+      persistDockWidth(width);
+      return width;
+    });
+  };
 
   return (
-    <aside className={`side-dock ${open ? "open" : ""} ${maxed ? "max" : ""}`}>
+    <aside
+      className={`side-dock ${open ? "open" : ""} ${maxed ? "max" : ""}`}
+      data-testid="side-dock"
+      style={maxed ? undefined : { width: dockWidth }}
+    >
+      <div
+        className="sd-resize-handle"
+        data-testid="side-dock-resize-handle"
+        role="separator"
+        aria-label="调整工作台宽度"
+        aria-orientation="vertical"
+        aria-valuemin={DOCK_WIDTH_MIN}
+        aria-valuemax={DOCK_WIDTH_MAX}
+        aria-valuenow={dockWidth}
+        tabIndex={0}
+        onMouseDown={onResizeStart}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            resizeByKeyboard(16);
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            resizeByKeyboard(-16);
+          }
+        }}
+      />
       <div className="sd-top">
-        {view !== null && (
-          <button className="fv-btn" title="返回" onClick={() => setView(null)}>
-            <ArrowLeftIcon size={15} />
-          </button>
-        )}
-        <span className="sd-top-title">{view !== null ? VIEW_LABEL[view] : "工作台"}</span>
+        <span className="sd-top-title">工作台</span>
         <span className="bar-spacer" />
         {view === "files" && (
           <>
@@ -162,35 +243,58 @@ export function SideDock({
         </button>
       </div>
 
-      <div className="sd-body">
-        {view === null && (
-          <div className="sd-launch">
-            {git && git.status.repo && (
-              <button className="sd-launch-row" onClick={() => setView("diff")}>
-                <FileIcon size={18} className="sd-launch-ico" />
-                <span className="sd-launch-label">改动</span>
-                <span className="sd-launch-stat mono">
-                  <span className="add">+{gitAdds}</span> <span className="del">−{gitDels}</span>
-                </span>
-              </button>
+      <div className="sd-tabs" role="tablist" aria-label="工作台视图">
+        {git && (
+          <button
+            className={`sd-tab ${view === "diff" ? "on" : ""}`}
+            data-testid="side-dock-tab-diff"
+            role="tab"
+            aria-selected={view === "diff"}
+            onClick={() => setView("diff")}
+          >
+            <FileIcon size={14} />
+            <span>改动</span>
+            {(gitAdds > 0 || gitDels > 0) && (
+              <span className="sd-tab-stat mono">
+                <span className="add">+{gitAdds}</span> <span className="del">−{gitDels}</span>
+              </span>
             )}
-            <button className="sd-launch-row" onClick={() => setView("files")}>
-              <FolderIcon size={18} className="sd-launch-ico" />
-              <span className="sd-launch-label">文件</span>
-              {files.length > 0 && <span className="rev-count">{files.length}</span>}
-              <span className="sd-launch-kbd">⌘P</span>
-            </button>
-            <button className="sd-launch-row" onClick={() => setView("preview")}>
-              <GlobeIcon size={18} className="sd-launch-ico" />
-              <span className="sd-launch-label">浏览器</span>
-              <span className="sd-launch-kbd">⌘T</span>
-            </button>
-            <button className="sd-launch-row" onClick={() => setView("terminal")}>
-              <TerminalIcon size={18} className="sd-launch-ico" />
-              <span className="sd-launch-label">终端</span>
-            </button>
-          </div>
+          </button>
         )}
+        <button
+          className={`sd-tab ${view === "files" ? "on" : ""}`}
+          data-testid="side-dock-tab-files"
+          role="tab"
+          aria-selected={view === "files"}
+          onClick={() => setView("files")}
+        >
+          <FolderIcon size={14} />
+          <span>文件</span>
+          {files.length > 0 && <span className="rev-count">{files.length}</span>}
+        </button>
+        <button
+          className={`sd-tab ${view === "terminal" ? "on" : ""}`}
+          data-testid="side-dock-tab-terminal"
+          role="tab"
+          aria-selected={view === "terminal"}
+          onClick={() => setView("terminal")}
+        >
+          <TerminalIcon size={14} />
+          <span>终端</span>
+        </button>
+        <button
+          className={`sd-tab ${view === "preview" ? "on" : ""}`}
+          data-testid="side-dock-tab-preview"
+          role="tab"
+          aria-selected={view === "preview"}
+          onClick={() => setView("preview")}
+        >
+          <GlobeIcon size={14} />
+          <span>浏览器</span>
+        </button>
+      </div>
+
+      <div className="sd-body">
         {view === "diff" && git && <DiffTab git={git} />}
         {view === "files" && (
           <FilesTab
@@ -199,6 +303,7 @@ export function SideDock({
             id={previewId}
             emptyHint={filesEmpty}
             openTarget={repo ? null : target}
+            maxed={maxed}
           />
         )}
         {view === "terminal" && <TerminalTab msgs={msgs} history={termHistory} onRun={runCommand} />}
@@ -215,6 +320,7 @@ function FilesTab({
   id,
   emptyHint,
   openTarget,
+  maxed,
 }: {
   files: WsEntry[];
   scope: "workspace" | "chat";
@@ -222,6 +328,7 @@ function FilesTab({
   emptyHint: ReactNode;
   /** 外部请求打开的文件（点「文件改动」卡时定位预览）；nonce 让连点同一文件也触发。 */
   openTarget?: { path: string; nonce: number } | null;
+  maxed: boolean;
 }) {
   const [sel, setSel] = useState<string | null>(null);
   const handledRef = useRef<number | null>(null);
@@ -247,34 +354,42 @@ function FilesTab({
     setSel(targetFile?.path ?? openTarget.path);
   }, [openTarget, targetFile]);
 
-  if (visibleFiles.length === 0) return <DockEmpty>{emptyHint}</DockEmpty>;
-  return (
+  const fileList = (
     <div className="rev-scroll af-scroll">
-      {visibleFiles.map((f) => {
-        const isOpen = sel === f.path;
-        return (
-          <div key={f.path} className={`af-file ${isOpen ? "open" : ""}`}>
-            <div
-              className={`af-file-head ${isOpen ? "open" : ""}`}
-              onClick={() => setSel(isOpen ? null : f.path)}
-            >
-              <ChevronIcon size={13} className={`chev ${isOpen ? "open" : ""}`} />
-              {fileIconFor(f.path)}
-              <span className="af-path" title={f.path}>
-                {f.path}
-              </span>
-              {f.size != null && <span className="af-size">{formatFileSize(f.size)}</span>}
-            </div>
-            {isOpen && (
-              <div className="af-body">
-                <FileViewer key={f.path} source={{ kind: "fs", scope, id, path: f.path }} />
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {visibleFiles.map((file) => (
+        <button
+          type="button"
+          key={file.path}
+          className={`af-file ${sel === file.path ? "active" : ""}`}
+          onClick={() => setSel(file.path)}
+        >
+          {fileIconFor(file.path)}
+          <span className="af-path" title={file.path}>{file.path}</span>
+          {file.size != null && <span className="af-size">{formatFileSize(file.size)}</span>}
+        </button>
+      ))}
     </div>
   );
+  const fileViewer = sel ? (
+    <FileViewer
+      key={sel}
+      source={{ kind: "fs", scope, id, path: sel }}
+      onBack={maxed ? undefined : () => setSel(null)}
+    />
+  ) : (
+    <DockEmpty>从文件列表中选择一个文件进行预览。</DockEmpty>
+  );
+
+  if (visibleFiles.length === 0) return <DockEmpty>{emptyHint}</DockEmpty>;
+  if (maxed) {
+    return (
+      <div className="files-split">
+        <nav className="files-nav" aria-label="文件列表">{fileList}</nav>
+        <div className="files-detail">{fileViewer}</div>
+      </div>
+    );
+  }
+  return sel ? <div className="files-detail">{fileViewer}</div> : fileList;
 }
 
 // ===== 终端 tab：看 AI 运行的命令 + 自己跑命令 =====

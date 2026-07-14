@@ -8,7 +8,7 @@ import hljs from "highlight.js/lib/common";
 import { getClient } from "../lib/client.js";
 import { resolvePreviewKind, mimeForName, extOf, langForExt, useBlobUrl, type PreviewKind, type PreviewMeta } from "../lib/preview.js";
 import { fileType, formatFileSize } from "../lib/filetype.js";
-import { LoaderIcon, CopyIcon, CheckIcon } from "../icons.js";
+import { ArrowLeftIcon, LoaderIcon, CopyIcon, CheckIcon } from "../icons.js";
 
 export type PreviewSource =
   | { kind: "fs"; scope: "workspace" | "chat"; id: string; path: string }
@@ -53,7 +53,7 @@ function CopyBtn({ text }: { text: string }) {
 }
 
 /** 统一文件预览。 */
-export function FileViewer({ source }: { source: PreviewSource }) {
+export function FileViewer({ source, onBack }: { source: PreviewSource; onBack?: () => void }) {
   const [meta, setMeta] = useState<PreviewMeta | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // markdown/html/svg：在"渲染"与"源码"间切换。
@@ -119,6 +119,11 @@ export function FileViewer({ source }: { source: PreviewSource }) {
   return (
     <div className="fv" data-testid="file-viewer">
       <div className="fv-bar">
+        {onBack && (
+          <button className="fv-btn" title="返回文件列表" aria-label="返回文件列表" onClick={onBack}>
+            <ArrowLeftIcon size={15} />
+          </button>
+        )}
         <span className="fv-badge" style={{ background: ft.color }}>{ft.label}</span>
         <span className="fv-name" data-testid="file-viewer-name" title={meta.name}>{meta.name.split(/[/\\]/).pop()}</span>
         {meta.size > 0 && <span className="fv-size">{formatFileSize(meta.size)}</span>}

@@ -144,11 +144,12 @@ test.describe("composer e2e", () => {
     await expect(card).toContainText("summary.md");
     await expect(card).toContainText("新建");
     await card.getByRole("button", { name: /summary\.md/ }).click();
-    await expect(page.locator(".side-dock .sd-top-title")).toHaveText("文件");
+    await expect(page.locator(".side-dock .sd-top-title")).toHaveText("工作台");
+    await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
     await expect(page.getByTestId("file-viewer-name")).toHaveText("summary.md");
   });
 
-  test("HTML 交付文件不重复，并在侧栏与放大态都填满剩余高度", async ({ page, openApp, info }) => {
+  test("HTML 交付文件在普通侧栏使用主从导航，放大后使用双栏且只有一套预览工具栏", async ({ page, openApp, info }) => {
     const absolutePath = "/Users/test/.easywork/workspace/chats/thread/shanghai-weather.html";
     let listedFiles = [{ path: "shanghai-weather.html", type: "file", size: 1024 }];
     await page.route(`${info.baseUrl}/models`, async (route) => {
@@ -191,38 +192,51 @@ test.describe("composer e2e", () => {
     await expect(page.locator(".cv-changes-row")).toHaveCount(1);
     await page.locator(".cv-changes-row").evaluate((element: HTMLElement) => element.click());
 
-    await expect(page.locator(".side-dock .af-file")).toHaveCount(1);
-    await expect(page.locator(".side-dock .af-path")).toHaveText("shanghai-weather.html");
+    await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
+    await expect(page.getByTestId("side-dock-tab-terminal")).toBeVisible();
+    await expect(page.getByTestId("side-dock-tab-preview")).toBeVisible();
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(0);
     await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.html");
+    await expect(page.getByTestId("file-viewer-name")).toHaveCount(1);
+    await expect(page.getByTitle("返回文件列表")).toBeVisible();
 
     const previewFillRatio = async () => {
       const available = await page.locator(".side-dock .sd-body").boundingBox();
-      const preview = await page.locator(".side-dock .af-body").boundingBox();
+      const preview = await page.locator(".side-dock .files-detail").boundingBox();
       return available && preview ? preview.height / available.height : 0;
     };
     await expect.poll(previewFillRatio).toBeGreaterThan(0.9);
 
+    await page.getByTitle("返回文件列表").click();
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(1);
+    await expect(page.getByTestId("file-viewer")).toHaveCount(0);
+    await page.locator(".side-dock .af-file").click();
+    await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.html");
+
     await page.getByTitle("放大到窗口").click();
     await expect(page.locator(".side-dock")).toHaveClass(/max/);
+    await expect(page.locator(".side-dock .files-split")).toBeVisible();
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(1);
+    await expect(page.getByTestId("file-viewer-name")).toHaveCount(1);
     await expect.poll(previewFillRatio).toBeGreaterThan(0.9);
 
-    // 文件行超过面板高度时，列表应滚动，已展开预览仍需保留可用视口。
+    // 文件行超过导航栏高度时，左侧列表独立滚动，右侧预览不受影响。
     listedFiles = [
       { path: "shanghai-weather.html", type: "file", size: 1024 },
       ...Array.from({ length: 18 }, (_, index) => ({ path: `notes-${index + 1}.txt`, type: "file", size: 128 })),
     ];
-    await page.getByTitle("还原").click();
     await page.locator(".side-dock").getByTitle("刷新").click();
     await expect(page.locator(".side-dock .af-file")).toHaveCount(19);
-    await expect(page.locator(".side-dock .af-file.open")).toHaveCount(1);
-    await expect
-      .poll(async () => (await page.locator(".side-dock .af-body").boundingBox())?.height ?? 0)
-      .toBeGreaterThanOrEqual(350);
     const scrollMetrics = await page.locator(".side-dock .af-scroll").evaluate((element) => ({
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
     }));
     expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+    await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.html");
+
+    await page.getByTitle("还原").click();
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(0);
+    await expect(page.getByTestId("file-viewer-name")).toHaveCount(1);
   });
 
   test("聊天页关闭联网后从请求中排除 explore_web 和 http_get", async ({ page, openApp, info }) => {

@@ -1,29 +1,27 @@
 /* 统一右侧「工作台坞」：改动 / 文件 / 终端 / 预览（对话区与工作区共用） */
-/* 常驻右面板（设计：贴在对话列右侧，非滑入遮罩）。 */
-/* 常驻挂载（保留终端历史/视图等内部态），关闭时隐藏不占位。 */
-.side-dock { position: relative; flex: none; height: 100%; width: 360px; border-left: 1px solid var(--border-soft); background: var(--bg); display: flex; flex-direction: column; min-height: 0; }
+/* 宽屏贴在主列右侧；组件常驻挂载以保留终端历史和当前视图。 */
+.side-dock { position: relative; flex: none; height: 100%; width: 420px; border-left: 1px solid var(--border-soft); background: var(--bg); display: flex; flex-direction: column; min-height: 0; }
 .side-dock:not(.open) { display: none; }
-/* —— 面板顶部控制行（返回 / 标题 / 操作 / 放大 / 关闭）—— */
+.sd-resize-handle { position: absolute; z-index: 4; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; outline: none; }
+.sd-resize-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background 120ms ease; }
+.sd-resize-handle:hover::after, .sd-resize-handle:focus-visible::after { background: var(--accent); }
+/* —— 面板顶部控制行（标题 / 上下文操作 / 放大 / 关闭）—— */
 .sd-top { flex: none; display: flex; align-items: center; gap: 3px; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); }
 .sd-top-title { font-size: 12px; font-weight: 600; color: var(--tx-0); padding-left: 4px; }
-/* —— 启动菜单（大行：改动 / 文件 / 浏览器 / 终端，垂直居中，参考设计）—— */
-.sd-launch { margin: auto 0; display: flex; flex-direction: column; gap: 5px; padding: 12px; }
-.sd-launch-row { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid transparent; border-radius: var(--r); background: transparent; color: var(--tx-0); cursor: pointer; font-size: 13.5px; font-weight: 550; font-family: var(--font); }
-.sd-launch-row:hover { background: color-mix(in srgb, var(--bg-hover) 68%, transparent); border-color: color-mix(in srgb, var(--border-soft) 76%, transparent); }
-.sd-launch-ico { color: var(--tx-1); flex: none; }
-.sd-launch-label { flex: 1; text-align: left; }
-.sd-launch-kbd { font-family: var(--font-mono); font-size: 11px; color: var(--tx-2); background: var(--bg-inset); border-radius: var(--r-sm); padding: 1px 7px; flex: none; }
-.sd-launch-stat { font-size: 12px; flex: none; }
-.sd-launch-stat .add { color: var(--grn); }
-.sd-launch-stat .del { color: var(--red); }
 /* 放大到整个窗口（position:fixed 逃出主区域，盖住 rail/会话列表/标题栏） */
 .side-dock.max { position: fixed; inset: 0; width: auto; z-index: 200; }
+.side-dock.max .sd-resize-handle { display: none; }
 /* Tauri/macOS 的原生 traffic lights 仍悬浮在 fixed 层之上；放大态共享头部须复用标题栏安全区。 */
 .is-desktop .side-dock.max .sd-top { padding-left: var(--ad-traffic-light-safe-x); }
-.sd-tabs { display: flex; align-items: center; gap: 2px; padding: 7px 8px; border-bottom: 1px solid var(--border); flex: none; }
-.sd-tab { height: 28px; padding: 0 11px; border: none; border-radius: var(--r); cursor: pointer; font-family: var(--font-mono); font-size: 11px; font-weight: 600; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+.sd-tabs { display: flex; align-items: center; gap: 3px; padding: 6px 8px; border-bottom: 1px solid var(--border); flex: none; }
+.sd-tab { flex: 1 1 0; min-width: 0; height: 30px; padding: 0 8px; border: none; border-radius: var(--r); cursor: pointer; font-family: var(--font); font-size: 11.5px; font-weight: 600; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
 .sd-tab:hover { background: var(--color-bg-tertiary); color: var(--text); }
 .sd-tab.on { background: var(--accent-soft); color: var(--accent); }
+.sd-tab > svg { flex: none; }
+.sd-tab .rev-count { padding: 0 5px; }
+.sd-tab-stat { display: inline-flex; gap: 3px; font-size: 10px; }
+.sd-tab-stat .add { color: var(--color-diff-add-text); }
+.sd-tab-stat .del { color: var(--color-diff-del-text); }
 .sd-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .sd-url { flex: none; }
 .rev-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 650; }
@@ -123,23 +121,21 @@
 /* 预览 tab：网页 iframe（来源/外链点击 → 内联预览，不导航走整个 app） */
 .wpv-url { font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .wpv-frame { flex: 1; width: 100%; border: 0; background: #fff; display: block; }
-.af-file { border-top: 1px solid var(--border); }
+.af-file { flex: none; width: 100%; min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; font-family: var(--font); }
 .af-file:first-child { border-top: 0; }
-.af-file-head { display: flex; align-items: center; gap: 7px; padding: 7px 12px; cursor: pointer; font-size: 13px; }
-.af-file-head:hover { background: var(--surface-3); }
-.af-file-head.open { background: var(--surface-3); }
-.af-file-head .chev { color: var(--muted); transition: transform var(--ease) 0.15s; flex: none; }
-.af-file-head .chev.open { transform: rotate(90deg); }
-.af-file-head > svg { color: var(--muted); flex: none; }
+.af-file:hover { background: var(--surface-3); }
+.af-file.active { background: var(--accent-soft); color: var(--accent); }
+.af-file > svg { flex: none; }
 .af-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; }
 .af-size { font-family: var(--font-mono); font-size: 11px; color: var(--muted); flex: none; }
 .af-scroll { display: flex; flex-direction: column; min-height: 0; }
-/* 展开项有空间时填满；文件行过多时保持一个可用预览视口，超出部分由 af-scroll 滚动。 */
-.af-file.open { flex: 1 0 390px; min-height: 390px; display: flex; flex-direction: column; }
-.af-body { flex: 1; min-height: 0; border-top: 1px solid var(--border); background: var(--surface); display: flex; }
+.files-detail { flex: 1; min-width: 0; min-height: 0; display: flex; background: var(--surface); }
+.files-detail > .sd-empty { flex: 1; }
+.files-split { flex: 1; min-width: 0; min-height: 0; display: flex; }
+.files-nav { flex: 0 0 clamp(240px, 28vw, 360px); min-width: 0; min-height: 0; display: flex; border-right: 1px solid var(--border); background: var(--bg); }
 
-/* 响应式：中窄窗口优先隐藏工作台坞 */
+/* 中窄窗口将工作台变为右侧浮层，入口和内容都继续可用。 */
 @media (max-width: 1100px) {
-  .side-dock { display: none !important; }
-  .ad-tb-dock { display: none !important; }
+  .side-dock.open:not(.max) { position: fixed; z-index: 190; top: var(--ad-titlebar-height); right: 0; bottom: 0; width: min(92vw, 520px) !important; height: auto; box-shadow: -18px 0 40px rgba(0, 0, 0, 0.18); }
+  .side-dock.open:not(.max) .sd-resize-handle { display: none; }
 }

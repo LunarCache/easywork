@@ -350,10 +350,11 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 
 ### 12.2 外壳（App.tsx）
 
-- **两段式 Titlebar（46px，无下边框、与下方内容同底色无缝）**：段 A 宽 = 实时侧栏宽（右边框与分隔线像素对齐）+ macOS 红绿灯让位（`--ad-traffic-light-safe-x: 88px`）+ 侧栏开关；SideDock 放大覆盖标题栏时，其共用 `.sd-top` 复用同一安全区，避免文件 / 浏览器等标题和返回按钮落到原生 traffic lights 下方。段 B 面包屑（任务名 + 工作区/分支 pill）+ 工作台开关（动态图标，仅聊天/工作区会话显示）。Tauri 拖拽区必须标在实际命中元素上：标题栏非交互容器、任务名、spacer、项目/分支 pill 及其内部文本 / 图标都带 `data-tauri-drag-region`，交互按钮不带。
+- **两段式 Titlebar（46px，无下边框、与下方内容同底色无缝）**：段 A 宽 = 实时侧栏宽（右边框与分隔线像素对齐）+ macOS 红绿灯让位（`--ad-traffic-light-safe-x: 88px`）+ 侧栏开关；SideDock 放大覆盖标题栏时，其共用 `.sd-top` 复用同一安全区，避免工作台标题落到原生 traffic lights 下方。段 B 面包屑（任务名 + 工作区/分支 pill）+ 工作台开关（动态图标，仅聊天/工作区会话显示）。Tauri 拖拽区必须标在实际命中元素上：标题栏非交互容器、任务名、spacer、项目/分支 pill 及其内部文本 / 图标都带 `data-tauri-drag-region`，交互按钮不带。
 - **展开式侧栏**：快捷操作（新对话 ⌘N / **搜索 ⌘K** / 新建工作区 / 收件箱）+「项目」折叠组（CWD 角标 / hover 新建会话 ＋·文件树·删除 / 分区头「折叠全部」`toggleAll`）+「对话」分区（相对时间）+ 底部设置 + 连接状态点。首页/侧栏的「新建工作区」调用无 `workspaceDir` 的 `POST /projects`，由 daemon 分配数据目录下的 `workspace/NewProjectN`，随后直接进入空白 `.ws-hero`；它不触发系统目录选择。`ContextBar` 项目菜单的「打开文件夹」是独立流程，只有这里才调用 `pickWorkspaceDir()`，取消选择不再追加确认或创建项目。可拖拽列宽（200–460，持久化）。channel threads 不出现在普通对话分区和 `SearchPalette`，统一进入收件箱。**全局搜索 `SearchPalette`（⌘K，App 全局 keydown）**：居中浮层跨 对话/工作区/工作区会话 模糊匹配，↑↓/Enter/Esc。注意 eyebrow 控件类名勿用 `row`（命中全局 `.row > button` 主按钮样式）。
 - **收件箱 `Inbox.tsx`**：基于 `GET /inbox/threads` 的只读聊天优先视图——左侧渠道会话队列（搜索 + 全部/运行中/未运行筛选，可拖拽宽度并持久化），右侧消息时间线（读取 `/threads/:id/messages` 的 `StoredMessage[]`）；打开页面时订阅 `GET /inbox/events` SSE，收到 `changed` 后重新读取 read model，不做固定间隔轮询。身份 / 模型 / 同类连接器状态进入按需右侧抽屉，窄屏切成上方会话队列 + 下方消息流。展示层会把 opaque channel id 降级成「微信联系人」等友好标题，预览清洗 Markdown 标记，助手消息按 Markdown 渲染；手动回复和暂停自动回复暂不伪实现，只保留禁用控制位。
 - **dockOpen 是 App 级共享态**，切模式/会话/工作区时重置（面板不跨会话"跟着"）。
+- **SideDock 工作台**：打开后直接显示常驻模式栏 **改动（仅工作区）/ 文件 / 终端 / 浏览器**，不再经过二级启动菜单；当前模式、文件数量和 Git 统计在同一层可见。宽屏下作为 320–760px 可拖拽、localStorage 持久化的右侧列；≤1100px 时保留标题栏入口并切成右侧浮层，不再直接隐藏。文件模式在普通侧栏采用主从导航：列表选中文件后由详情接管正文，FileViewer 自己的单一工具栏提供返回；放大态切成左侧独立滚动文件导航 + 右侧独立预览，避免把预览继续嵌进文件手风琴。
 - 主区按 `mode` 切换 Chat（按 threadId 重挂载）/ Workspace / FilesPage / inbox 占位；**设置为整页内嵌**（非弹层）。`.set-page` 用 `position:absolute; inset:0; z-index` **覆盖整窗（含标题栏）**——否则上一页的标题会在顶部露出；桌面端 `.set-nav` 顶部留白让位红绿灯 + `data-tauri-drag-region` 保留拖拽。打开设置时 `.ad-body` 保持挂载、仅 CSS 隐藏（`display:none`），避免卸载 Chat/Workspace 而中断在途流式运行。
 - **设置 page-host**：`SettingsHost`（`apps/ui/src/settings/SettingsHost.tsx`）封装 section registry、visited keep-alive、上次分区 localStorage、`ew:open-settings` 定向打开和整页覆盖布局；`App.tsx` 只调用 `settingsHost.open/openSection/close`，不再直接持有设置页运行态。
 - **⌘N** 全局 keydown 新建对话。
@@ -379,6 +380,7 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 ### 12.5 统一文件预览 FileViewer
 
 一个 `<FileViewer source>` 组件按 `kind` 选渲染器（开闭：加类型=加分支），统一工作台「文件」tab 与项目文件浏览页 FilesPage 的预览：
+- **工具栏所有权**：文件名、大小、预览 / 源码、复制 / 下载都只由 FileViewer 渲染；SideDock 普通详情可注入一个返回文件列表动作，但不再额外包文件标题栏。
 - **数据源四态**：`fs`（工作区/会话文件，走 `/files/meta` + `/files/raw`）/ `text`（已有文本）/ `url`（网页）/ `bytes`（消息图片 base64）。
 - **类型**：文本·代码（highlight.js 高亮）/ Markdown（渲染 ⇆ 源码）/ 图片（鉴权 fetch→blob URL）/ SVG（渲染 ⇆ 源码）/ PDF（`<iframe>` 浏览器原生）/ HTML（沙箱 iframe ⇆ 源码）/ 二进制兜底下载。不做音视频。
 - **鉴权字节**：daemon 用 Bearer，`<img>/<iframe>` 不能带 header → SDK `fileBytes()` 用 fetch 取 Blob → `useBlobUrl` 的 `createObjectURL` 当 src，卸载/换 key 时 revoke。
@@ -399,7 +401,7 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 
 - **渐进披露**：`ConfigPrimitives.tsx` 的 `ConfigDisclosure` 提供统一的摘要按钮、`aria-expanded` 与按需内容区，供 Skills 自动学习和记忆迁移审计复用；它是页面内层级组件，不是遮罩弹层。
 - **统一弹层**：删除确认 / 文本输入 / 列表选择共用 `.confirm-mask`/`.confirm-box` 外壳——`useConfirm()` hook（promise 化、重入放弃前一个防泄漏）做确认（模型/MCP 删除）；`.confirm-box.wide` 做输入（记忆添加）。**替代 Tauri WKWebView 不可靠的 `window.confirm`/`prompt`**（不阻塞、点一下即"确认"）。
-- **文件类型体系**：`lib/filetype.ts` 统一扩展名→`{label,color,Icon}`（工具行/文件树/汇总卡共用）；`BY_NAME` 处理整名配置（Dockerfile/.gitignore→GIT，避免 `.gitignore`→GITI）。SideDock 的文件列表使用纵向 flex 布局，已展开文件在普通侧栏和放大态都会接管剩余高度，HTML/PDF iframe 不再只占窗口上半部。新建技能等改**行内输入**（桌面走 Rust 原生目录选择）。
+- **文件类型体系**：`lib/filetype.ts` 统一扩展名→`{label,color,Icon}`（工具行/文件树/汇总卡共用）；`BY_NAME` 处理整名配置（Dockerfile/.gitignore→GIT，避免 `.gitignore`→GITI）。SideDock 的文件详情与放大双栏都使用完整剩余高度，HTML/PDF iframe 不再只占窗口上半部。新建技能等改**行内输入**（桌面走 Rust 原生目录选择）。
 
 ### 12.8 瘦客户端连接 + Tauri sidecar
 
