@@ -23,6 +23,16 @@ function expectInOrder(source: string, values: string[]): void {
 }
 
 describe("Windows desktop build workflows", () => {
+  it("uses Node 24-based official actions on ordinary CI", () => {
+    const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+
+    expect(workflow).toContain("actions/checkout@v7");
+    expect(workflow).toContain("actions/setup-node@v6");
+    expect(workflow).toContain("actions/cache@v5");
+    expect(workflow).toContain("actions/upload-artifact@v6");
+    expect(workflow).not.toMatch(/actions\/(checkout|setup-node|cache|upload-artifact)@v4/);
+  });
+
   it("builds, smokes, checks, and publishes both Windows installers on release tags", () => {
     const workflow = jobBlock(
       fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8"),
