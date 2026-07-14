@@ -26,6 +26,7 @@ import {
   GlobeIcon,
   MaximizeIcon,
   MinimizeIcon,
+  PlusIcon,
   RefreshIcon,
   TerminalIcon,
   UndoIcon,
@@ -42,6 +43,19 @@ export interface GitContext {
 }
 
 type Tab = "diff" | "files" | "terminal" | "preview";
+
+const TAB_META: Record<Tab, { label: string; icon: () => ReactNode }> = {
+  diff: { label: "改动", icon: () => <FileIcon size={14} /> },
+  files: { label: "文件", icon: () => <FolderIcon size={14} /> },
+  terminal: { label: "终端", icon: () => <TerminalIcon size={14} /> },
+  preview: { label: "浏览器", icon: () => <GlobeIcon size={14} /> },
+};
+const TAB_ORDER: Tab[] = ["diff", "terminal", "preview", "files"];
+
+export interface BrowserTarget {
+  url: string;
+  nonce: number;
+}
 
 const DOCK_WIDTH_KEY = "easywork.side-dock.width";
 const DOCK_WIDTH_DEFAULT = 420;
@@ -66,6 +80,18 @@ function persistDockWidth(width: number): void {
     localStorage.setItem(DOCK_WIDTH_KEY, String(width));
   } catch {
     /* ignore */
+  }
+}
+
+function normalizeBrowserAddress(value: string): string | null {
+  const input = value.trim();
+  if (!input) return null;
+  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(input) ? input : `https://${input}`;
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
+  } catch {
+    return null;
   }
 }
 
@@ -101,7 +127,7 @@ export function SideDock({
   filesEmpty,
   msgs,
   exec,
-  previewUrl,
+  browserTarget,
   onClearPreview,
   git,
   target,
@@ -117,32 +143,66 @@ export function SideDock({
   filesEmpty: ReactNode;
   msgs: UiMsg[];
   exec: (command: string) => Promise<ExecResult>;
-  previewUrl: string | null;
+  /** 消息链接触发的一次浏览器导航；nonce 使重复点击同一 URL 仍能重新激活。 */
+  browserTarget: BrowserTarget | null;
   onClearPreview: () => void;
   git?: GitContext;
   /** 外部请求查看某文件的改动（点「文件改动」卡）：跳到 改动(工作区)/文件(对话) 视图。 */
   target?: { path: string; nonce: number } | null;
 }) {
-  const [view, setView] = useState<Tab>(() => (git ? "diff" : "files"));
+  const initialView: Tab = git ? "diff" : "files";
+  const [view, setView] = useState<Tab>(initialView);
+  const [openViews, setOpenViews] = useState<Tab[]>([initialView]);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [browserUrl, setBrowserUrl] = useState<string | null>(() =>
+    browserTarget ? normalizeBrowserAddress(browserTarget.url) : null,
+  );
   const [maxed, setMaxed] = useState(false);
   const [dockWidth, setDockWidth] = useState(readDockWidth);
   const [termHistory, setTermHistory] = useState<TermEntry[]>([]);
+  const addMenuRef = useRef<HTMLDivElement>(null);
   const repo = !!git?.status.repo;
   // repo 经 ref 读取：仅 target.nonce 变化（点击改动卡）才切视图；
   // git 状态后台刷新（repo false→true）不应把用户从当前视图（终端/预览）拽回 diff。
   const repoRef = useRef(repo);
   repoRef.current = repo;
 
+  const activateView = useCallback((next: Tab) => {
+    setOpenViews((current) => (current.includes(next) ? current : [...current, next]));
+    setView(next);
+    setAddMenuOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAddMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [addMenuOpen]);
+
   // 「文件改动」卡点击 → git 仓库跳到 diff；否则跳到「文件」视图（FilesTab 按 nonce 定位文件）。
   useEffect(() => {
     if (!target) return;
-    setView(repoRef.current ? "diff" : "files");
-  }, [target?.nonce]);
+    activateView(repoRef.current ? "diff" : "files");
+  }, [target?.nonce, activateView]);
 
-  // 点消息里的链接/来源 → 自动进「浏览器」（开关由父组件负责）。
+  // 点消息里的链接/来源 → 校验地址后自动进「浏览器」（开关由父组件负责）。
   useEffect(() => {
-    if (previewUrl) setView("preview");
-  }, [previewUrl]);
+    if (!browserTarget) return;
+    const url = normalizeBrowserAddress(browserTarget.url);
+    if (!url) return;
+    setBrowserUrl(url);
+    activateView("preview");
+  }, [browserTarget?.nonce, activateView]);
 
   const runCommand = async (c: string) => {
     setTermHistory((h) => [...h, { cmd: c, output: "运行中…", code: null }]);
@@ -158,8 +218,6 @@ export function SideDock({
     });
   };
 
-  const gitAdds = git ? git.status.files.reduce((s, f) => s + f.adds, 0) : 0;
-  const gitDels = git ? git.status.files.reduce((s, f) => s + f.dels, 0) : 0;
   const onResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startX = event.clientX;
@@ -218,79 +276,51 @@ export function SideDock({
         }}
       />
       <div className="sd-top">
-        <span className="sd-top-title">工作台</span>
-        <span className="bar-spacer" />
-        {view === "files" && (
-          <>
-            <button className="fv-btn" title="在文件管理器中打开目录" onClick={onRevealDir}>
-              <FolderIcon size={14} />
+        <div className="sd-open-tabs" role="tablist" aria-label="已打开的工作台视图">
+          {openViews.map((tab) => (
+            <button
+              key={tab}
+              className={`sd-tab ${view === tab ? "on" : ""}`}
+              data-testid={`side-dock-tab-${tab}`}
+              role="tab"
+              aria-selected={view === tab}
+              onClick={() => activateView(tab)}
+            >
+              {TAB_META[tab].icon()}
+              <span>{TAB_META[tab].label}</span>
+              {tab === "files" && files.length > 0 && <span className="rev-count">{files.length}</span>}
             </button>
-            <button className="fv-btn" title="刷新" onClick={onFilesRefresh}>
-              <RefreshIcon size={13} />
-            </button>
-          </>
-        )}
-        {view === "diff" && git && (
-          <button className="fv-btn" title="刷新" onClick={() => void git.onRefresh()}>
-            <RefreshIcon size={13} />
+          ))}
+        </div>
+        <div className="sd-add-wrap" ref={addMenuRef}>
+          <button
+            className={`fv-btn sd-add ${addMenuOpen ? "on" : ""}`}
+            data-testid="side-dock-add-view"
+            title="打开工作台视图"
+            aria-label="打开工作台视图"
+            aria-expanded={addMenuOpen}
+            onClick={() => setAddMenuOpen((current) => !current)}
+          >
+            <PlusIcon size={16} />
           </button>
-        )}
+          {addMenuOpen && (
+            <div className="sd-view-menu" data-testid="side-dock-view-menu" role="menu">
+              {TAB_ORDER.filter((tab) => tab !== "diff" || git).map((tab) => (
+                <button type="button" key={tab} role="menuitem" onClick={() => activateView(tab)}>
+                  {TAB_META[tab].icon()}
+                  <span>{TAB_META[tab].label}</span>
+                  {openViews.includes(tab) && <CheckIcon size={14} className="sd-menu-check" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <span className="bar-spacer" />
         <button className="fv-btn" title={maxed ? "还原" : "放大到窗口"} onClick={() => setMaxed((v) => !v)}>
           {maxed ? <MinimizeIcon size={13} /> : <MaximizeIcon size={13} />}
         </button>
         <button className="fv-btn" title="关闭" onClick={onClose}>
           <XIcon size={14} />
-        </button>
-      </div>
-
-      <div className="sd-tabs" role="tablist" aria-label="工作台视图">
-        {git && (
-          <button
-            className={`sd-tab ${view === "diff" ? "on" : ""}`}
-            data-testid="side-dock-tab-diff"
-            role="tab"
-            aria-selected={view === "diff"}
-            onClick={() => setView("diff")}
-          >
-            <FileIcon size={14} />
-            <span>改动</span>
-            {(gitAdds > 0 || gitDels > 0) && (
-              <span className="sd-tab-stat mono">
-                <span className="add">+{gitAdds}</span> <span className="del">−{gitDels}</span>
-              </span>
-            )}
-          </button>
-        )}
-        <button
-          className={`sd-tab ${view === "files" ? "on" : ""}`}
-          data-testid="side-dock-tab-files"
-          role="tab"
-          aria-selected={view === "files"}
-          onClick={() => setView("files")}
-        >
-          <FolderIcon size={14} />
-          <span>文件</span>
-          {files.length > 0 && <span className="rev-count">{files.length}</span>}
-        </button>
-        <button
-          className={`sd-tab ${view === "terminal" ? "on" : ""}`}
-          data-testid="side-dock-tab-terminal"
-          role="tab"
-          aria-selected={view === "terminal"}
-          onClick={() => setView("terminal")}
-        >
-          <TerminalIcon size={14} />
-          <span>终端</span>
-        </button>
-        <button
-          className={`sd-tab ${view === "preview" ? "on" : ""}`}
-          data-testid="side-dock-tab-preview"
-          role="tab"
-          aria-selected={view === "preview"}
-          onClick={() => setView("preview")}
-        >
-          <GlobeIcon size={14} />
-          <span>浏览器</span>
         </button>
       </div>
 
@@ -304,10 +334,21 @@ export function SideDock({
             emptyHint={filesEmpty}
             openTarget={repo ? null : target}
             maxed={maxed}
+            onRefresh={onFilesRefresh}
+            onRevealDir={onRevealDir}
           />
         )}
         {view === "terminal" && <TerminalTab msgs={msgs} history={termHistory} onRun={runCommand} />}
-        {view === "preview" && <PreviewTab url={previewUrl} onClear={onClearPreview} />}
+        {view === "preview" && (
+          <PreviewTab
+            url={browserUrl}
+            onNavigate={setBrowserUrl}
+            onClear={() => {
+              setBrowserUrl(null);
+              onClearPreview();
+            }}
+          />
+        )}
       </div>
     </aside>
   );
@@ -321,6 +362,8 @@ function FilesTab({
   emptyHint,
   openTarget,
   maxed,
+  onRefresh,
+  onRevealDir,
 }: {
   files: WsEntry[];
   scope: "workspace" | "chat";
@@ -329,6 +372,8 @@ function FilesTab({
   /** 外部请求打开的文件（点「文件改动」卡时定位预览）；nonce 让连点同一文件也触发。 */
   openTarget?: { path: string; nonce: number } | null;
   maxed: boolean;
+  onRefresh: () => void;
+  onRevealDir: () => void;
 }) {
   const [sel, setSel] = useState<string | null>(null);
   const handledRef = useRef<number | null>(null);
@@ -355,19 +400,33 @@ function FilesTab({
   }, [openTarget, targetFile]);
 
   const fileList = (
-    <div className="rev-scroll af-scroll">
-      {visibleFiles.map((file) => (
-        <button
-          type="button"
-          key={file.path}
-          className={`af-file ${sel === file.path ? "active" : ""}`}
-          onClick={() => setSel(file.path)}
-        >
-          {fileIconFor(file.path)}
-          <span className="af-path" title={file.path}>{file.path}</span>
-          {file.size != null && <span className="af-size">{formatFileSize(file.size)}</span>}
+    <div className="files-list">
+      <div className="rev-head files-head">
+        <span>文件</span>
+        {visibleFiles.length > 0 && <span className="rev-count">{visibleFiles.length}</span>}
+        <span className="bar-spacer" />
+        <button className="fv-btn" title="在文件管理器中打开目录" onClick={onRevealDir}>
+          <FolderIcon size={14} />
         </button>
-      ))}
+        <button className="fv-btn" title="刷新" onClick={onRefresh}>
+          <RefreshIcon size={13} />
+        </button>
+      </div>
+      <div className="rev-scroll af-scroll">
+        {visibleFiles.length === 0 && <DockEmpty>{emptyHint}</DockEmpty>}
+        {visibleFiles.map((file) => (
+          <button
+            type="button"
+            key={file.path}
+            className={`af-file ${sel === file.path ? "active" : ""}`}
+            onClick={() => setSel(file.path)}
+          >
+            {fileIconFor(file.path)}
+            <span className="af-path" title={file.path}>{file.path}</span>
+            {file.size != null && <span className="af-size">{formatFileSize(file.size)}</span>}
+          </button>
+        ))}
+      </div>
     </div>
   );
   const fileViewer = sel ? (
@@ -380,7 +439,6 @@ function FilesTab({
     <DockEmpty>从文件列表中选择一个文件进行预览。</DockEmpty>
   );
 
-  if (visibleFiles.length === 0) return <DockEmpty>{emptyHint}</DockEmpty>;
   if (maxed) {
     return (
       <div className="files-split">
@@ -483,49 +541,96 @@ function TerminalTab({
   );
 }
 
-// ===== 预览 tab：网页（点链接/来源）iframe 预览 =====
-function PreviewTab({ url, onClear }: { url: string | null; onClear: () => void }) {
+// ===== 浏览器 tab：消息链接或用户输入地址 → iframe 预览 =====
+function PreviewTab({
+  url,
+  onNavigate,
+  onClear,
+}: {
+  url: string | null;
+  onNavigate: (url: string) => void;
+  onClear: () => void;
+}) {
   const [nonce, setNonce] = useState(0);
   const [copied, setCopied] = useState(false);
-  if (!url)
-    return (
-      <DockEmpty>打开消息中的链接后，会在这里预览。</DockEmpty>
-    );
+  const [draft, setDraft] = useState(url ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(url ?? "");
+    setError(null);
+  }, [url]);
+
+  const navigate = () => {
+    const next = normalizeBrowserAddress(draft);
+    if (!next) {
+      setError("请输入有效的 http(s) 地址");
+      return;
+    }
+    setError(null);
+    setDraft(next);
+    onNavigate(next);
+  };
+
   return (
-    <>
+    <div className="preview-tab">
       <div className="rev-head sd-url">
         <GlobeIcon size={14} />
-        <span className="wpv-url" title={url}>
-          {url}
-        </span>
-        <span className="bar-spacer" />
-        <button
-          className="fv-btn"
-          title="复制链接"
-          onClick={() => {
-            void navigator.clipboard.writeText(url);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1200);
+        <input
+          className="wpv-address"
+          aria-label="浏览器地址"
+          value={draft}
+          placeholder="输入网址，例如 example.com"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              navigate();
+            }
           }}
-        >
-          {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+        />
+        <button className="fv-btn" title="前往" onClick={navigate} disabled={!draft.trim()}>
+          <EnterIcon size={14} />
         </button>
-        <button className="fv-btn" title="刷新" onClick={() => setNonce((n) => n + 1)}>
-          <RefreshIcon size={13} />
-        </button>
-        <button className="fv-btn" title="清空预览" onClick={onClear}>
-          <XIcon size={14} />
-        </button>
+        {url && (
+          <>
+            <button
+              className="fv-btn"
+              title="复制链接"
+              onClick={() => {
+                void navigator.clipboard.writeText(url);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1200);
+              }}
+            >
+              {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+            </button>
+            <button className="fv-btn" title="刷新" onClick={() => setNonce((n) => n + 1)}>
+              <RefreshIcon size={13} />
+            </button>
+            <button className="fv-btn" title="清空地址" onClick={onClear}>
+              <XIcon size={14} />
+            </button>
+          </>
+        )}
       </div>
-      <iframe
-        key={`${url}#${nonce}`}
-        className="wpv-frame"
-        src={url}
-        title="网页预览"
-        referrerPolicy="no-referrer"
-        sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-      />
-    </>
+      {error && <div className="wpv-error">{error}</div>}
+      {url ? (
+        <iframe
+          key={`${url}#${nonce}`}
+          className="wpv-frame"
+          src={url}
+          title="网页预览"
+          referrerPolicy="no-referrer"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+        />
+      ) : (
+        <DockEmpty>输入网址，或打开消息中的链接后在这里浏览。</DockEmpty>
+      )}
+    </div>
   );
 }
 
@@ -540,6 +645,8 @@ function DiffTab({ git }: { git: GitContext }) {
   const [historyNonce, setHistoryNonce] = useState(0);
   const staged = status.files.filter((f) => f.staged);
   const unstaged = status.files.filter((f) => f.unstaged);
+  const adds = status.files.reduce((sum, file) => sum + file.adds, 0);
+  const dels = status.files.reduce((sum, file) => sum + file.dels, 0);
 
   const act = async (fn: () => Promise<unknown>) => {
     await fn().catch(() => {});
@@ -578,15 +685,34 @@ function DiffTab({ git }: { git: GitContext }) {
     }
   };
 
+  const summary = (
+    <div className="rev-head">
+      <span>当前改动</span>
+      {(adds > 0 || dels > 0) && (
+        <span className="rev-stat">
+          <span className="add">+{adds}</span> <span className="del">-{dels}</span>
+        </span>
+      )}
+      <span className="bar-spacer" />
+      <button className="fv-btn" title="刷新" onClick={() => void onRefresh()}>
+        <RefreshIcon size={13} />
+      </button>
+    </div>
+  );
+
   if (!status.repo)
     return (
-      <DockEmpty>
-        当前目录不是 Git 仓库。运行 <code>git init</code> 后即可审阅改动。
-      </DockEmpty>
+      <>
+        {summary}
+        <DockEmpty>
+          当前目录不是 Git 仓库。运行 <code>git init</code> 后即可审阅改动。
+        </DockEmpty>
+      </>
     );
 
   return (
     <>
+      {summary}
       {remote.hasRemote && (
         <div className="rev-remote">
           <span className="rev-remote-info" title={remote.upstream}>

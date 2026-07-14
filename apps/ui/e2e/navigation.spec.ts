@@ -53,11 +53,91 @@ test.describe("navigation e2e", () => {
     await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
     await page.getByTitle("放大到窗口").click();
 
-    const title = page.locator(".side-dock.max .sd-top-title");
-    await expect(title).toHaveText("工作台");
-    const titleBox = await title.boundingBox();
-    expect(titleBox).not.toBeNull();
-    expect(titleBox!.x >= 88 || titleBox!.y >= 46).toBe(true);
+    const activeTab = page.locator(".side-dock.max .sd-top").getByTestId("side-dock-tab-files");
+    await expect(activeTab).toHaveText(/文件/);
+    const activeTabBox = await activeTab.boundingBox();
+    expect(activeTabBox).not.toBeNull();
+    expect(activeTabBox!.x >= 88 || activeTabBox!.y >= 46).toBe(true);
+  });
+
+  test("工作台使用顶层动态标签，并支持输入自定义浏览器地址", async ({ page, openApp }) => {
+    await openApp();
+    await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
+
+    const dock = page.getByTestId("side-dock");
+    await expect(dock.locator(".sd-top-title")).toHaveCount(0);
+    await expect(dock.locator(".sd-top").getByTestId("side-dock-tab-files")).toBeVisible();
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
+
+    await page.getByTestId("side-dock-add-view").click();
+    const menu = page.getByTestId("side-dock-view-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("menuitem", { name: "浏览器" }).click();
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveClass(/on/);
+
+    const address = page.getByRole("textbox", { name: "浏览器地址" });
+    await address.fill("example.com/docs");
+    await address.press("Enter");
+    await expect(address).toHaveValue("https://example.com/docs");
+    await expect(page.locator(".side-dock .wpv-frame")).toHaveAttribute("src", "https://example.com/docs");
+
+    await address.fill("file:///etc/passwd");
+    await address.press("Enter");
+    await expect(page.locator(".side-dock .wpv-error")).toContainText("http(s)");
+    await expect(page.locator(".side-dock .wpv-frame")).toHaveAttribute("src", "https://example.com/docs");
+    await address.fill("https://example.com/docs");
+
+    await page.getByTestId("side-dock-add-view").click();
+    await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" }).click();
+    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveClass(/on/);
+    await expect(page.getByTestId("side-dock-tab-preview")).toBeVisible();
+    await page.getByTestId("side-dock-tab-preview").click();
+    await expect(address).toHaveValue("https://example.com/docs");
+  });
+
+  test("消息链接在重复点击时会重新激活浏览器标签", async ({ page, openApp, info }) => {
+    await page.route(`${info.baseUrl}/models`, async (route) => {
+      await route.fulfill({
+        json: {
+          routed: ["test-model"],
+          modelSources: [{ id: "test-model", kind: "engine", label: "Test", modelId: "test-model" }],
+          context: { "test-model": 32_768 },
+          engines: [],
+        },
+      });
+    });
+    await page.route(`${info.baseUrl}/agent/run`, async (route) => {
+      const content = "查看 [示例页面](https://example.com/docs)。";
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: [
+          `data: ${JSON.stringify({ type: "text", text: content })}\n\n`,
+          `data: ${JSON.stringify({ type: "final", message: { role: "assistant", content } })}\n\n`,
+          "data: [DONE]\n\n",
+        ].join(""),
+      });
+    });
+
+    await openApp();
+    await page.getByTestId("chat-composer-input").fill("给我一个链接");
+    await page.getByTestId("chat-composer-input").press("Enter");
+
+    const link = page.getByRole("link", { name: "示例页面" });
+    await link.click();
+    const address = page.getByRole("textbox", { name: "浏览器地址" });
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveClass(/on/);
+    await expect(address).toHaveValue("https://example.com/docs");
+
+    await address.fill("example.org/other");
+    await address.press("Enter");
+    await page.getByTestId("side-dock-add-view").click();
+    await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" }).click();
+    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveClass(/on/);
+
+    await link.click();
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveClass(/on/);
+    await expect(address).toHaveValue("https://example.com/docs");
   });
 
   test("工作台宽度可拖拽并持久化，窄窗口改为浮层而不是消失", async ({ page, openApp }) => {

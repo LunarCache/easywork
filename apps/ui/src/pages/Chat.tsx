@@ -16,7 +16,7 @@ import {
 import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
 import { ComposerContextPill, ComposerContextStrip, ComposerUsagePill } from "../components/ComposerContextStrip.js";
-import { SideDock } from "../components/SideDock.js";
+import { SideDock, type BrowserTarget } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
 import { THINK_LABEL, nextThink } from "../lib/slash.js";
@@ -125,7 +125,7 @@ export function Chat({
   const { images, setImages, fileRef, onPickImages, onPasteImages } = useComposerImages();
   // 右侧「工件」面板：本会话目录下产出的文件（fs 工具写入 / 命令生成的网页/构建物）。
   const [files, setFiles] = useState<WsEntry[]>([]);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [browserTarget, setBrowserTarget] = useState<BrowserTarget | null>(null);
   // 点「文件改动」卡 → 工作台跳到该文件（{path, nonce} 让连点同一文件也触发）。
   const [dockTarget, setDockTarget] = useState<{ path: string; nonce: number } | null>(null);
   const autoOpenedRef = useRef(false);
@@ -443,7 +443,7 @@ export function Chat({
             msgs={msgs}
             busy={busy}
             onOpenUrl={(u) => {
-              setPreviewUrl(u);
+              setBrowserTarget((current) => ({ url: u, nonce: (current?.nonce ?? 0) + 1 }));
               setDockOpen(true);
             }}
             onOpenFile={(p) => {
@@ -590,8 +590,8 @@ export function Chat({
         filesEmpty="暂无会话文件。"
         msgs={msgs}
         exec={(c) => getClient().chatExec(threadId, c)}
-        previewUrl={previewUrl}
-        onClearPreview={() => setPreviewUrl(null)}
+        browserTarget={browserTarget}
+        onClearPreview={() => setBrowserTarget(null)}
         target={dockTarget}
       />
     </div>

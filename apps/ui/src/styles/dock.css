@@ -5,23 +5,27 @@
 .sd-resize-handle { position: absolute; z-index: 4; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; outline: none; }
 .sd-resize-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background 120ms ease; }
 .sd-resize-handle:hover::after, .sd-resize-handle:focus-visible::after { background: var(--accent); }
-/* —— 面板顶部控制行（标题 / 上下文操作 / 放大 / 关闭）—— */
-.sd-top { flex: none; display: flex; align-items: center; gap: 3px; padding: 8px 10px; border-bottom: 1px solid var(--border-soft); }
-.sd-top-title { font-size: 12px; font-weight: 600; color: var(--tx-0); padding-left: 4px; }
+/* —— 顶层动态标签：已打开视图 + 添加视图 + 窗口动作 —— */
+.sd-top { flex: none; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border-soft); }
+.sd-open-tabs { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 100px); display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.sd-open-tabs::-webkit-scrollbar { display: none; }
+.sd-tab { flex: none; min-width: 92px; max-width: 150px; height: 32px; padding: 0 11px; border: none; border-radius: var(--r); cursor: pointer; font-family: var(--font); font-size: 12px; font-weight: 600; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; justify-content: flex-start; gap: 6px; white-space: nowrap; }
+.sd-tab:hover { background: var(--color-bg-tertiary); color: var(--text); }
+.sd-tab.on { background: var(--surface-3); color: var(--text); }
+.sd-tab > svg { flex: none; }
+.sd-tab .rev-count { padding: 0 5px; }
+.sd-add-wrap { position: relative; flex: none; }
+.sd-add.on { background: var(--surface-3); color: var(--text); }
+.sd-view-menu { position: absolute; z-index: 20; top: calc(100% + 7px); left: 0; width: 220px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elev); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 2px; }
+.sd-view-menu button { width: 100%; min-height: 36px; padding: 7px 9px; border: 0; border-radius: var(--r); background: transparent; color: var(--text); display: flex; align-items: center; gap: 9px; font: 500 13px var(--font); text-align: left; cursor: pointer; }
+.sd-view-menu button:hover { background: var(--surface-3); }
+.sd-view-menu button > svg { flex: none; color: var(--muted); }
+.sd-view-menu .sd-menu-check { margin-left: auto; color: var(--accent); }
 /* 放大到整个窗口（position:fixed 逃出主区域，盖住 rail/会话列表/标题栏） */
 .side-dock.max { position: fixed; inset: 0; width: auto; z-index: 200; }
 .side-dock.max .sd-resize-handle { display: none; }
 /* Tauri/macOS 的原生 traffic lights 仍悬浮在 fixed 层之上；放大态共享头部须复用标题栏安全区。 */
 .is-desktop .side-dock.max .sd-top { padding-left: var(--ad-traffic-light-safe-x); }
-.sd-tabs { display: flex; align-items: center; gap: 3px; padding: 6px 8px; border-bottom: 1px solid var(--border); flex: none; }
-.sd-tab { flex: 1 1 0; min-width: 0; height: 30px; padding: 0 8px; border: none; border-radius: var(--r); cursor: pointer; font-family: var(--font); font-size: 11.5px; font-weight: 600; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
-.sd-tab:hover { background: var(--color-bg-tertiary); color: var(--text); }
-.sd-tab.on { background: var(--accent-soft); color: var(--accent); }
-.sd-tab > svg { flex: none; }
-.sd-tab .rev-count { padding: 0 5px; }
-.sd-tab-stat { display: inline-flex; gap: 3px; font-size: 10px; }
-.sd-tab-stat .add { color: var(--color-diff-add-text); }
-.sd-tab-stat .del { color: var(--color-diff-del-text); }
 .sd-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .sd-url { flex: none; }
 .rev-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 650; }
@@ -118,8 +122,11 @@
 .term-input .fv-btn:hover:not(:disabled) { color: var(--accent); }
 .term-input .fv-btn:disabled { opacity: 0.4; cursor: default; }
 
-/* 预览 tab：网页 iframe（来源/外链点击 → 内联预览，不导航走整个 app） */
-.wpv-url { font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* 浏览器 tab：可编辑地址栏 + iframe（来源链接仍可自动导航）。 */
+.preview-tab { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wpv-address { flex: 1; min-width: 0; height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r); outline: none; background: var(--surface-2); color: var(--text); font: 12px var(--font-mono); }
+.wpv-address:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.wpv-error { flex: none; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--color-danger-soft); color: var(--err); font-size: 11.5px; }
 .wpv-frame { flex: 1; width: 100%; border: 0; background: #fff; display: block; }
 .af-file { flex: none; width: 100%; min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; font-family: var(--font); }
 .af-file:first-child { border-top: 0; }
@@ -129,6 +136,8 @@
 .af-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; }
 .af-size { font-family: var(--font-mono); font-size: 11px; color: var(--muted); flex: none; }
 .af-scroll { display: flex; flex-direction: column; min-height: 0; }
+.files-list { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.files-head { flex: none; padding-block: 6px; }
 .files-detail { flex: 1; min-width: 0; min-height: 0; display: flex; background: var(--surface); }
 .files-detail > .sd-empty { flex: 1; }
 .files-split { flex: 1; min-width: 0; min-height: 0; display: flex; }

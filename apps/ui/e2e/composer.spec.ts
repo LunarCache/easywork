@@ -144,7 +144,8 @@ test.describe("composer e2e", () => {
     await expect(card).toContainText("summary.md");
     await expect(card).toContainText("新建");
     await card.getByRole("button", { name: /summary\.md/ }).click();
-    await expect(page.locator(".side-dock .sd-top-title")).toHaveText("工作台");
+    await expect(page.locator(".side-dock .sd-top-title")).toHaveCount(0);
+    await expect(page.locator(".side-dock .sd-top").getByTestId("side-dock-tab-files")).toBeVisible();
     await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
     await expect(page.getByTestId("file-viewer-name")).toHaveText("summary.md");
   });
@@ -193,8 +194,9 @@ test.describe("composer e2e", () => {
     await page.locator(".cv-changes-row").evaluate((element: HTMLElement) => element.click());
 
     await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
-    await expect(page.getByTestId("side-dock-tab-terminal")).toBeVisible();
-    await expect(page.getByTestId("side-dock-tab-preview")).toBeVisible();
+    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveCount(0);
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
+    await expect(page.getByTestId("side-dock-add-view")).toBeVisible();
     await expect(page.locator(".side-dock .af-file")).toHaveCount(0);
     await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.html");
     await expect(page.getByTestId("file-viewer-name")).toHaveCount(1);

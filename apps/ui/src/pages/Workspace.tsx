@@ -19,7 +19,7 @@ import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
 import { ComposerContextPill, ComposerUsagePill } from "../components/ComposerContextStrip.js";
 import { ContextBar } from "../components/ContextBar.js";
-import { SideDock } from "../components/SideDock.js";
+import { SideDock, type BrowserTarget } from "../components/SideDock.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
 import { THINK_LABEL, nextThink } from "../lib/slash.js";
@@ -129,7 +129,7 @@ export function Workspace({
   const [branch, setBranch] = useState<string | undefined>(undefined);
   const [branches, setBranches] = useState<string[]>([]);
   const [remote, setRemote] = useState<GitRemoteInfo>({ hasRemote: false, hasUpstream: false, ahead: 0, behind: 0 });
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [browserTarget, setBrowserTarget] = useState<BrowserTarget | null>(null);
   const [dockTarget, setDockTarget] = useState<{ path: string; nonce: number } | null>(null);
   const [wsFiles, setWsFiles] = useState<WsEntry[]>([]);
   const [usage, setUsage] = useState<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(
@@ -582,7 +582,7 @@ export function Workspace({
                 msgs={msgs}
                 busy={busy}
                 onOpenUrl={(u) => {
-                  setPreviewUrl(u);
+                  setBrowserTarget((current) => ({ url: u, nonce: (current?.nonce ?? 0) + 1 }));
                   setDockOpen(true);
                 }}
                 onOpenFile={(p) => {
@@ -612,8 +612,8 @@ export function Workspace({
         filesEmpty="暂无工作区文件。"
         msgs={msgs}
         exec={(c) => getClient().wsExec(project.id, c)}
-        previewUrl={previewUrl}
-        onClearPreview={() => setPreviewUrl(null)}
+        browserTarget={browserTarget}
+        onClearPreview={() => setBrowserTarget(null)}
         target={dockTarget}
         git={{ projectId: project.id, status: git, remote, onRefresh: refreshGit }}
       />
