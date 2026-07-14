@@ -148,7 +148,7 @@ test.describe("composer e2e", () => {
     await expect(page.getByTestId("file-viewer-name")).toHaveText("summary.md");
   });
 
-  test("绝对路径目标与相对文件列表指向同一文件时不重复显示", async ({ page, openApp, info }) => {
+  test("HTML 交付文件不重复，并在工作台放大时填满剩余高度", async ({ page, openApp, info }) => {
     const absolutePath = "/Users/test/.easywork/workspace/chats/thread/shanghai-weather.html";
     await page.route(`${info.baseUrl}/models`, async (route) => {
       await route.fulfill({
@@ -193,6 +193,16 @@ test.describe("composer e2e", () => {
     await expect(page.locator(".side-dock .af-file")).toHaveCount(1);
     await expect(page.locator(".side-dock .af-path")).toHaveText("shanghai-weather.html");
     await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.html");
+
+    await page.getByTitle("放大到窗口").click();
+    await expect(page.locator(".side-dock")).toHaveClass(/max/);
+    await expect
+      .poll(async () => {
+        const available = await page.locator(".side-dock .sd-body").boundingBox();
+        const preview = await page.locator(".side-dock .af-body").boundingBox();
+        return available && preview ? preview.height / available.height : 0;
+      })
+      .toBeGreaterThan(0.9);
   });
 
   test("聊天页关闭联网后从请求中排除 explore_web 和 http_get", async ({ page, openApp, info }) => {

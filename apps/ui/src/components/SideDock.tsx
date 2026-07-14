@@ -249,11 +249,11 @@ function FilesTab({
 
   if (visibleFiles.length === 0) return <DockEmpty>{emptyHint}</DockEmpty>;
   return (
-    <div className="rev-scroll">
+    <div className="rev-scroll af-scroll">
       {visibleFiles.map((f) => {
         const isOpen = sel === f.path;
         return (
-          <div key={f.path} className="af-file">
+          <div key={f.path} className={`af-file ${isOpen ? "open" : ""}`}>
             <div
               className={`af-file-head ${isOpen ? "open" : ""}`}
               onClick={() => setSel(isOpen ? null : f.path)}
