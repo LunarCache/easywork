@@ -36,6 +36,26 @@ export const ThreadSchema = z.object({
 });
 export type Thread = z.infer<typeof ThreadSchema>;
 
+export const TurnArtifactPathSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (value) =>
+      !value.startsWith("/") &&
+      !value.startsWith("\\") &&
+      !/^[A-Za-z]:[/\\]/.test(value) &&
+      !value.split(/[/\\]/).includes(".."),
+    "artifact path must be relative and stay within the conversation directory",
+  );
+
+export const TurnArtifactSchema = z.object({
+  /** 相对于该对话工件目录的安全路径。 */
+  path: TurnArtifactPathSchema,
+  kind: z.enum(["created", "modified"]),
+  size: z.number().int().nonnegative(),
+});
+export type TurnArtifact = z.infer<typeof TurnArtifactSchema>;
+
 export const StoredMessageSchema = z.object({
   id: z.string(),
   threadId: z.string(),
@@ -44,6 +64,8 @@ export const StoredMessageSchema = z.object({
   parts: z.array(ContentPartSchema),
   toolCalls: z.array(ToolCallSchema).optional(),
   toolResults: z.array(ToolResultSchema).optional(),
+  /** 普通对话本轮最终仍存在的新增/修改文件。 */
+  artifacts: z.array(TurnArtifactSchema).optional(),
   createdAt: z.string(),
 });
 export type StoredMessage = z.infer<typeof StoredMessageSchema>;

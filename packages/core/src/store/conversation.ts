@@ -15,6 +15,7 @@ import type {
   Thread,
   ToolCall,
   ToolResult,
+  TurnArtifact,
 } from "@ew/shared";
 import { messageText } from "@ew/shared";
 
@@ -52,6 +53,7 @@ interface MessageRow {
   parts: string;
   tool_calls: string | null;
   tool_results: string | null;
+  artifacts: string | null;
   created_at: string;
 }
 
@@ -87,6 +89,7 @@ export class SqliteConversationRepo implements ConversationRepo {
         parts TEXT NOT NULL,
         tool_calls TEXT,
         tool_results TEXT,
+        artifacts TEXT,
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_msg_thread ON messages(thread_id, seq);
@@ -118,6 +121,10 @@ export class SqliteConversationRepo implements ConversationRepo {
     ] as const) {
       if (!cols.has(name)) this.db.exec(ddl);
     }
+    const messageCols = new Set(
+      (this.db.prepare(`PRAGMA table_info(messages)`).all() as unknown as { name: string }[]).map((c) => c.name),
+    );
+    if (!messageCols.has("artifacts")) this.db.exec("ALTER TABLE messages ADD COLUMN artifacts TEXT");
   }
 
   private rowToProject(r: ProjectRow): Project {
@@ -290,8 +297,8 @@ export class SqliteConversationRepo implements ConversationRepo {
   appendMessage(m: StoredMessage): void {
     this.db
       .prepare(
-        `INSERT INTO messages (id, thread_id, role, seq, parts, tool_calls, tool_results, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO messages (id, thread_id, role, seq, parts, tool_calls, tool_results, artifacts, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         m.id,
@@ -301,6 +308,7 @@ export class SqliteConversationRepo implements ConversationRepo {
         JSON.stringify(m.parts),
         m.toolCalls ? JSON.stringify(m.toolCalls) : null,
         m.toolResults ? JSON.stringify(m.toolResults) : null,
+        m.artifacts ? JSON.stringify(m.artifacts) : null,
         m.createdAt,
       );
     this.db.prepare(`UPDATE threads SET updated_at = ? WHERE id = ?`).run(m.createdAt, m.threadId);
@@ -382,6 +390,7 @@ export class SqliteConversationRepo implements ConversationRepo {
       parts: JSON.parse(r.parts) as ContentPart[],
       ...(r.tool_calls ? { toolCalls: JSON.parse(r.tool_calls) as ToolCall[] } : {}),
       ...(r.tool_results ? { toolResults: JSON.parse(r.tool_results) as ToolResult[] } : {}),
+      ...(r.artifacts ? { artifacts: JSON.parse(r.artifacts) as TurnArtifact[] } : {}),
       createdAt: r.created_at,
     }));
   }

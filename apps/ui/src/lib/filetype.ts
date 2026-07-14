@@ -93,3 +93,9 @@ export function fileType(path: string): FileTypeInfo {
   const ext = name.slice(dot + 1).toLowerCase();
   return BY_EXT[ext] ?? { label: ext.slice(0, 4).toUpperCase() || "FILE", color: FALLBACK_COLOR, Icon: FileIcon };
 }
+
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}

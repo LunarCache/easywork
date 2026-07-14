@@ -152,6 +152,10 @@ export async function runTurn(client: EasyWorkClient, opts: TurnOptions): Promis
           if (isTTY)
             err(c.dim(`  · tokens in=${ev.usage.promptTokens} out=${ev.usage.completionTokens}`));
           break;
+        case "artifacts":
+          if (ev.artifacts.length > 0)
+            err(c.dim(`  ↳ 本轮交付 ${ev.artifacts.map((artifact) => artifact.path).join(", ")}`));
+          break;
         case "final":
           final = ev.message;
           break;

@@ -1,5 +1,5 @@
 // 聊天 / 工作区共享的 agent 流式逻辑：数据模型 + 纯函数 + 事件归约器。
-import type { AgentEvent } from "@ew/shared";
+import type { AgentEvent, TurnArtifact } from "@ew/shared";
 
 export interface UiTool {
   id: string;
@@ -35,6 +35,8 @@ export interface UiMsg {
   raw: string;
   reasoning: string;
   tools: UiTool[];
+  /** 本轮结束时仍存在的新增/修改交付文件。 */
+  artifacts?: TurnArtifact[];
   /** 有序时间线（渲染源）：思考/工具/文本按发生顺序排列。 */
   blocks?: UiBlock[];
   images?: UiImage[];
@@ -131,6 +133,7 @@ export interface StoredMsg {
   parts: StoredPart[];
   toolCalls?: { id: string; name: string; arguments: string }[];
   toolResults?: { content: unknown; isError?: boolean; display?: unknown }[];
+  artifacts?: TurnArtifact[];
   createdAt?: string;
 }
 
@@ -179,6 +182,7 @@ export function storedToUiMsgs(list: StoredMsg[]): UiMsg[] {
       if (!bubble) bubble = { role: "assistant", raw: "", reasoning: "", tools: [], blocks: [] };
       const displayAt = storedTimestamp(m.createdAt);
       if (displayAt != null) bubble.displayAt = displayAt;
+      if (m.artifacts?.length) bubble.artifacts = m.artifacts;
       // 按存档顺序重建时间线块：思考(reasoning) / 文本(text) 交织。
       for (const p of m.parts) {
         if (p.type === "reasoning" && p.text) {
@@ -297,7 +301,15 @@ export function applyAgentEvent(m: UiMsg, ev: AgentEvent): UiMsg {
         blocks: patchToolBlock(blocks, ev.call.id, patch),
       };
     }
+    case "artifacts":
+      return { ...m, artifacts: ev.artifacts };
     default:
       return m;
   }
+}
+
+export function isIncrementalAssistantEvent(
+  ev: AgentEvent,
+): ev is Extract<AgentEvent, { type: "text" | "reasoning" | "artifacts" }> {
+  return ev.type === "text" || ev.type === "reasoning" || ev.type === "artifacts";
 }

@@ -24,11 +24,13 @@ describe("SqliteConversationRepo", () => {
       role: "assistant",
       seq: r.nextSeq(t.id),
       parts: [{ type: "text", text: "hello" }],
+      artifacts: [{ path: "report.pdf", kind: "created", size: 2048 }],
       createdAt: new Date().toISOString(),
     });
     const h = r.history(t.id);
     expect(h.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(h[0]!.parts[0]).toEqual({ type: "text", text: "hi" });
+    expect(h[1]!.artifacts).toEqual([{ path: "report.pdf", kind: "created", size: 2048 }]);
     r.close();
   });
 

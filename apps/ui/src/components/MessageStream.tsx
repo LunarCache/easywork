@@ -5,6 +5,7 @@ import rehypeHighlight from "rehype-highlight";
 import hljs from "highlight.js/lib/common";
 import { splitThink, type UiBlock, type UiMsg, type UiTool } from "../lib/agent-stream.js";
 import { fileType } from "../lib/filetype.js";
+import { TurnArtifacts } from "./TurnArtifacts.js";
 import {
   BrainIcon,
   ChevronIcon,
@@ -824,6 +825,9 @@ export function MessageStream({
                   </details>
                 );
               })()}
+              {m.artifacts && (
+                <TurnArtifacts artifacts={m.artifacts} messageIndex={i} onOpenFile={onOpenFile} />
+              )}
               {!live && (answer || assistantTimestamp != null) && (
                 <div className="cv-actions">
                   {answer && <CopyButton text={answer} className="cv-action" label="复制" />}

@@ -7,7 +7,7 @@ import rehypeHighlight from "rehype-highlight";
 import hljs from "highlight.js/lib/common";
 import { getClient } from "../lib/client.js";
 import { resolvePreviewKind, mimeForName, extOf, langForExt, useBlobUrl, type PreviewKind, type PreviewMeta } from "../lib/preview.js";
-import { fileType } from "../lib/filetype.js";
+import { fileType, formatFileSize } from "../lib/filetype.js";
 import { LoaderIcon, CopyIcon, CheckIcon } from "../icons.js";
 
 export type PreviewSource =
@@ -15,12 +15,6 @@ export type PreviewSource =
   | { kind: "text"; name: string; text: string }
   | { kind: "url"; url: string }
   | { kind: "bytes"; name: string; mime: string; data: string }; // data = base64
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
 
 function CodeBody({ text, name }: { text: string; name: string }) {
   const html = useMemo(() => {
@@ -127,7 +121,7 @@ export function FileViewer({ source }: { source: PreviewSource }) {
       <div className="fv-bar">
         <span className="fv-badge" style={{ background: ft.color }}>{ft.label}</span>
         <span className="fv-name" data-testid="file-viewer-name" title={meta.name}>{meta.name.split(/[/\\]/).pop()}</span>
-        {meta.size > 0 && <span className="fv-size">{fmtBytes(meta.size)}</span>}
+        {meta.size > 0 && <span className="fv-size">{formatFileSize(meta.size)}</span>}
         <span className="fv-spacer" />
         {toggleable && (
           <div className="fv-seg">
@@ -188,7 +182,7 @@ export function FileViewer({ source }: { source: PreviewSource }) {
         {/* —— 二进制兜底 —— */}
         {kind === "binary" && (
           <div className="fv-msg fv-bin">
-            二进制文件，无法预览 · {fmtBytes(meta.size)}
+            二进制文件，无法预览 · {formatFileSize(meta.size)}
             {blob.url && (
               <a className="fv-dl" href={blob.url} download={meta.name.split(/[/\\]/).pop()}>下载</a>
             )}

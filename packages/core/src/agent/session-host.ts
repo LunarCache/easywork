@@ -20,6 +20,7 @@ import { runAgentTurn } from "./run-agent-turn.js";
 import { agentSessionResourceKey, buildAgentSessionResources } from "./session-resources.js";
 import { AgentSessionStore } from "./session-store.js";
 import { ThreadRunQueue } from "./thread-run-queue.js";
+import { diffTurnFiles, snapshotTurnFiles } from "./turn-artifacts.js";
 import type { StageSkillCandidate } from "../skill-learning/candidate-tool.js";
 
 /** 宿主依赖（从 daemon 注入）。 */
@@ -74,6 +75,8 @@ export interface EwAgentRunInput {
   excludeSkills?: string[];
   /** 禁用的 customTool 名称（改变即重建会话）。 */
   excludeTools?: string[];
+  /** 普通对话是否在本轮串行边界内采集最终新增/修改工件。 */
+  trackArtifacts?: boolean;
 }
 
 interface HostedSession {
@@ -286,7 +289,16 @@ export class SessionHost {
     const release = await this.runQueue.acquire(input.threadId);
     try {
       if (this.deleting.has(input.threadId)) throw new Error("thread_deleted");
-      yield* this.runOne(input);
+      const turnFilesBefore = input.trackArtifacts ? snapshotTurnFiles(input.cwd) : null;
+      let sawFinal = false;
+      for await (const event of this.runOne(input)) {
+        if (event.type === "final") sawFinal = true;
+        yield event;
+      }
+      if (turnFilesBefore && sawFinal && !input.signal?.aborted) {
+        const artifacts = diffTurnFiles(turnFilesBefore, snapshotTurnFiles(input.cwd));
+        if (artifacts.length > 0) yield { type: "artifacts", artifacts };
+      }
     } finally {
       release();
     }

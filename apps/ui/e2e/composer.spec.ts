@@ -101,6 +101,53 @@ test.describe("composer e2e", () => {
     await expect(page.getByTestId("workspace-context-usage-tooltip")).toBeVisible();
   });
 
+  test("普通对话在对应助手轮次显示最终交付文件并可打开预览", async ({ page, openApp, info }) => {
+    await page.route(`${info.baseUrl}/models`, async (route) => {
+      await route.fulfill({
+        json: {
+          routed: ["test-model"],
+          modelSources: [{ id: "test-model", kind: "engine", label: "Test", modelId: "test-model" }],
+          context: { "test-model": 32768 },
+          engines: [],
+        },
+      });
+    });
+    await page.route(`${info.baseUrl}/chat/*/files?*`, async (route) => {
+      // 列表默认只取四层；交付路径更深时也应能按路径直接预览。
+      await route.fulfill({ json: { entries: [] } });
+    });
+    await page.route(`${info.baseUrl}/files/meta?*`, async (route) => {
+      await route.fulfill({
+        json: { name: "reports/summary.md", mime: "text/markdown", kind: "markdown", size: 2048, text: "# Summary" },
+      });
+    });
+    await page.route(`${info.baseUrl}/agent/run`, async (route) => {
+      const artifacts = [{ path: "exports/2026/reports/final/summary.md", kind: "created", size: 2048 }];
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: [
+          `data: ${JSON.stringify({ type: "text", text: "报告已生成。" })}\n\n`,
+          `data: ${JSON.stringify({ type: "final", message: { role: "assistant", content: "报告已生成。" } })}\n\n`,
+          `data: ${JSON.stringify({ type: "artifacts", artifacts })}\n\n`,
+          "data: [DONE]\n\n",
+        ].join(""),
+      });
+    });
+
+    await openApp();
+    await page.getByTestId("chat-composer-input").fill("生成报告");
+    await page.getByTestId("chat-composer-input").press("Enter");
+
+    const card = page.locator('[data-testid^="turn-artifacts-"]');
+    await expect(card).toContainText("本轮交付");
+    await expect(card).toContainText("summary.md");
+    await expect(card).toContainText("新建");
+    await card.getByRole("button", { name: /summary\.md/ }).click();
+    await expect(page.locator(".side-dock .sd-top-title")).toHaveText("文件");
+    await expect(page.getByTestId("file-viewer-name")).toHaveText("summary.md");
+  });
+
   test("聊天页关闭联网后从请求中排除 explore_web 和 http_get", async ({ page, openApp, info }) => {
     let requestBody: { excludeTools?: string[] } | null = null;
     await page.route(`${info.baseUrl}/models`, async (route) => {

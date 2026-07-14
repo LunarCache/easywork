@@ -10,6 +10,7 @@ import {
   workspaceScope,
   type AgentEvent,
   type ContentPart,
+  type TurnArtifact,
 } from "@ew/shared";
 import type { EngineRegistry } from "../../engine/registry.js";
 import type { ProviderManager } from "../../providers/manager.js";
@@ -83,7 +84,6 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     } catch {
       /* 目录创建失败由后续 fs 工具报错 */
     }
-
     // 持久化（应用内会话历史）：确保 thread 存在。本轮消息延迟到成功结束才落库——
     // 用户取消时整轮（用户消息 + 部分助手输出 + 工具往返）一律不计入历史/上下文。
     const lastUser = parsed.data.history[parsed.data.history.length - 1];
@@ -127,6 +127,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     const usedLearnedSkills = new Set<string>();
     const learnedSkillReads = new Map<string, string>();
     let sawFinal = false;
+    let artifacts: TurnArtifact[] = [];
 
     const userText = lastUser?.role === "user" ? messageText(lastUser.content) : "";
     const runStartedAt = new Date().toISOString();
@@ -160,7 +161,13 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
         ...(parsed.data.regenerate ? { regenerate: true } : {}),
         ...(parsed.data.excludeSkills?.length ? { excludeSkills: parsed.data.excludeSkills } : {}),
         ...(parsed.data.excludeTools?.length ? { excludeTools: parsed.data.excludeTools } : {}),
+        ...(!isWorkspace ? { trackArtifacts: true } : {}),
       })) {
+        // SessionHost 在 thread 串行边界内完成快照；先缓冲，持久化提交成功后再发给 UI。
+        if (ev.type === "artifacts") {
+          artifacts = ev.artifacts;
+          continue;
+        }
         if (ev.type === "tool-start") {
           learningToolCalls.set(ev.call.id, { name: ev.call.name, ok: true });
           const learnedId = skillCandidates.learnedIdForToolCall(ev.call.name, ev.call.arguments, runWorkspaceDir);
@@ -181,57 +188,59 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
       // 仅在「未被取消」时落库：用户取消 → 整轮不计入历史（与 pi 上下文回滚一致）。
       if (sawFinal && !ac.signal.aborted) {
         const committed = await sessionHost.commitThread(threadId, () => {
-        if (lastUser?.role === "user") {
-          repo.appendMessage({
-            id: crypto.randomUUID(),
-            threadId,
-            role: "user",
-            seq: repo.nextSeq(threadId),
-            parts: normalizeContent(lastUser.content),
-            createdAt: runStartedAt,
-          });
-        }
-        for (const m of recorded) {
-          repo.appendMessage({
-            id: crypto.randomUUID(),
-            threadId,
-            role: m.role,
-            seq: repo.nextSeq(threadId),
-            parts: m.parts,
-            ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
-            ...(m.toolResults ? { toolResults: m.toolResults } : {}),
-            createdAt: new Date().toISOString(),
-          });
-        }
-        // 收尾 assistant 消息：思考过程（reasoning）+ 答案。
-        // 思考优先取 reasoning 事件（recorder 累计的收尾轮残留）；兜底剥离内联 <think>。
-        let answer = finalContent;
-        let inlineThink = "";
-        if (answer.includes("<think>")) {
-          answer = answer.replace(/<think>([\s\S]*?)<\/think>/g, (_m, t: string) => {
-            inlineThink += t;
-            return "";
-          });
-        }
-        answer = answer.trim();
-        // 先各自 trim 再取舍：避免"全空白的事件型 reasoning"短路掉真正有内容的内联 think。
-        const reasoningText = recorder.trailingReasoning().trim() || inlineThink.trim();
-        const finalParts: ContentPart[] = [
-          ...(reasoningText ? [{ type: "reasoning" as const, text: reasoningText }] : []),
-          ...(answer ? [{ type: "text" as const, text: answer }] : []),
-        ];
-        if (finalParts.length > 0) {
-          repo.appendMessage({
-            id: crypto.randomUUID(),
-            threadId,
-            role: "assistant",
-            seq: repo.nextSeq(threadId),
-            parts: finalParts,
-            createdAt: new Date().toISOString(),
-          });
-        }
+          if (lastUser?.role === "user") {
+            repo.appendMessage({
+              id: crypto.randomUUID(),
+              threadId,
+              role: "user",
+              seq: repo.nextSeq(threadId),
+              parts: normalizeContent(lastUser.content),
+              createdAt: runStartedAt,
+            });
+          }
+          for (const m of recorded) {
+            repo.appendMessage({
+              id: crypto.randomUUID(),
+              threadId,
+              role: m.role,
+              seq: repo.nextSeq(threadId),
+              parts: m.parts,
+              ...(m.toolCalls ? { toolCalls: m.toolCalls } : {}),
+              ...(m.toolResults ? { toolResults: m.toolResults } : {}),
+              createdAt: new Date().toISOString(),
+            });
+          }
+          // 收尾 assistant 消息：思考过程（reasoning）+ 答案。
+          // 思考优先取 reasoning 事件（recorder 累计的收尾轮残留）；兜底剥离内联 <think>。
+          let answer = finalContent;
+          let inlineThink = "";
+          if (answer.includes("<think>")) {
+            answer = answer.replace(/<think>([\s\S]*?)<\/think>/g, (_m, t: string) => {
+              inlineThink += t;
+              return "";
+            });
+          }
+          answer = answer.trim();
+          // 先各自 trim 再取舍：避免"全空白的事件型 reasoning"短路掉真正有内容的内联 think。
+          const reasoningText = recorder.trailingReasoning().trim() || inlineThink.trim();
+          const finalParts: ContentPart[] = [
+            ...(reasoningText ? [{ type: "reasoning" as const, text: reasoningText }] : []),
+            ...(answer ? [{ type: "text" as const, text: answer }] : []),
+          ];
+          if (finalParts.length > 0 || artifacts.length > 0) {
+            repo.appendMessage({
+              id: crypto.randomUUID(),
+              threadId,
+              role: "assistant",
+              seq: repo.nextSeq(threadId),
+              parts: finalParts,
+              ...(artifacts.length ? { artifacts } : {}),
+              createdAt: new Date().toISOString(),
+            });
+          }
         });
         if (committed) {
+          if (artifacts.length) send({ type: "artifacts", artifacts });
           for (const learnedId of usedLearnedSkills) skillCandidates.recordTelemetry(learnedId, "use");
           const toolCalls = [...learningToolCalls.values()];
           skillLearning.schedule({

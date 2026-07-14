@@ -22,6 +22,7 @@ import { useSlashPalette } from "../components/SlashPalette.js";
 import { THINK_LABEL, nextThink } from "../lib/slash.js";
 import {
   applyAgentEvent,
+  isIncrementalAssistantEvent,
   messageText,
   storedToUiMsgs,
   type StoredMsg,
@@ -337,7 +338,7 @@ export function Chat({
         else if (ev.type === "retry") setNotice(`重试中 (${ev.attempt}/${ev.maxAttempts})…`);
         else if (ev.type === "compaction")
           setNotice(ev.phase === "start" ? "压缩上下文中…" : ev.ok === false ? "压缩未完成" : "已压缩上下文");
-        else if (ev.type === "text" || ev.type === "reasoning") {
+        else if (isIncrementalAssistantEvent(ev)) {
           setNotice(null); // 有新输出即清掉瞬态提示（值未变时 React 自动跳过重渲染）
           apply((m) => applyAgentEvent(m, ev));
         } else if (ev.type === "final") {

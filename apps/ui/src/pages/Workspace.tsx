@@ -28,6 +28,7 @@ import { useComposerImages } from "../hooks/useComposerImages.js";
 import { useMessageScroll } from "../hooks/useMessageScroll.js";
 import {
   applyAgentEvent,
+  isIncrementalAssistantEvent,
   messageText,
   storedToUiMsgs,
   type PendingApproval,
@@ -317,7 +318,7 @@ export function Workspace({
         else if (ev.type === "retry") setNotice(`重试中 (${ev.attempt}/${ev.maxAttempts})…`);
         else if (ev.type === "compaction")
           setNotice(ev.phase === "start" ? "压缩上下文中…" : ev.ok === false ? "压缩未完成" : "已压缩上下文");
-        else if (ev.type === "text" || ev.type === "reasoning") {
+        else if (isIncrementalAssistantEvent(ev)) {
           setNotice(null);
           apply((m) => applyAgentEvent(m, ev));
         } else if (ev.type === "final") {

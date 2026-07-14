@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ExecResult, GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { FileViewer } from "./FileViewer.js";
-import { fileType } from "../lib/filetype.js";
+import { fileType, formatFileSize } from "../lib/filetype.js";
 import type { UiMsg } from "../lib/agent-stream.js";
 import {
   ArrowLeftIcon,
@@ -38,11 +38,6 @@ type Tab = "diff" | "files" | "terminal" | "preview";
 function fileIconFor(p: string) {
   const ft = fileType(p);
   return <ft.Icon size={14} style={{ color: ft.color }} />;
-}
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function DockEmpty({ children }: { children: ReactNode }) {
@@ -229,11 +224,16 @@ function FilesTab({
 }) {
   const [sel, setSel] = useState<string | null>(null);
   const handledRef = useRef<number | null>(null);
+  // 交付卡可能指向超过列表默认深度的文件；合成一条可预览项，点击不依赖 FilesTab 是否已列到它。
+  const visibleFiles = useMemo(() => {
+    if (!openTarget || files.some((file) => file.path === openTarget.path)) return files;
+    return [{ path: openTarget.path, type: "file" as const }, ...files];
+  }, [files, openTarget]);
 
   // 选中文件刷新后消失（被删/改名）→ 收起预览。
   useEffect(() => {
-    if (sel && !files.some((f) => f.path === sel)) setSel(null);
-  }, [files, sel]);
+    if (sel && !visibleFiles.some((f) => f.path === sel)) setSel(null);
+  }, [visibleFiles, sel]);
 
   // 外部请求打开某文件（文件改动卡）→ 选中。按 nonce 去重（防文件列表轮询重复触发；连点同一文件 nonce 变 → 重新打开）。
   useEffect(() => {
@@ -242,15 +242,14 @@ function FilesTab({
     const want = openTarget.path;
     const base = want.split(/[/\\]/).pop();
     const hit = files.find((f) => f.path === want) ?? files.find((f) => f.path.split(/[/\\]/).pop() === base);
-    if (!hit) return;
     handledRef.current = openTarget.nonce;
-    setSel(hit.path);
+    setSel(hit?.path ?? want);
   }, [openTarget, files]);
 
-  if (files.length === 0) return <DockEmpty>{emptyHint}</DockEmpty>;
+  if (visibleFiles.length === 0) return <DockEmpty>{emptyHint}</DockEmpty>;
   return (
     <div className="rev-scroll">
-      {files.map((f) => {
+      {visibleFiles.map((f) => {
         const isOpen = sel === f.path;
         return (
           <div key={f.path} className="af-file">
@@ -263,7 +262,7 @@ function FilesTab({
               <span className="af-path" title={f.path}>
                 {f.path}
               </span>
-              {f.size != null && <span className="af-size">{fmtBytes(f.size)}</span>}
+              {f.size != null && <span className="af-size">{formatFileSize(f.size)}</span>}
             </div>
             {isOpen && (
               <div className="af-body">

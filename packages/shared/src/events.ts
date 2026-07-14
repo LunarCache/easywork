@@ -3,6 +3,7 @@ import { ChatMessageSchema, ToolCallSchema } from "./message.js";
 import { ToolResultSchema } from "./tool.js";
 import { UsageSchema } from "./provider.js";
 import { ChannelKindSchema } from "./im.js";
+import { TurnArtifactSchema } from "./conversation.js";
 
 /**
  * Agent 运行对外发出的事件（agent loop → UI / IM 连接器 / SSE）。
@@ -27,6 +28,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("memory-recall"), count: z.number().int().nonnegative() }),
   z.object({ type: z.literal("usage"), usage: UsageSchema }),
+  z.object({ type: z.literal("artifacts"), artifacts: z.array(TurnArtifactSchema) }),
   // 自动重试（provider 抖动时 pi 自带退避重试）：attempt/maxAttempts 从 1 计。
   z.object({
     type: z.literal("retry"),

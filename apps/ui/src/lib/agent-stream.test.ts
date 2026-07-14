@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { storedToUiMsgs } from "./agent-stream.js";
+import { applyAgentEvent, storedToUiMsgs } from "./agent-stream.js";
 
 describe("storedToUiMsgs", () => {
   it("preserves stored timestamps on user and assistant conversation turns", () => {
@@ -48,5 +48,21 @@ describe("storedToUiMsgs", () => {
     ]);
 
     expect(messages[1]?.displayAt).toBe(Date.parse(answerAt));
+  });
+
+  it("restores persisted artifacts and accepts live artifact events", () => {
+    const artifacts = [{ path: "reports/summary.pdf", kind: "created" as const, size: 2048 }];
+    const stored = storedToUiMsgs([
+      { role: "user", parts: [{ type: "text", text: "make a report" }] },
+      { role: "assistant", parts: [{ type: "text", text: "done" }], artifacts },
+    ]);
+
+    expect(stored[1]?.artifacts).toEqual(artifacts);
+    expect(
+      applyAgentEvent(
+        { role: "assistant", raw: "done", reasoning: "", tools: [] },
+        { type: "artifacts", artifacts },
+      ).artifacts,
+    ).toEqual(artifacts);
   });
 });
