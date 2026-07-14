@@ -75,6 +75,12 @@ export function Titlebar({
           </span>
         )}
         <span className="ad-spacer" data-tauri-drag-region />
+        <div
+          id="side-dock-titlebar-host"
+          className={`ad-tb-dock-host ${showDock ? "" : "hidden"}`}
+          data-testid="side-dock-titlebar-host"
+          data-tauri-drag-region
+        />
         {showDock && (
           <button
             className={`ad-tb-dock ${dockOpen ? "on" : ""}`}

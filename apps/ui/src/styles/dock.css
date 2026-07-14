@@ -5,27 +5,31 @@
 .sd-resize-handle { position: absolute; z-index: 4; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; outline: none; }
 .sd-resize-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background 120ms ease; }
 .sd-resize-handle:hover::after, .sd-resize-handle:focus-visible::after { background: var(--accent); }
-/* —— 顶层动态标签：已打开视图 + 添加视图 + 窗口动作 —— */
-.sd-top { flex: none; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border-soft); }
-.sd-open-tabs { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 100px); display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+/* —— 标题栏动态标签：与工作台抽屉按钮同一行 —— */
+.sd-titlebar-toolbar { flex: 0 1 auto; min-width: 0; height: 100%; display: flex; align-items: center; gap: 4px; }
+.sd-open-tabs { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .sd-open-tabs::-webkit-scrollbar { display: none; }
-.sd-tab { flex: none; min-width: 92px; max-width: 150px; height: 32px; padding: 0 11px; border: none; border-radius: var(--r); cursor: pointer; font-family: var(--font); font-size: 12px; font-weight: 600; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; justify-content: flex-start; gap: 6px; white-space: nowrap; }
+.sd-tab-shell { flex: none; min-width: 96px; max-width: 164px; height: 32px; display: flex; align-items: center; border-radius: var(--r); background: transparent; }
+.sd-tab-shell:hover, .sd-tab-shell.on { background: var(--surface-3); }
+.sd-tab { flex: 1; min-width: 0; height: 32px; padding: 0 4px 0 10px; border: none; border-radius: var(--r); cursor: pointer; font-family: var(--font); font-size: 12px; font-weight: 600; background: transparent; color: var(--text-2); display: inline-flex; align-items: center; justify-content: flex-start; gap: 6px; white-space: nowrap; overflow: hidden; }
 .sd-tab:hover { background: var(--color-bg-tertiary); color: var(--text); }
-.sd-tab.on { background: var(--surface-3); color: var(--text); }
+.sd-tab.on { background: transparent; color: var(--text); }
 .sd-tab > svg { flex: none; }
+.sd-tab > span:not(.rev-count) { overflow: hidden; text-overflow: ellipsis; }
 .sd-tab .rev-count { padding: 0 5px; }
+.sd-tab-close { flex: none; width: 24px; height: 24px; margin-right: 3px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; opacity: .72; }
+.sd-tab-close:hover { background: var(--bg-hover); color: var(--text); opacity: 1; }
 .sd-add-wrap { position: relative; flex: none; }
+.sd-max { flex: none; }
 .sd-add.on { background: var(--surface-3); color: var(--text); }
-.sd-view-menu { position: absolute; z-index: 20; top: calc(100% + 7px); left: 0; width: 220px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elev); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 2px; }
+.sd-view-menu { position: absolute; z-index: 20; top: calc(100% + 7px); right: 0; width: 220px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elev); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 2px; }
 .sd-view-menu button { width: 100%; min-height: 36px; padding: 7px 9px; border: 0; border-radius: var(--r); background: transparent; color: var(--text); display: flex; align-items: center; gap: 9px; font: 500 13px var(--font); text-align: left; cursor: pointer; }
 .sd-view-menu button:hover { background: var(--surface-3); }
 .sd-view-menu button > svg { flex: none; color: var(--muted); }
 .sd-view-menu .sd-menu-check { margin-left: auto; color: var(--accent); }
-/* 放大到整个窗口（position:fixed 逃出主区域，盖住 rail/会话列表/标题栏） */
-.side-dock.max { position: fixed; inset: 0; width: auto; z-index: 200; }
+/* 放大到标题栏下方的整个工作区；标签与抽屉按钮继续留在同一标题栏。 */
+.side-dock.max { position: fixed; top: var(--ad-titlebar-height); right: 0; bottom: 0; left: 0; width: auto; height: auto; z-index: 30; }
 .side-dock.max .sd-resize-handle { display: none; }
-/* Tauri/macOS 的原生 traffic lights 仍悬浮在 fixed 层之上；放大态共享头部须复用标题栏安全区。 */
-.is-desktop .side-dock.max .sd-top { padding-left: var(--ad-traffic-light-safe-x); }
 .sd-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .sd-url { flex: none; }
 .rev-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 650; }
@@ -145,6 +149,6 @@
 
 /* 中窄窗口将工作台变为右侧浮层，入口和内容都继续可用。 */
 @media (max-width: 1100px) {
-  .side-dock.open:not(.max) { position: fixed; z-index: 190; top: var(--ad-titlebar-height); right: 0; bottom: 0; width: min(92vw, 520px) !important; height: auto; box-shadow: -18px 0 40px rgba(0, 0, 0, 0.18); }
+  .side-dock.open:not(.max) { position: fixed; z-index: 30; top: var(--ad-titlebar-height); right: 0; bottom: 0; width: min(92vw, 520px) !important; height: auto; box-shadow: -18px 0 40px rgba(0, 0, 0, 0.18); }
   .side-dock.open:not(.max) .sd-resize-handle { display: none; }
 }

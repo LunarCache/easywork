@@ -35,10 +35,18 @@ test.describe("navigation e2e", () => {
     await expect(page.locator(".ad-tb-seg-b")).toHaveAttribute("data-tauri-drag-region", "true");
     await expect(page.locator(".ad-tb-task")).toHaveAttribute("data-tauri-drag-region", "true");
     await expect(page.locator(".ad-spacer").first()).toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.getByTestId("side-dock-titlebar-host")).toHaveAttribute("data-tauri-drag-region", "true");
     await expect(page.locator("button.ad-tb-nav")).toHaveCount(1);
     await expect(page.locator("button.ad-tb-nav")).not.toHaveAttribute("data-tauri-drag-region", "true");
     await expect(page.locator(".ad-tb-nav-static")).toHaveCount(2);
     await expect(page.locator(".ad-tb-nav-static").first()).toHaveAttribute("data-tauri-drag-region", "true");
+
+    await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
+    await expect(page.locator(".sd-titlebar-toolbar")).toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.locator(".sd-open-tabs")).toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.locator(".sd-tab-shell").first()).toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.locator(".sd-add-wrap")).toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.getByTestId("side-dock-tab-files")).not.toHaveAttribute("data-tauri-drag-region", "true");
   });
 
   test("macOS 放大工作台时标题避开 traffic lights", async ({ page, openApp }) => {
@@ -53,7 +61,7 @@ test.describe("navigation e2e", () => {
     await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
     await page.getByTitle("放大到窗口").click();
 
-    const activeTab = page.locator(".side-dock.max .sd-top").getByTestId("side-dock-tab-files");
+    const activeTab = page.locator(".ad-titlebar").getByTestId("side-dock-tab-files");
     await expect(activeTab).toHaveText(/文件/);
     const activeTabBox = await activeTab.boundingBox();
     expect(activeTabBox).not.toBeNull();
@@ -65,8 +73,13 @@ test.describe("navigation e2e", () => {
     await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
 
     const dock = page.getByTestId("side-dock");
-    await expect(dock.locator(".sd-top-title")).toHaveCount(0);
-    await expect(dock.locator(".sd-top").getByTestId("side-dock-tab-files")).toBeVisible();
+    await expect(dock.locator(".sd-top")).toHaveCount(0);
+    await expect(page.locator(".ad-titlebar").getByTestId("side-dock-tab-files")).toBeVisible();
+    const tabBox = await page.getByTestId("side-dock-tab-files").boundingBox();
+    const drawerBox = await page.getByTitle("关闭工作台").boundingBox();
+    expect(tabBox).not.toBeNull();
+    expect(drawerBox).not.toBeNull();
+    expect(Math.abs(tabBox!.y + tabBox!.height / 2 - (drawerBox!.y + drawerBox!.height / 2))).toBeLessThan(2);
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
 
     await page.getByTestId("side-dock-add-view").click();
@@ -93,6 +106,25 @@ test.describe("navigation e2e", () => {
     await expect(page.getByTestId("side-dock-tab-preview")).toBeVisible();
     await page.getByTestId("side-dock-tab-preview").click();
     await expect(address).toHaveValue("https://example.com/docs");
+
+    await page.getByTitle("关闭浏览器标签").click();
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
+    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveClass(/on/);
+    await page.getByTitle("关闭终端标签").click();
+    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveCount(0);
+    await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
+
+    await page.setViewportSize({ width: 960, height: 720 });
+    await page.getByTestId("side-dock-add-view").click();
+    const narrowMenuBox = await page.getByTestId("side-dock-view-menu").boundingBox();
+    expect(narrowMenuBox).not.toBeNull();
+    expect(narrowMenuBox!.x).toBeGreaterThanOrEqual(0);
+    expect(narrowMenuBox!.x + narrowMenuBox!.width).toBeLessThanOrEqual(960);
+    await page.keyboard.press("Escape");
+    await page.getByTitle("关闭文件标签").click();
+    await expect(dock).not.toBeVisible();
+    await page.getByTitle("打开工作台（文件 / 浏览器 / 终端）").click();
+    await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
   });
 
   test("消息链接在重复点击时会重新激活浏览器标签", async ({ page, openApp, info }) => {
@@ -121,7 +153,7 @@ test.describe("navigation e2e", () => {
 
     await openApp();
     await page.getByTestId("chat-composer-input").fill("给我一个链接");
-    await page.getByTestId("chat-composer-input").press("Enter");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
 
     const link = page.getByRole("link", { name: "示例页面" });
     await link.click();

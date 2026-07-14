@@ -15,7 +15,7 @@
 - **记忆（作用域化）**：Core Memory = User Profile / Agent Notes；每工作区私有 conventions / decisions / pitfalls；derived facts 保留来源所有权，manifest 有界；sqlite-vec ⊕ 词法召回，markdown 可手改回灌。外部 provider 当前仅为宿主注入 seam，Desktop / CLI 无配置入口，Mem0 仍是骨架；注入后也只做 additive、受限且可关闭的召回。
 - **Skill 学习闭环**：Chat/设置显式 Learn + restricted background review → pending Candidate → 用户审核批准 → 全局/工作区原子激活；支持证据、package 安全验证、来源删除、乐观锁 patch、使用反馈、pin、stale、可恢复归档、快照与回滚。
 - **思考能力与过程**：`reasoning` 能力由运行时模型投影到 UI，推理模型首次默认中档、显式关闭按模型持久化；reasoning 内容落库并跨会话回放（不回喂模型）。
-- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 可调宽「工作台」面板（顶层动态标签、可导航浏览器、文件主从 / 放大双栏、窄屏浮层）+ 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；WebView 启用显式 CSP，保留 IPC/daemon/预览来源并禁止远程脚本、对象插件与表单提交。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 可调宽「工作台」面板（标题栏可关闭动态标签、HTML 直达浏览器、文件主从 / 放大双栏、窄屏浮层）+ 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；WebView 启用显式 CSP，保留 IPC/daemon/预览来源并禁止远程脚本、对象插件与表单提交。
 - **外部渠道**：`@ew/im-connectors` Channel Gateway（adapter registry + 配置/状态 + allowlist + webhook 分发），core 侧 `ChannelOperations` 统一连接器生命周期、Feishu/WeChat 扫码 setup session、收件箱 read model 与 SSE invalidation；Telegram 已迁入同一抽象并支持可取消 long-poll；Feishu/Lark 默认走官方 SDK WebSocket 长连接并支持扫码创建应用，高级模式保留 webhook（URL verification、token/signature、加密回调解密、文本收发），且 public webhook 只在 `transport:webhook` + 验证 secret 配置完整时启用；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；渠道 secret 已迁到 macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI，旧 SQLite 明文自动迁移并去敏；Discord / 企业微信待补平台 adapter。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP / IM 非敏感配置）+ 系统渠道密钥存储。
 - **命令行（CLI）**：SEA daemon 二进制同时也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性；无位置参数时可从 stdin 读取，`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。macOS / Windows 安装包仅把该二进制作为 desktop sidecar，不会把 `easywork` 命令安装到 `PATH`。
@@ -35,6 +35,14 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-14 — 工作台标签并入标题栏与 HTML 直达浏览器
+
+- **同层 chrome**：SideDock 通过标题栏稳定 host portal 输出已打开标签、`+` 与放大动作，与抽屉按钮严格同一行；抽屉正文从第一像素开始归属当前视图。
+- **标签生命周期**：所有标签带独立关闭按钮；关闭当前标签切到相邻标签，关闭最后一个标签收起抽屉，再次打开恢复上下文默认标签。
+- **HTML 直达 Browser**：HTML 交付卡与文件行统一读取受控文件内容后直接进入浏览器标签，以 sandbox `srcDoc` 浏览，不再创建 FileViewer 预览 / 源码界面；Markdown 等非 HTML 文件保留原主从 / 放大双栏。
+- **响应式细节**：`+` 菜单改为向左对齐展开，960px 浮层下完整留在 viewport 内。
+- **回归锁定**：Playwright 覆盖标题栏同层布局、标签关闭 / 最后标签收起、HTML 直达 Browser、重复链接激活和窄屏菜单边界；`npm run lint`、`npm run typecheck`、`npm run build` 全绿；`npm test` = **363 passed / 1 skipped**；`npm run test:e2e` = **36 passed**。
 
 ## 2026-07-14 — 工作台顶层动态标签与可导航浏览器
 

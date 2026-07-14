@@ -144,15 +144,15 @@ test.describe("composer e2e", () => {
     await expect(card).toContainText("summary.md");
     await expect(card).toContainText("新建");
     await card.getByRole("button", { name: /summary\.md/ }).click();
-    await expect(page.locator(".side-dock .sd-top-title")).toHaveCount(0);
-    await expect(page.locator(".side-dock .sd-top").getByTestId("side-dock-tab-files")).toBeVisible();
+    await expect(page.locator(".side-dock .sd-top")).toHaveCount(0);
+    await expect(page.locator(".ad-titlebar").getByTestId("side-dock-tab-files")).toBeVisible();
     await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
     await expect(page.getByTestId("file-viewer-name")).toHaveText("summary.md");
   });
 
-  test("HTML 交付文件在普通侧栏使用主从导航，放大后使用双栏且只有一套预览工具栏", async ({ page, openApp, info }) => {
-    const absolutePath = "/Users/test/.easywork/workspace/chats/thread/shanghai-weather.html";
-    let listedFiles = [{ path: "shanghai-weather.html", type: "file", size: 1024 }];
+  test("Markdown 交付文件在普通侧栏使用主从导航，放大后使用双栏且只有一套预览工具栏", async ({ page, openApp, info }) => {
+    const absolutePath = "/Users/test/.easywork/workspace/chats/thread/shanghai-weather.md";
+    let listedFiles = [{ path: "shanghai-weather.md", type: "file", size: 1024 }];
     await page.route(`${info.baseUrl}/models`, async (route) => {
       await route.fulfill({
         json: {
@@ -168,11 +168,101 @@ test.describe("composer e2e", () => {
     });
     await page.route(`${info.baseUrl}/files/meta?*`, async (route) => {
       await route.fulfill({
+        json: { name: "shanghai-weather.md", mime: "text/markdown", kind: "markdown", size: 1024, text: "# 上海天气" },
+      });
+    });
+    await page.route(`${info.baseUrl}/agent/run`, async (route) => {
+      const call = { id: "write-1", name: "write", arguments: JSON.stringify({ path: absolutePath, content: "# 上海天气" }) };
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: [
+          `data: ${JSON.stringify({ type: "tool-start", call })}\n\n`,
+          `data: ${JSON.stringify({ type: "tool-end", call, result: { content: "ok", display: { kind: "diff", path: absolutePath, before: null, after: "# 上海天气" } } })}\n\n`,
+          `data: ${JSON.stringify({ type: "text", text: "页面已生成。" })}\n\n`,
+          `data: ${JSON.stringify({ type: "final", message: { role: "assistant", content: "页面已生成。" } })}\n\n`,
+          `data: ${JSON.stringify({ type: "artifacts", artifacts: [{ path: "shanghai-weather.md", kind: "created", size: 1024 }] })}\n\n`,
+          "data: [DONE]\n\n",
+        ].join(""),
+      });
+    });
+
+    await openApp();
+    await page.getByTestId("chat-composer-input").fill("生成上海天气页面");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await expect(page.locator(".cv-changes-row")).toHaveCount(1);
+    await page.locator(".cv-changes-row").evaluate((element: HTMLElement) => element.click());
+
+    await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
+    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveCount(0);
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
+    await expect(page.getByTestId("side-dock-add-view")).toBeVisible();
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(0);
+    await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.md");
+    await expect(page.getByTestId("file-viewer-name")).toHaveCount(1);
+    await expect(page.getByTitle("返回文件列表")).toBeVisible();
+
+    const previewFillRatio = async () => {
+      const available = await page.locator(".side-dock .sd-body").boundingBox();
+      const preview = await page.locator(".side-dock .files-detail").boundingBox();
+      return available && preview ? preview.height / available.height : 0;
+    };
+    await expect.poll(previewFillRatio).toBeGreaterThan(0.9);
+
+    await page.getByTitle("返回文件列表").click();
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(1);
+    await expect(page.getByTestId("file-viewer")).toHaveCount(0);
+    await page.locator(".side-dock .af-file").click();
+    await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.md");
+
+    await page.getByTitle("放大到窗口").click();
+    await expect(page.locator(".side-dock")).toHaveClass(/max/);
+    await expect(page.locator(".side-dock .files-split")).toBeVisible();
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(1);
+    await expect(page.getByTestId("file-viewer-name")).toHaveCount(1);
+    await expect.poll(previewFillRatio).toBeGreaterThan(0.9);
+
+    // 文件行超过导航栏高度时，左侧列表独立滚动，右侧预览不受影响。
+    listedFiles = [
+      { path: "shanghai-weather.md", type: "file", size: 1024 },
+      ...Array.from({ length: 18 }, (_, index) => ({ path: `notes-${index + 1}.txt`, type: "file", size: 128 })),
+    ];
+    await page.locator(".side-dock").getByTitle("刷新").click();
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(19);
+    const scrollMetrics = await page.locator(".side-dock .af-scroll").evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+    await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.md");
+
+    await page.getByTitle("还原").click();
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(0);
+    await expect(page.getByTestId("file-viewer-name")).toHaveCount(1);
+  });
+
+  test("HTML 交付文件直接在浏览器标签打开，不进入 FileViewer", async ({ page, openApp, info }) => {
+    const absolutePath = "/Users/test/.easywork/workspace/chats/thread/shanghai-weather.html";
+    await page.route(`${info.baseUrl}/models`, async (route) => {
+      await route.fulfill({
+        json: {
+          routed: ["test-model"],
+          modelSources: [{ id: "test-model", kind: "engine", label: "Test", modelId: "test-model" }],
+          context: { "test-model": 32_768 },
+          engines: [],
+        },
+      });
+    });
+    await page.route(`${info.baseUrl}/chat/*/files?*`, async (route) => {
+      await route.fulfill({ json: { entries: [{ path: "shanghai-weather.html", type: "file", size: 1024 }] } });
+    });
+    await page.route(`${info.baseUrl}/files/meta?*`, async (route) => {
+      await route.fulfill({
         json: { name: "shanghai-weather.html", mime: "text/html", kind: "html", size: 1024, text: "<h1>上海天气</h1>" },
       });
     });
     await page.route(`${info.baseUrl}/agent/run`, async (route) => {
-      const call = { id: "write-1", name: "write", arguments: JSON.stringify({ path: absolutePath, content: "<h1>上海天气</h1>" }) };
+      const call = { id: "write-html", name: "write", arguments: JSON.stringify({ path: absolutePath, content: "<h1>上海天气</h1>" }) };
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
@@ -190,55 +280,21 @@ test.describe("composer e2e", () => {
     await openApp();
     await page.getByTestId("chat-composer-input").fill("生成上海天气页面");
     await page.getByRole("button", { name: "发送", exact: true }).click();
-    await expect(page.locator(".cv-changes-row")).toHaveCount(1);
     await page.locator(".cv-changes-row").evaluate((element: HTMLElement) => element.click());
 
-    await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
-    await expect(page.getByTestId("side-dock-tab-terminal")).toHaveCount(0);
-    await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
-    await expect(page.getByTestId("side-dock-add-view")).toBeVisible();
-    await expect(page.locator(".side-dock .af-file")).toHaveCount(0);
-    await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.html");
-    await expect(page.getByTestId("file-viewer-name")).toHaveCount(1);
-    await expect(page.getByTitle("返回文件列表")).toBeVisible();
-
-    const previewFillRatio = async () => {
-      const available = await page.locator(".side-dock .sd-body").boundingBox();
-      const preview = await page.locator(".side-dock .files-detail").boundingBox();
-      return available && preview ? preview.height / available.height : 0;
-    };
-    await expect.poll(previewFillRatio).toBeGreaterThan(0.9);
-
-    await page.getByTitle("返回文件列表").click();
-    await expect(page.locator(".side-dock .af-file")).toHaveCount(1);
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveClass(/on/);
+    await expect(page.getByRole("textbox", { name: "浏览器地址" })).toHaveValue("shanghai-weather.html");
+    await expect(page.locator(".side-dock .wpv-frame")).toHaveAttribute("srcdoc", "<h1>上海天气</h1>");
     await expect(page.getByTestId("file-viewer")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "预览", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "源码", exact: true })).toHaveCount(0);
+
+    await page.getByTitle("关闭浏览器标签").click();
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
+    await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
     await page.locator(".side-dock .af-file").click();
-    await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.html");
-
-    await page.getByTitle("放大到窗口").click();
-    await expect(page.locator(".side-dock")).toHaveClass(/max/);
-    await expect(page.locator(".side-dock .files-split")).toBeVisible();
-    await expect(page.locator(".side-dock .af-file")).toHaveCount(1);
-    await expect(page.getByTestId("file-viewer-name")).toHaveCount(1);
-    await expect.poll(previewFillRatio).toBeGreaterThan(0.9);
-
-    // 文件行超过导航栏高度时，左侧列表独立滚动，右侧预览不受影响。
-    listedFiles = [
-      { path: "shanghai-weather.html", type: "file", size: 1024 },
-      ...Array.from({ length: 18 }, (_, index) => ({ path: `notes-${index + 1}.txt`, type: "file", size: 128 })),
-    ];
-    await page.locator(".side-dock").getByTitle("刷新").click();
-    await expect(page.locator(".side-dock .af-file")).toHaveCount(19);
-    const scrollMetrics = await page.locator(".side-dock .af-scroll").evaluate((element) => ({
-      clientHeight: element.clientHeight,
-      scrollHeight: element.scrollHeight,
-    }));
-    expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
-    await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.html");
-
-    await page.getByTitle("还原").click();
-    await expect(page.locator(".side-dock .af-file")).toHaveCount(0);
-    await expect(page.getByTestId("file-viewer-name")).toHaveCount(1);
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveClass(/on/);
+    await expect(page.locator(".side-dock .wpv-frame")).toHaveAttribute("srcdoc", "<h1>上海天气</h1>");
   });
 
   test("聊天页关闭联网后从请求中排除 explore_web 和 http_get", async ({ page, openApp, info }) => {

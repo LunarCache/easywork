@@ -7,12 +7,14 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import type { ExecResult, GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { FileViewer } from "./FileViewer.js";
 import { fileType, formatFileSize } from "../lib/filetype.js";
 import { matchFileTarget } from "../lib/file-target.js";
+import { resolvePreviewKind } from "../lib/preview.js";
 import type { UiMsg } from "../lib/agent-stream.js";
 import {
   ChevronIcon,
@@ -57,6 +59,10 @@ export interface BrowserTarget {
   nonce: number;
 }
 
+type BrowserPage =
+  | { kind: "url"; url: string }
+  | { kind: "html"; name: string; html: string };
+
 const DOCK_WIDTH_KEY = "easywork.side-dock.width";
 const DOCK_WIDTH_DEFAULT = 420;
 const DOCK_WIDTH_MIN = 320;
@@ -98,6 +104,10 @@ function normalizeBrowserAddress(value: string): string | null {
 function fileIconFor(p: string) {
   const ft = fileType(p);
   return <ft.Icon size={14} style={{ color: ft.color }} />;
+}
+
+function isHtmlFile(path: string): boolean {
+  return resolvePreviewKind(path) === "html";
 }
 
 function DockEmpty({ children }: { children: ReactNode }) {
@@ -154,13 +164,16 @@ export function SideDock({
   const [view, setView] = useState<Tab>(initialView);
   const [openViews, setOpenViews] = useState<Tab[]>([initialView]);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [browserUrl, setBrowserUrl] = useState<string | null>(() =>
-    browserTarget ? normalizeBrowserAddress(browserTarget.url) : null,
-  );
+  const [browserPage, setBrowserPage] = useState<BrowserPage | null>(() => {
+    const url = browserTarget ? normalizeBrowserAddress(browserTarget.url) : null;
+    return url ? { kind: "url", url } : null;
+  });
   const [maxed, setMaxed] = useState(false);
   const [dockWidth, setDockWidth] = useState(readDockWidth);
   const [termHistory, setTermHistory] = useState<TermEntry[]>([]);
+  const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
+  const targetHandledRef = useRef<number | null>(null);
   const repo = !!git?.status.repo;
   // repo 经 ref 读取：仅 target.nonce 变化（点击改动卡）才切视图；
   // git 状态后台刷新（repo false→true）不应把用户从当前视图（终端/预览）拽回 diff。
@@ -172,6 +185,46 @@ export function SideDock({
     setView(next);
     setAddMenuOpen(false);
   }, []);
+
+  useEffect(() => {
+    setToolbarHost(document.getElementById("side-dock-titlebar-host"));
+  }, []);
+
+  useEffect(() => {
+    if (!open || openViews.length > 0) return;
+    setOpenViews([initialView]);
+    setView(initialView);
+  }, [initialView, open, openViews.length]);
+
+  const closeView = useCallback((closing: Tab) => {
+    const index = openViews.indexOf(closing);
+    if (index < 0) return;
+    const remaining = openViews.filter((tab) => tab !== closing);
+    setOpenViews(remaining);
+    if (closing === "preview") {
+      setBrowserPage(null);
+      onClearPreview();
+    }
+    if (view === closing && remaining.length > 0) {
+      setView(remaining[Math.min(index, remaining.length - 1)]!);
+    }
+    if (remaining.length === 0) onClose();
+  }, [onClearPreview, onClose, openViews, view]);
+
+  const openHtmlFile = useCallback(async (path: string) => {
+    const resolvedPath = matchFileTarget(files, path)?.path ?? path;
+    try {
+      const meta = await getClient().previewMeta(previewScope, previewId, resolvedPath);
+      if (meta.kind !== "html") {
+        activateView("files");
+        return;
+      }
+      setBrowserPage({ kind: "html", name: meta.name, html: meta.text ?? "" });
+      activateView("preview");
+    } catch {
+      activateView("files");
+    }
+  }, [activateView, files, previewId, previewScope]);
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -191,16 +244,21 @@ export function SideDock({
 
   // 「文件改动」卡点击 → git 仓库跳到 diff；否则跳到「文件」视图（FilesTab 按 nonce 定位文件）。
   useEffect(() => {
-    if (!target) return;
+    if (!target || targetHandledRef.current === target.nonce) return;
+    targetHandledRef.current = target.nonce;
+    if (isHtmlFile(target.path)) {
+      void openHtmlFile(target.path);
+      return;
+    }
     activateView(repoRef.current ? "diff" : "files");
-  }, [target?.nonce, activateView]);
+  }, [target?.nonce, activateView, openHtmlFile]);
 
   // 点消息里的链接/来源 → 校验地址后自动进「浏览器」（开关由父组件负责）。
   useEffect(() => {
     if (!browserTarget) return;
     const url = normalizeBrowserAddress(browserTarget.url);
     if (!url) return;
-    setBrowserUrl(url);
+    setBrowserPage({ kind: "url", url });
     activateView("preview");
   }, [browserTarget?.nonce, activateView]);
 
@@ -248,8 +306,70 @@ export function SideDock({
     });
   };
 
+  const titlebarTabs = open && toolbarHost
+    ? createPortal(
+      <div className="sd-titlebar-toolbar" data-tauri-drag-region>
+        <div className="sd-open-tabs" role="tablist" aria-label="已打开的工作台视图" data-tauri-drag-region>
+          {openViews.map((tab) => (
+            <div key={tab} className={`sd-tab-shell ${view === tab ? "on" : ""}`} data-tauri-drag-region>
+              <button
+                className={`sd-tab ${view === tab ? "on" : ""}`}
+                data-testid={`side-dock-tab-${tab}`}
+                role="tab"
+                aria-selected={view === tab}
+                onClick={() => activateView(tab)}
+              >
+                {TAB_META[tab].icon()}
+                <span>{TAB_META[tab].label}</span>
+                {tab === "files" && files.length > 0 && <span className="rev-count">{files.length}</span>}
+              </button>
+              <button
+                type="button"
+                className="sd-tab-close"
+                title={`关闭${TAB_META[tab].label}标签`}
+                aria-label={`关闭${TAB_META[tab].label}标签`}
+                onClick={() => closeView(tab)}
+              >
+                <XIcon size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="sd-add-wrap" ref={addMenuRef} data-tauri-drag-region>
+          <button
+            className={`fv-btn sd-add ${addMenuOpen ? "on" : ""}`}
+            data-testid="side-dock-add-view"
+            title="打开工作台视图"
+            aria-label="打开工作台视图"
+            aria-expanded={addMenuOpen}
+            onClick={() => setAddMenuOpen((current) => !current)}
+          >
+            <PlusIcon size={16} />
+          </button>
+          {addMenuOpen && (
+            <div className="sd-view-menu" data-testid="side-dock-view-menu" role="menu">
+              {TAB_ORDER.filter((tab) => tab !== "diff" || git).map((tab) => (
+                <button type="button" key={tab} role="menuitem" onClick={() => activateView(tab)}>
+                  {TAB_META[tab].icon()}
+                  <span>{TAB_META[tab].label}</span>
+                  {openViews.includes(tab) && <CheckIcon size={14} className="sd-menu-check" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <button className="fv-btn sd-max" title={maxed ? "还原" : "放大到窗口"} onClick={() => setMaxed((v) => !v)}>
+          {maxed ? <MinimizeIcon size={13} /> : <MaximizeIcon size={13} />}
+        </button>
+      </div>,
+      toolbarHost,
+    )
+    : null;
+
   return (
-    <aside
+    <>
+      {titlebarTabs}
+      <aside
       className={`side-dock ${open ? "open" : ""} ${maxed ? "max" : ""}`}
       data-testid="side-dock"
       style={maxed ? undefined : { width: dockWidth }}
@@ -275,55 +395,6 @@ export function SideDock({
           }
         }}
       />
-      <div className="sd-top">
-        <div className="sd-open-tabs" role="tablist" aria-label="已打开的工作台视图">
-          {openViews.map((tab) => (
-            <button
-              key={tab}
-              className={`sd-tab ${view === tab ? "on" : ""}`}
-              data-testid={`side-dock-tab-${tab}`}
-              role="tab"
-              aria-selected={view === tab}
-              onClick={() => activateView(tab)}
-            >
-              {TAB_META[tab].icon()}
-              <span>{TAB_META[tab].label}</span>
-              {tab === "files" && files.length > 0 && <span className="rev-count">{files.length}</span>}
-            </button>
-          ))}
-        </div>
-        <div className="sd-add-wrap" ref={addMenuRef}>
-          <button
-            className={`fv-btn sd-add ${addMenuOpen ? "on" : ""}`}
-            data-testid="side-dock-add-view"
-            title="打开工作台视图"
-            aria-label="打开工作台视图"
-            aria-expanded={addMenuOpen}
-            onClick={() => setAddMenuOpen((current) => !current)}
-          >
-            <PlusIcon size={16} />
-          </button>
-          {addMenuOpen && (
-            <div className="sd-view-menu" data-testid="side-dock-view-menu" role="menu">
-              {TAB_ORDER.filter((tab) => tab !== "diff" || git).map((tab) => (
-                <button type="button" key={tab} role="menuitem" onClick={() => activateView(tab)}>
-                  {TAB_META[tab].icon()}
-                  <span>{TAB_META[tab].label}</span>
-                  {openViews.includes(tab) && <CheckIcon size={14} className="sd-menu-check" />}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <span className="bar-spacer" />
-        <button className="fv-btn" title={maxed ? "还原" : "放大到窗口"} onClick={() => setMaxed((v) => !v)}>
-          {maxed ? <MinimizeIcon size={13} /> : <MaximizeIcon size={13} />}
-        </button>
-        <button className="fv-btn" title="关闭" onClick={onClose}>
-          <XIcon size={14} />
-        </button>
-      </div>
-
       <div className="sd-body">
         {view === "diff" && git && <DiffTab git={git} />}
         {view === "files" && (
@@ -336,21 +407,23 @@ export function SideDock({
             maxed={maxed}
             onRefresh={onFilesRefresh}
             onRevealDir={onRevealDir}
+            onOpenHtml={(path) => void openHtmlFile(path)}
           />
         )}
         {view === "terminal" && <TerminalTab msgs={msgs} history={termHistory} onRun={runCommand} />}
         {view === "preview" && (
           <PreviewTab
-            url={browserUrl}
-            onNavigate={setBrowserUrl}
+            page={browserPage}
+            onNavigate={(url) => setBrowserPage({ kind: "url", url })}
             onClear={() => {
-              setBrowserUrl(null);
+              setBrowserPage(null);
               onClearPreview();
             }}
           />
         )}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }
 
@@ -364,6 +437,7 @@ function FilesTab({
   maxed,
   onRefresh,
   onRevealDir,
+  onOpenHtml,
 }: {
   files: WsEntry[];
   scope: "workspace" | "chat";
@@ -374,6 +448,7 @@ function FilesTab({
   maxed: boolean;
   onRefresh: () => void;
   onRevealDir: () => void;
+  onOpenHtml: (path: string) => void;
 }) {
   const [sel, setSel] = useState<string | null>(null);
   const handledRef = useRef<number | null>(null);
@@ -396,8 +471,21 @@ function FilesTab({
   useEffect(() => {
     if (!openTarget || handledRef.current === openTarget.nonce) return;
     handledRef.current = openTarget.nonce;
+    if (isHtmlFile(openTarget.path)) {
+      setSel(null);
+      return;
+    }
     setSel(targetFile?.path ?? openTarget.path);
   }, [openTarget, targetFile]);
+
+  const openFile = (path: string) => {
+    if (isHtmlFile(path)) {
+      setSel(null);
+      onOpenHtml(path);
+      return;
+    }
+    setSel(path);
+  };
 
   const fileList = (
     <div className="files-list">
@@ -419,7 +507,7 @@ function FilesTab({
             type="button"
             key={file.path}
             className={`af-file ${sel === file.path ? "active" : ""}`}
-            onClick={() => setSel(file.path)}
+            onClick={() => openFile(file.path)}
           >
             {fileIconFor(file.path)}
             <span className="af-path" title={file.path}>{file.path}</span>
@@ -541,25 +629,25 @@ function TerminalTab({
   );
 }
 
-// ===== 浏览器 tab：消息链接或用户输入地址 → iframe 预览 =====
+// ===== 浏览器 tab：消息链接、HTML 文件或用户输入地址 → iframe 浏览 =====
 function PreviewTab({
-  url,
+  page,
   onNavigate,
   onClear,
 }: {
-  url: string | null;
+  page: BrowserPage | null;
   onNavigate: (url: string) => void;
   onClear: () => void;
 }) {
   const [nonce, setNonce] = useState(0);
   const [copied, setCopied] = useState(false);
-  const [draft, setDraft] = useState(url ?? "");
+  const [draft, setDraft] = useState(page?.kind === "url" ? page.url : page?.name ?? "");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setDraft(url ?? "");
+    setDraft(page?.kind === "url" ? page.url : page?.name ?? "");
     setError(null);
-  }, [url]);
+  }, [page]);
 
   const navigate = () => {
     const next = normalizeBrowserAddress(draft);
@@ -595,13 +683,13 @@ function PreviewTab({
         <button className="fv-btn" title="前往" onClick={navigate} disabled={!draft.trim()}>
           <EnterIcon size={14} />
         </button>
-        {url && (
+        {page && (
           <>
             <button
               className="fv-btn"
-              title="复制链接"
+              title="复制地址"
               onClick={() => {
-                void navigator.clipboard.writeText(url);
+                void navigator.clipboard.writeText(page.kind === "url" ? page.url : page.name);
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1200);
               }}
@@ -618,17 +706,25 @@ function PreviewTab({
         )}
       </div>
       {error && <div className="wpv-error">{error}</div>}
-      {url ? (
+      {page?.kind === "url" ? (
         <iframe
-          key={`${url}#${nonce}`}
+          key={`${page.url}#${nonce}`}
           className="wpv-frame"
-          src={url}
+          src={page.url}
           title="网页预览"
           referrerPolicy="no-referrer"
           sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
         />
+      ) : page?.kind === "html" ? (
+        <iframe
+          key={`${page.name}#${nonce}`}
+          className="wpv-frame"
+          srcDoc={page.html}
+          title={page.name}
+          sandbox="allow-scripts allow-forms allow-modals"
+        />
       ) : (
-        <DockEmpty>输入网址，或打开消息中的链接后在这里浏览。</DockEmpty>
+        <DockEmpty>输入网址，或打开消息链接 / HTML 文件后在这里浏览。</DockEmpty>
       )}
     </div>
   );
