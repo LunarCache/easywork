@@ -9,6 +9,11 @@ export { dataDir, modelsDir, memoryDir, dbPath } from "./config/paths.js";
 // 模型管理
 export { ModelManager, type ModelManagerOptions } from "./models/manager.js";
 export { LocalModelSettingsStore } from "./models/local-model-settings.js";
+export {
+  createChannelSecretStore,
+  MemoryChannelSecretStore,
+  type ChannelSecretStore,
+} from "./channels/secret-store.js";
 export { HFClient, groupVariants, type HFFile } from "./models/hf.js";
 export { downloadVariant, enumerateShards } from "./models/download.js";
 export { parseGGUFBuffer, readGGUFHeader, type GGUFMetadata } from "./models/gguf.js";

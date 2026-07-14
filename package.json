@@ -1,6 +1,6 @@
 {
   "name": "easywork",
-  "version": "0.4.1",
+  "version": "0.4.4",
   "private": true,
   "license": "MIT",
   "description": "本地 AI 工作台 — 下载并运行本地模型，Agent 工具(Skills/MCP)，IM + 记忆",
@@ -31,7 +31,8 @@
     "lint": "eslint .",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean && rimraf node_modules",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "release:check-version": "node scripts/check-release-version.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

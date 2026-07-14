@@ -3,6 +3,7 @@ import type {
   AgentEvent,
   AgentRunInput,
   ChannelConfig,
+  ChannelConnectorView,
   ChannelStatus,
   ConversationRepo,
   InboxEvent,
@@ -19,6 +20,7 @@ import {
   type registerFeishuApp,
   type registerWechatAccount,
 } from "@ew/im-connectors";
+import type { ChannelSecretStore } from "./secret-store.js";
 
 export interface FeishuSetupInput {
   id?: string;
@@ -90,6 +92,7 @@ export interface ChannelOperationsDeps {
   defaultModel?: string;
   run(input: AgentRunInput): AsyncIterable<AgentEvent>;
   persistConfigs(configs: ChannelConfig[]): void;
+  secretStore: ChannelSecretStore;
   feishuRegister: typeof registerFeishuApp;
   wechatRegister: typeof registerWechatAccount;
 }
@@ -129,15 +132,27 @@ export class ChannelOperations {
 
   connectors() {
     return {
-      connectors: this.gateway.configs(),
+      connectors: this.gateway.configs().map(toChannelConnectorView),
       status: this.gateway.statuses(),
     };
   }
 
   async upsertConnector(config: ChannelConfig): Promise<ChannelStatus> {
-    let status = await this.gateway.upsert(config);
+    const previousSecrets = this.deps.secretStore.get(config.id);
+    const incomingSecrets = nonEmptySecrets(config.secrets);
+    const secrets = { ...previousSecrets, ...incomingSecrets };
+    if (Object.keys(secrets).length) this.deps.secretStore.set(config.id, secrets);
+    const hydrated = { ...config, secrets };
+    let status: ChannelStatus;
+    try {
+      status = await this.gateway.upsert(hydrated);
+    } catch (error) {
+      if (Object.keys(previousSecrets).length) this.deps.secretStore.set(config.id, previousSecrets);
+      else this.deps.secretStore.delete(config.id);
+      throw error;
+    }
     this.persistConnectors();
-    if (config.enabled) status = await this.gateway.start(config.id);
+    if (hydrated.enabled) status = await this.gateway.start(hydrated.id);
     this.emitInboxChanged({ reason: "connector" });
     return status;
   }
@@ -155,6 +170,7 @@ export class ChannelOperations {
   }
 
   async deleteConnector(id: string): Promise<boolean> {
+    this.deps.secretStore.delete(id);
     const removed = await this.gateway.remove(id);
     this.persistConnectors();
     this.emitInboxChanged({ reason: "connector" });
@@ -393,7 +409,7 @@ export class ChannelOperations {
   }
 
   private persistConnectors(): void {
-    this.deps.persistConfigs(this.gateway.configs());
+    this.deps.persistConfigs(this.gateway.configs().map(stripChannelSecrets));
   }
 
   private emitInboxChanged(patch: Omit<Extract<InboxEvent, { type: "changed" }>, "type" | "at">): void {
@@ -409,6 +425,28 @@ export class ChannelOperations {
   private scheduleWechatSetupCleanup(id: string): void {
     setTimeout(() => this.wechatSetupSessions.delete(id), 10 * 60 * 1000).unref?.();
   }
+}
+
+function nonEmptySecrets(secrets: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(secrets)) {
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
+export function stripChannelSecrets(config: ChannelConfig): ChannelConfig {
+  return {
+    ...config,
+    secrets: {},
+  };
+}
+
+export function toChannelConnectorView(config: ChannelConfig): ChannelConnectorView {
+  return {
+    ...stripChannelSecrets(config),
+    secretKeys: Object.keys(nonEmptySecrets(config.secrets)).sort(),
+  };
 }
 
 function isActiveSetup(session: SetupSessionBase): boolean {

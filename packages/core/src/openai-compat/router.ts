@@ -25,6 +25,22 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function createGuardedWriter(raw: FastifyReply["raw"]): (chunk: string) => void {
+  raw.on("error", () => {});
+  return (chunk) => {
+    if (chunk && !raw.writableEnded && !raw.destroyed) raw.write(chunk);
+  };
+}
+
+function endGuarded(raw: FastifyReply["raw"]): void {
+  if (raw.writableEnded || raw.destroyed) return;
+  try {
+    raw.end();
+  } catch {
+    /* 客户端可能恰在守卫后断开。 */
+  }
+}
+
 /** 网关依赖：本地已加载模型的 router baseUrl 解析器（用于本地透传）。 */
 export interface OpenAICompatDeps {
   /** 返回已加载本地模型的 OpenAI/Anthropic 兼容 baseUrl（http://host:port/v1）；非本地返回 undefined。 */
@@ -119,11 +135,7 @@ async function proxyToLocal(
   } catch {
     /* 客户端断开/上游中断：直接收尾 */
   } finally {
-    try {
-      raw.end();
-    } catch {
-      /* ignore */
-    }
+    endGuarded(raw);
   }
 }
 
@@ -176,12 +188,9 @@ export function registerOpenAICompat(
         const created = Math.floor(Date.now() / 1000);
         reply.hijack();
         const raw = reply.raw;
-        raw.on("error", () => {});
+        const write = createGuardedWriter(raw);
         const roleSent = { value: false };
         const state = newPiAdaptState();
-        const write = (s: string): void => {
-          if (!raw.writableEnded && !raw.destroyed) raw.write(s);
-        };
         try {
           raw.writeHead(200, {
             "content-type": "text/event-stream",
@@ -200,11 +209,7 @@ export function registerOpenAICompat(
           write(`data: ${JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
         } finally {
           write("data: [DONE]\n\n");
-          try {
-            raw.end();
-          } catch {
-            /* ignore */
-          }
+          endGuarded(raw);
         }
         return;
       }
@@ -237,6 +242,7 @@ export function registerOpenAICompat(
     reply.raw.on("close", () => ac.abort());
     reply.hijack();
     const raw = reply.raw;
+    const write = createGuardedWriter(raw);
     raw.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
@@ -247,16 +253,16 @@ export function registerOpenAICompat(
     try {
       for await (const ev of engine.chatStream({ ...chatReq, signal: ac.signal })) {
         for (const chunk of streamEventToOpenAIChunks(ev, { id, created, model: chatReq.model, roleSent })) {
-          raw.write(`data: ${chunk}\n\n`);
+          write(`data: ${chunk}\n\n`);
         }
       }
     } catch (err) {
-      raw.write(
+      write(
         `data: ${JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`,
       );
     } finally {
-      raw.write("data: [DONE]\n\n");
-      raw.end();
+      write("data: [DONE]\n\n");
+      endGuarded(raw);
     }
   });
 
@@ -288,12 +294,9 @@ export function registerOpenAICompat(
         const id = `msg_${Date.now().toString(36)}${(counter += 1).toString(36)}`;
         reply.hijack();
         const raw = reply.raw;
-        raw.on("error", () => {});
+        const write = createGuardedWriter(raw);
         const tr = new AnthropicStreamTranslator(id, chatReq.model);
         const state = newPiAdaptState();
-        const write = (s: string): void => {
-          if (s && !raw.writableEnded && !raw.destroyed) raw.write(s);
-        };
         try {
           raw.writeHead(200, {
             "content-type": "text/event-stream",
@@ -309,11 +312,7 @@ export function registerOpenAICompat(
         } catch (err) {
           write(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
         } finally {
-          try {
-            raw.end();
-          } catch {
-            /* ignore */
-          }
+          endGuarded(raw);
         }
         return;
       }
@@ -346,6 +345,7 @@ export function registerOpenAICompat(
     reply.raw.on("close", () => ac.abort());
     reply.hijack();
     const raw = reply.raw;
+    const write = createGuardedWriter(raw);
     raw.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
@@ -353,19 +353,19 @@ export function registerOpenAICompat(
       "access-control-allow-origin": req.headers.origin ?? "*",
     });
     const tr = new AnthropicStreamTranslator(id, chatReq.model);
-    raw.write(tr.start());
+    write(tr.start());
     try {
       for await (const ev of engine.chatStream({ ...chatReq, signal: ac.signal })) {
         const frame = tr.event(ev);
-        if (frame) raw.write(frame);
+        if (frame) write(frame);
       }
-      raw.write(tr.end());
+      write(tr.end());
     } catch (err) {
-      raw.write(
+      write(
         `event: error\ndata: ${JSON.stringify({ type: "error", error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`,
       );
     } finally {
-      raw.end();
+      endGuarded(raw);
     }
   });
 

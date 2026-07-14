@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
+import http from "node:http";
 import Fastify from "fastify";
 import type { EngineRegistry } from "../src/engine/registry.js";
 import type { AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type { ChatRequest, ChatResponse, ChatStreamEvent, InferenceEngine } from "@ew/shared";
 import { registerOpenAICompat } from "../src/openai-compat/router.js";
 
 /** 假 pi 流：把若干 AssistantMessageEvent 包成 AsyncIterable（router 只 for-await 它）。 */
@@ -291,4 +293,80 @@ describe("/v1 云端经 pi-ai", () => {
     expect(res.statusCode).toBe(404);
     await app.close();
   });
+});
+
+describe("/v1 engine fallback 流断开", () => {
+  for (const endpoint of ["/v1/chat/completions", "/v1/messages"] as const) {
+    it(`${endpoint}: 客户端断开后停止写入且正常收尾`, async () => {
+      let release!: () => void;
+      const continueStream = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let streamFinished = false;
+      const engine: InferenceEngine = {
+        id: "fallback-engine",
+        capabilities: {},
+        async chat(_req: ChatRequest): Promise<ChatResponse> {
+          throw new Error("unused");
+        },
+        async *chatStream(_req: ChatRequest): AsyncIterable<ChatStreamEvent> {
+          try {
+            yield { type: "text-delta", delta: "first" };
+            await continueStream;
+            yield { type: "text-delta", delta: "late" };
+            yield { type: "done", finishReason: "stop" };
+          } finally {
+            streamFinished = true;
+          }
+        },
+      };
+      const registry = {
+        routedModels: () => ["fallback-model"],
+        resolve: () => engine,
+      } as unknown as EngineRegistry;
+      const app = Fastify();
+      registerOpenAICompat(app, registry, { localBaseUrl: () => undefined });
+      const address = await app.listen({ host: "127.0.0.1", port: 0 });
+      const originalWrite = http.ServerResponse.prototype.write;
+      let writesAfterClose = 0;
+      http.ServerResponse.prototype.write = function (...args: Parameters<typeof originalWrite>) {
+        if (this.destroyed || this.writableEnded) writesAfterClose += 1;
+        return originalWrite.apply(this, args);
+      };
+
+      try {
+        const requestClosed = new Promise<void>((resolve, reject) => {
+          const url = new URL(endpoint, address);
+          const body = JSON.stringify({
+            model: "fallback-model",
+            messages: [{ role: "user", content: "hi" }],
+            stream: true,
+            ...(endpoint === "/v1/messages" ? { max_tokens: 32 } : {}),
+          });
+          const req = http.request(url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
+          });
+          req.on("error", reject);
+          req.on("response", (res) => {
+            res.once("data", () => {
+              res.destroy();
+              resolve();
+            });
+          });
+          req.end(body);
+        });
+
+        await requestClosed;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        release();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(streamFinished).toBe(true);
+        expect(writesAfterClose).toBe(0);
+      } finally {
+        http.ServerResponse.prototype.write = originalWrite;
+        await app.close();
+      }
+    });
+  }
 });

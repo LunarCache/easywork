@@ -103,6 +103,7 @@ flowchart LR
 
 - Channel Gateway 把不同平台统一成 adapter；core 侧 Channel Operations 统一管理连接器生命周期、扫码连接会话、收件箱读模型和 SSE 失效事件。
 - Telegram long-poll、Feishu/Lark WebSocket 与 webhook、WeChat iLink QR + long-poll 已落地。
+- 渠道 secret 不再写入 SQLite：macOS 使用 Keychain、Linux 使用 Secret Service、Windows 使用当前用户 DPAPI；旧版明文配置会在启动时自动迁移，管理 API 只返回已配置字段名而不回显密钥。
 - 收件箱按外部联系人聚合消息，使用 SSE invalidation 实时刷新。
 
 ---
@@ -181,7 +182,7 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 343 passed / 1 skipped
+npm test               # vitest: 349 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
@@ -201,13 +202,13 @@ node scripts/build-daemon-sea.mjs
 npm run app:build --workspace @ew/desktop
 ```
 
-发布流程：推送 `v*` tag 触发 [`release.yml`](.github/workflows/release.yml)，macOS Apple Silicon runner 构建 dmg 并上传到 GitHub Releases。
+发布流程：推送 `v*` tag 触发 [`release.yml`](.github/workflows/release.yml)，先运行 `npm run release:check-version` 校验 npm / Tauri / Cargo 版本与 tag 一致，再由 macOS Apple Silicon runner 构建 dmg 并上传到 GitHub Releases。Desktop WebView 启用显式 CSP，保留 Tauri IPC、本地 daemon 与沙盒预览所需来源，同时禁止远程脚本、对象插件和表单提交。
 
 ---
 
 ## 测试覆盖
 
-- Vitest：343 passed / 1 skipped。
+- Vitest：349 passed / 1 skipped。
 - Playwright UI e2e：29 条，覆盖设置页、模型模板跨协议元数据继承、推理模型默认思考档位、默认工作区直达、渠道/知识库/Skills/记忆入口与设置层级、Chat / Workspace composer 无边框控件与上下文用量悬停详情、联网工具门控、图片上传与粘贴、搜索导航、文件页、macOS 工作台安全区、来源事实、记忆 CRUD、知识库、Skills 模板/候选 diff/审批与显式学习。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
 

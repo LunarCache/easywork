@@ -41,6 +41,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Verify release version
+        run: npm run release:check-version
+
       - name: Build (UI + 单文件 daemon + Tauri dmg)
         run: npm run app:build --workspace @ew/desktop
 

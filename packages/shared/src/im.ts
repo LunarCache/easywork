@@ -90,12 +90,19 @@ export const ChannelConfigSchema = z.object({
   kind: ChannelKindSchema.exclude(["inapp"]),
   enabled: z.boolean().default(false),
   displayName: z.string().optional(),
-  /** 临时持久化：后续迁 keychain 时可替换为 SecretRef。 */
+  /** 仅用于写入；读取 API 始终返回空对象，真实值保存在系统密钥存储。 */
   secrets: z.record(z.string(), z.string()).default({}),
   options: z.record(z.string(), z.unknown()).default({}),
   auth: ChannelAuthConfigSchema.default({}),
 });
 export type ChannelConfig = z.infer<typeof ChannelConfigSchema>;
+
+/** 连接器读取视图：不回显 secret，只暴露已安全保存的字段名。 */
+export const ChannelConnectorViewSchema = ChannelConfigSchema.extend({
+  secrets: z.record(z.string(), z.string()).default({}),
+  secretKeys: z.array(z.string()).default([]),
+});
+export type ChannelConnectorView = z.infer<typeof ChannelConnectorViewSchema>;
 
 export const ChannelAdapterMetaSchema = z.object({
   kind: ChannelConfigSchema.shape.kind,

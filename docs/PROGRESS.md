@@ -9,27 +9,26 @@
 - **核心守护进程**（`@ew/core`）：Fastify HTTP + SSE，托管 pi-coding-agent 内核（`SessionHost`，按 threadId 串行化），无头可运行（`easywork serve`）。
 - **本地推理（router 模式）**：统一 `llama`（llama.app）的 `llama serve --models-dir` **单路由进程**，按请求 `model`（= 模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰（文本 / 视觉）；嵌入模型走独立 `llama serve -m --embedding` 进程。经典每模型一进程的 `llama-server`（含 brew llama.cpp）**已完全移除**——只支持 llama.app 统一 `llama`。HF 搜索 / 断点续传下载 / GGUF 头解析。
 - **云端推理**：pi-ai 内置 provider + 自定义多协议兼容端点；模型目录支持自动/手动模板绑定，运行时继承名称 / reasoning / thinking map / 输出上限，UI 选择模板时把上下文与模态复制进逐模型配置，报文 `compat` 保持协议隔离；云端流式/非流式统一经 pi-ai（含 OAuth）。
-- **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi。
+- **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi；本地 proxy、云端 pi 与 engine fallback 的全部 SSE 写口均具备断流 error listener 和 ended/destroyed 守卫。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/explore_web）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
 - **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 终端 / 预览）。
 - **记忆（作用域化）**：Core Memory = User Profile / Agent Notes；每工作区私有 conventions / decisions / pitfalls；derived facts 保留来源所有权，manifest 有界；sqlite-vec ⊕ 词法召回，markdown 可手改回灌；外部 provider 仅 additive、受限且可关闭。
 - **Skill 学习闭环**：Chat/设置显式 Learn + restricted background review → pending Candidate → 用户审核批准 → 全局/工作区原子激活；支持证据、package 安全验证、来源删除、乐观锁 patch、使用反馈、pin、stale、可恢复归档、快照与回滚。
 - **知识库 RAG**：上传 → 解析 → 分块 → 嵌入 → RRF 混合检索 + 引用来源。
 - **思考能力与过程**：`reasoning` 能力由运行时模型投影到 UI，推理模型首次默认中档、显式关闭按模型持久化；reasoning 内容落库并跨会话回放（不回喂模型）。
-- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/知识库/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层。
-- **外部渠道**：`@ew/im-connectors` Channel Gateway（adapter registry + 配置/状态 + allowlist + webhook 分发），core 侧 `ChannelOperations` 统一连接器生命周期、Feishu/WeChat 扫码 setup session、收件箱 read model 与 SSE invalidation；Telegram 已迁入同一抽象并支持可取消 long-poll；Feishu/Lark 默认走官方 SDK WebSocket 长连接并支持扫码创建应用，高级模式保留 webhook（URL verification、token/signature、加密回调解密、文本收发），且 public webhook 只在 `transport:webhook` + 验证 secret 配置完整时启用；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；Discord / 企业微信待补平台 adapter。
-- **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP / IM 连接器持久化）。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/知识库/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；WebView 启用显式 CSP，保留 IPC/daemon/预览来源并禁止远程脚本、对象插件与表单提交。
+- **外部渠道**：`@ew/im-connectors` Channel Gateway（adapter registry + 配置/状态 + allowlist + webhook 分发），core 侧 `ChannelOperations` 统一连接器生命周期、Feishu/WeChat 扫码 setup session、收件箱 read model 与 SSE invalidation；Telegram 已迁入同一抽象并支持可取消 long-poll；Feishu/Lark 默认走官方 SDK WebSocket 长连接并支持扫码创建应用，高级模式保留 webhook（URL verification、token/signature、加密回调解密、文本收发），且 public webhook 只在 `transport:webhook` + 验证 secret 配置完整时启用；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；渠道 secret 已迁到 macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI，旧 SQLite 明文自动迁移并去敏；Discord / 企业微信待补平台 adapter。
+- **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP / IM 非敏感配置）+ 系统渠道密钥存储。
 - **命令行（CLI）**：SEA daemon 二进制同时也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性；无位置参数时可从 stdin 读取，`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `kb ls·search·add·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。当前 macOS DMG 仅把该二进制作为 desktop sidecar，不会把 `easywork` 命令安装到 `PATH`。
-- **打包发布（macOS）**：daemon 打成单文件原生二进制（Node SEA，运行免 Node）；Tauri 出 dmg（Apple Silicon，内置 daemon + sqlite-vec）；`install.sh` 一键安装并自动备齐 llama 运行时（缺失经 llama.app 装）；`v*` tag 触发 GitHub Actions 构建 + 发布到 Releases。
+- **打包发布（macOS）**：daemon 打成单文件原生二进制（Node SEA，运行免 Node）；Tauri 出 dmg（Apple Silicon，内置 daemon + sqlite-vec）；`install.sh` 一键安装并自动备齐 llama 运行时（缺失经 llama.app 装）；当前版本清单统一为 `0.4.4`，`v*` tag 构建前强制校验 npm/Tauri/Cargo 版本一致，再发布到 Releases。
 
 ### 🚧 待做
 
 - **渠道 adapter**：Discord / 企业微信待补（需实盘凭证联调）；Channel Gateway 抽象、Telegram adapter、Feishu/Lark WebSocket + webhook adapter、WeChat iLink QR + long-poll adapter 已落地。个人微信走腾讯 iLink bot 身份，群聊默认关闭；企业微信仍走后续 WeCom adapter。
 - **打包发布收尾**：macOS（Apple Silicon）dmg 已发；Intel / Windows / Linux 安装包 + 代码签名 / 公证 + 自动更新待做。
 - **代码执行沙箱**：python / terminal 的独立 OS 级隔离（当前经 pi `bash` 工具 + 审批 4 档把守，无独立沙箱）。
-- **密钥存储**：provider / MCP key 现存 SQLite `settings`，待迁 OS keychain（keytar / Tauri stronghold）。
+- **密钥存储**：渠道 secret 已迁系统安全存储；provider / MCP key 仍在 SQLite `settings`，待后续迁移。
 - **工作区 v2**：多会话回放 / 提交历史 / push-pull / per-hunk 暂存均已完成；仅剩内嵌可编辑编辑器（按需）。
-- **SSE fallback 加固**：`/v1` 的 OpenAI / Anthropic engine fallback 分支仍需补 `raw.on("error")` 与 `writableEnded/destroyed` 守卫；`/agent/run`、本地 proxy 和云端 pi 分支已经具备。正确性约束不因此放宽。
 - **CLI 安装与跨平台开发脚本**：macOS 安装器尚未把 sidecar 链接到 `PATH`；desktop 的 `EW_DAEMON_ENTRY=... tauri dev` 仍是 POSIX 写法，Windows 源码开发需改成跨平台启动脚本。
 
 ---
@@ -37,6 +36,14 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-13 — SSE 断流、渠道密钥、Desktop CSP 与发布版本收口
+
+- **SSE fallback 加固**：OpenAI / Anthropic engine fallback 分支补齐 `raw.on("error")` 和 `writableEnded/destroyed` 写入/结束守卫；真实 HTTP 客户端中途断开回归测试在修复前分别捕获 3 / 2 次关闭后写入，修复后归零。
+- **渠道密钥迁移**：新增 `ChannelSecretStore`，macOS 走 Keychain、Linux 走 Secret Service、Windows 走当前用户 DPAPI；SQLite 只保存非敏感 connector 配置，GET 通过独立 read view 返回 `secretKeys` 且不回显 secret。旧明文启动时先迁安全存储再擦除，空白编辑保留旧值，删除 connector 同步清理。
+- **WebView CSP**：Tauri 从 `csp:null` 改为显式 policy，放行 IPC、本地 daemon、data/blob 媒体与沙盒 frame，禁用远程 script、object、form 和外部 frame ancestor；配置测试与 `cargo check` 通过。
+- **版本一致性**：root npm、desktop npm、Tauri config、Cargo.toml/Cargo.lock 统一到 `0.4.4`；新增 `release:check-version`，release workflow 在构建 dmg 前校验 `vX.Y.Z` tag 与所有发布清单一致。
+- **验证**：定向 SSE / Channel Operations / IM Gateway / CSP / release version 测试全绿；`npm run lint`、`npm run typecheck`、`npm test`（349 passed / 1 skipped）、`npm run build`、`cargo check` 与 Playwright 29 条 UI e2e 全部通过。
 
 ## 2026-07-13 — Composer 无边框控件与上下文悬停详情
 

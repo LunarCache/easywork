@@ -4,6 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createCore, type CoreServer } from "../src/server/app.js";
+import { MemoryChannelSecretStore } from "../src/channels/secret-store.js";
+import { SqliteConversationRepo } from "../src/store/conversation.js";
 
 const auth = { authorization: "Bearer t" };
 
@@ -152,8 +154,9 @@ describe("IM ChannelGateway HTTP routes", () => {
   it("persists connector configs and restores them on the next core instance", async () => {
     const { dir, dbPath } = tempDb();
     cleanup.push(dir);
+    const channelSecretStore = new MemoryChannelSecretStore();
 
-    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", kbDbPath: ":memory:", channelSecretStore });
     const upsert = await core.app.inject({
       method: "POST",
       url: "/im/connectors",
@@ -183,22 +186,78 @@ describe("IM ChannelGateway HTTP routes", () => {
           kind: "telegram",
           enabled: false,
           displayName: "Main bot",
-          secrets: { token: "test-token" },
+          secrets: {},
+          secretKeys: ["token"],
           options: { pollTimeout: 1 },
           auth: { allowedUsers: ["42"] },
         },
       ],
       status: [expect.objectContaining({ id: "tg-main", running: false })],
     });
+    expect(channelSecretStore.get("tg-main")).toEqual({ token: "test-token" });
+    expect(core.repo.getSetting("im.connectors")).not.toContain("test-token");
+
+    const metadataOnlyUpdate = await core.app.inject({
+      method: "POST",
+      url: "/im/connectors",
+      headers: { ...auth, "content-type": "application/json" },
+      payload: {
+        id: "tg-main",
+        kind: "telegram",
+        enabled: false,
+        displayName: "Renamed bot",
+        secrets: {},
+        options: { pollTimeout: 2 },
+        auth: { allowedUsers: ["42"] },
+      },
+    });
+    expect(metadataOnlyUpdate.statusCode).toBe(200);
+    expect(channelSecretStore.get("tg-main")).toEqual({ token: "test-token" });
 
     await core.stop();
-    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", kbDbPath: ":memory:" });
+    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", kbDbPath: ":memory:", channelSecretStore });
     const restored = await core.app.inject({ method: "GET", url: "/im/connectors", headers: auth });
 
     expect(restored.statusCode).toBe(200);
     expect(restored.json()).toMatchObject({
-      connectors: [expect.objectContaining({ id: "tg-main", kind: "telegram", displayName: "Main bot" })],
+      connectors: [expect.objectContaining({ id: "tg-main", kind: "telegram", displayName: "Renamed bot", secrets: {}, secretKeys: ["token"] })],
       status: [expect.objectContaining({ id: "tg-main", running: false })],
+    });
+
+    const removed = await core.app.inject({ method: "DELETE", url: "/im/connectors/tg-main", headers: auth });
+    expect(removed.statusCode).toBe(200);
+    expect(channelSecretStore.get("tg-main")).toEqual({});
+  });
+
+  it("migrates legacy connector secrets out of SQLite on startup", async () => {
+    const { dir, dbPath } = tempDb();
+    cleanup.push(dir);
+    const legacyRepo = new SqliteConversationRepo(dbPath);
+    legacyRepo.setSetting("im.connectors", JSON.stringify([{
+      id: "legacy-feishu",
+      kind: "feishu",
+      enabled: false,
+      secrets: { appId: "cli_legacy", appSecret: "legacy-secret" },
+      options: { transport: "websocket" },
+      auth: { allowAll: true },
+    }]));
+    legacyRepo.close();
+    const channelSecretStore = new MemoryChannelSecretStore();
+
+    core = createCore({ token: "t", dbPath, memoryDbPath: ":memory:", kbDbPath: ":memory:", channelSecretStore });
+
+    expect(channelSecretStore.get("legacy-feishu")).toEqual({ appId: "cli_legacy", appSecret: "legacy-secret" });
+    const persisted = core.repo.getSetting("im.connectors") ?? "";
+    expect(persisted).not.toContain("cli_legacy");
+    expect(persisted).not.toContain("legacy-secret");
+    expect(JSON.parse(persisted)).toEqual([
+      expect.objectContaining({ id: "legacy-feishu", secrets: {} }),
+    ]);
+    expect(persisted).not.toContain("secretKeys");
+
+    const listed = await core.app.inject({ method: "GET", url: "/im/connectors", headers: auth });
+    expect(listed.json()).toMatchObject({
+      connectors: [expect.objectContaining({ id: "legacy-feishu", secrets: {}, secretKeys: ["appId", "appSecret"] })],
     });
   });
 

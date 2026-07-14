@@ -17,6 +17,7 @@ import type {
   ChannelKind,
   ChannelAdapterMeta,
   ChannelConfig,
+  ChannelConnectorView,
   ChannelStatus,
   McpServerConfig,
   McpProbeResult,
@@ -36,7 +37,7 @@ import type {
   ThinkLevel,
 } from "@ew/shared";
 
-export type { Project, ApprovalMode, ChannelAdapterMeta, ChannelConfig, ChannelStatus, Thread, StoredMessage, InboxEvent, LegacySkillMemory } from "@ew/shared";
+export type { Project, ApprovalMode, ChannelAdapterMeta, ChannelConfig, ChannelConnectorView, ChannelStatus, Thread, StoredMessage, InboxEvent, LegacySkillMemory } from "@ew/shared";
 
 /** 工作区文件树条目。 */
 export interface WsEntry {
@@ -193,7 +194,7 @@ export interface ChannelAdaptersInfo {
 }
 
 export interface ChannelConnectorsInfo {
-  connectors: ChannelConfig[];
+  connectors: ChannelConnectorView[];
   status: ChannelStatus[];
 }
 
@@ -515,7 +516,7 @@ export class EasyWorkClient {
     return (await this.getJSON<ChannelAdaptersInfo>("/im/adapters")).adapters;
   }
 
-  async listChannelConnectors(): Promise<ChannelConfig[]> {
+  async listChannelConnectors(): Promise<ChannelConnectorView[]> {
     return (await this.getJSON<ChannelConnectorsInfo>("/im/connectors")).connectors;
   }
 

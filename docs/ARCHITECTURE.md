@@ -23,7 +23,7 @@
   └──────────────────┘  └──────────────┘  └────────────────┘  └────────────────┘
 ```
 
-- **Tauri 主进程（Rust）**：创建窗口并持有 daemon child；读取 child stdout 首行的 `{baseUrl, token}`，保存后通过 `get_config` 返回给 webview，退出时杀掉 child。Rust 层目前没有菜单或自动更新，也不负责 HTTP 探活；React UI 会重试 `get_config`，再请求 `/health`。**打包时启动随附的单文件 daemon 二进制（Node SEA，免 Node）**；开发时运行 `node $EW_DAEMON_ENTRY serve`。
+- **Tauri 主进程（Rust）**：创建窗口并持有 daemon child；读取 child stdout 首行的 `{baseUrl, token}`，保存后通过 `get_config` 返回给 webview，退出时杀掉 child。Rust 层目前没有菜单或自动更新，也不负责 HTTP 探活；React UI 会重试 `get_config`，再请求 `/health`。WebView 使用显式 CSP：放行 Tauri IPC、本地 daemon、data/blob 媒体与沙盒预览来源，禁止远程脚本、对象插件、表单提交和外部页面嵌入主窗口。**打包时启动随附的单文件 daemon 二进制（Node SEA，免 Node）**；开发时运行 `node $EW_DAEMON_ENTRY serve`。
 - **Core daemon 的三种进程形态**：显式 `easywork serve` 在前台运行；需要 daemon 且启用自动启动的 CLI 命令探测不到服务时，会 detached spawn 自身的 `serve` 并 `unref()`（`status` / `stop` 只检查现有服务，不自启）；Tauri 启动的是由桌面主进程持有、随应用退出回收的 child，不是 detached 自启进程。
 - **本地推理**：统一 `llama`（llama.app）的 **router 模式** —— 1 个 `llama serve --models-dir` 进程，按请求 `model`（即模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰。嵌入模型走独立 `llama serve -m --embedding` 进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，记忆 / 知识库向量召回用；缺失则降级纯词法）。
 
@@ -70,7 +70,7 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 - `ConnectorHost`：唯一把入站消息接到同一个大脑的宿主层，负责 `resolveThreadForChannel`、载历史、调用 `SessionHost.run`、把 `AgentEvent` 聚合为 IM 回复并落库。
 - `ChannelOperations`（`@ew/core`）：core 侧应用层模块，包住 gateway/host，把连接器 CRUD/启停、Feishu/WeChat 扫码 setup session、inbox read model 与 `/inbox/events` SSE invalidation 收成一个边界；HTTP route 只做鉴权后的参数校验和响应映射。
 
-`@ew/core` 暴露以下管理面：`GET /im/adapters`，`GET/POST /im/connectors`，`POST /im/connectors/:id/start`，`POST /im/connectors/:id/stop`，以及 `DELETE /im/connectors/:id`。这些路由都走 daemon Bearer 鉴权，并由 `ChannelOperations` 调用 gateway 完成实际变更。Feishu/Lark 扫码注册 helper 是 `POST /im/feishu/register` 与 `GET/DELETE /im/feishu/register/:id`：core 启动 SDK registerApp 短会话，二维码确认成功后自动保存 `transport:websocket` 连接器并按需启动；取消或 core stop 会 abort 未完成扫码会话，避免取消后落库。WeChat 对应 `POST /im/wechat/register` 与 `GET/DELETE /im/wechat/register/:id`，通过同一 setup session 模式完成 iLink QR 登录和 connector 保存。`GET /inbox/threads` 是给桌面收件箱的只读读模型：从 `ConversationRepo` 里筛选 `thread.channel`，聚合最后一条文本消息和消息数，不引入第二套 IM 消息表；`GET /inbox/events` 是 Bearer 鉴权的 SSE 失效通知，只发 `ready/changed`，消息正文仍通过 read model 读取。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。Core 只针对 webhook 捕获 raw body 供签名校验，并在读取前/读取中执行 32MiB 上限。Feishu/Lark adapter 的高级 webhook 模式负责 URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化和文本回复；非 `transport:webhook` 或未配置 `verificationToken`/`encryptKey` 时拒绝 public webhook。渠道配置先落 SQLite settings；平台 secret 目前随配置存储，后续可在不改 adapter seam 的情况下迁到 keychain/secret ref。
+`@ew/core` 暴露以下管理面：`GET /im/adapters`，`GET/POST /im/connectors`，`POST /im/connectors/:id/start`，`POST /im/connectors/:id/stop`，以及 `DELETE /im/connectors/:id`。这些路由都走 daemon Bearer 鉴权，并由 `ChannelOperations` 调用 gateway 完成实际变更。Feishu/Lark 扫码注册 helper 是 `POST /im/feishu/register` 与 `GET/DELETE /im/feishu/register/:id`：core 启动 SDK registerApp 短会话，二维码确认成功后自动保存 `transport:websocket` 连接器并按需启动；取消或 core stop 会 abort 未完成扫码会话，避免取消后落库。WeChat 对应 `POST /im/wechat/register` 与 `GET/DELETE /im/wechat/register/:id`，通过同一 setup session 模式完成 iLink QR 登录和 connector 保存。渠道配置的非敏感部分落 SQLite settings；secret 由 `ChannelSecretStore` 保存到 macOS Keychain、Linux Secret Service 或 Windows 当前用户 DPAPI。旧 SQLite 明文在启动时先写安全存储、成功后立即去敏；GET 只返回 `secretKeys`，空白编辑保留旧值，删除 connector 同步删除 secret。`GET /inbox/threads` 是给桌面收件箱的只读读模型：从 `ConversationRepo` 里筛选 `thread.channel`，聚合最后一条文本消息和消息数，不引入第二套 IM 消息表；`GET /inbox/events` 是 Bearer 鉴权的 SSE 失效通知，只发 `ready/changed`，消息正文仍通过 read model 读取。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。Core 只针对 webhook 捕获 raw body 供签名校验，并在读取前/读取中执行 32MiB 上限。Feishu/Lark adapter 的高级 webhook 模式负责 URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化和文本回复；非 `transport:webhook` 或未配置 `verificationToken`/`encryptKey` 时拒绝 public webhook。
 
 ### 记忆与 Skill 学习边界
 
@@ -87,10 +87,11 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 | HTTP | Fastify 路由编排；SSE 通过 Node `reply.raw` 手写 |
 | 契约 / 校验 | Zod 共享契约；HTTP handler 通过 `safeParse` 等手动校验请求 |
 | 本地 DB | `node:sqlite`（内置 DatabaseSync，零原生编译） |
+| 渠道密钥 | `ChannelSecretStore`：macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI；SQLite 仅存去密配置 |
 | 记忆 / RAG | 本地 Core Memory + 可选 additive provider；独立 `llama serve --embedding`（默认 nomic）+ **sqlite-vec**；记忆按 `0.75 × 语义 + 0.25 × 词法` 加权，知识库用 dense / lexical RRF；向量或 provider 不可用时本地词法链路仍工作 |
 | UI | React 19 + Vite + react-markdown |
 | 桌面 | Tauri 2（Rust 外壳 + TS 前端；Rust 启动并持有 daemon child） |
-| 打包 | daemon Node SEA 单文件二进制；Tauri dmg；GitHub Actions（`v*` tag → Releases） |
+| 打包 | daemon Node SEA 单文件二进制；Tauri dmg；`release:check-version` 强制 npm/Tauri/Cargo 与 `v*` tag 一致后进入 GitHub Releases |
 | 库构建 / 测试 | tsup（esbuild）/ Vitest |
 | Monorepo | npm workspaces + Turborepo |
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ChannelAdapterMeta, ChannelConfig, ChannelStatus } from "@ew/shared";
+import type { ChannelAdapterMeta, ChannelConfig, ChannelConnectorView, ChannelStatus } from "@ew/shared";
 import type { FeishuRegistrationSession, WechatRegistrationSession } from "@ew/sdk";
 import * as QRCode from "qrcode";
 import { getClient } from "../lib/client.js";
@@ -12,7 +12,7 @@ function kindLabel(kind: string, adapters: ChannelAdapterMeta[]): string {
   return adapters.find((k) => k.kind === kind)?.label ?? kind;
 }
 
-function blankConfig(kinds: ChannelAdapterMeta[]): ChannelConfig | null {
+function blankConfig(kinds: ChannelAdapterMeta[]): ChannelConnectorView | null {
   const first = kinds[0];
   if (!first) return null;
   return {
@@ -21,6 +21,7 @@ function blankConfig(kinds: ChannelAdapterMeta[]): ChannelConfig | null {
     enabled: false,
     displayName: "",
     secrets: {},
+    secretKeys: [],
     options: {},
     auth: { allowAll: true },
   };
@@ -42,12 +43,16 @@ function optionText(options: ChannelConfig["options"], key: string): string {
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
 }
 
+function secretPlaceholder(config: ChannelConnectorView, key: string, label: string): string {
+  return config.secretKeys.includes(key) ? `${label}（已安全保存，留空保持）` : label;
+}
+
 export function Channels() {
   const [adapters, setAdapters] = useState<ChannelAdapterMeta[]>([]);
-  const [connectors, setConnectors] = useState<ChannelConfig[]>([]);
+  const [connectors, setConnectors] = useState<ChannelConnectorView[]>([]);
   const [statuses, setStatuses] = useState<ChannelStatus[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
-  const [editing, setEditing] = useState<ChannelConfig | null>(null);
+  const [editing, setEditing] = useState<ChannelConnectorView | null>(null);
   const [feishuSetup, setFeishuSetup] = useState<FeishuRegistrationSession | null>(null);
   const [feishuQr, setFeishuQr] = useState("");
   const [showFeishuAdvanced, setShowFeishuAdvanced] = useState(false);
@@ -193,7 +198,8 @@ export function Channels() {
     setBusy(editing.id);
     setNote("");
     try {
-      const next = await getClient().upsertChannelConnector(editing);
+      const { secretKeys: _secretKeys, ...config } = editing;
+      const next = await getClient().upsertChannelConnector(config);
       setNote(next.running ? "已保存并启动" : "已保存");
       await refresh();
       setEditing(null);
@@ -204,7 +210,7 @@ export function Channels() {
     }
   };
 
-  const toggle = async (c: ChannelConfig, s?: ChannelStatus) => {
+  const toggle = async (c: ChannelConnectorView, s?: ChannelStatus) => {
     setBusy(c.id);
     try {
       if (s?.running) await getClient().stopChannelConnector(c.id);
@@ -217,7 +223,7 @@ export function Channels() {
     }
   };
 
-  const remove = async (c: ChannelConfig) => {
+  const remove = async (c: ChannelConnectorView) => {
     if (!(await askConfirm({ title: `删除渠道「${c.displayName || c.id}」？`, body: "该渠道配置会从本机移除。", danger: true }))) return;
     setBusy(c.id);
     try {
@@ -231,7 +237,7 @@ export function Channels() {
     }
   };
 
-  const patchEditing = (patch: Partial<ChannelConfig>) => {
+  const patchEditing = (patch: Partial<ChannelConnectorView>) => {
     setEditing((cur) => (cur ? { ...cur, ...patch } : cur));
   };
 
@@ -239,7 +245,7 @@ export function Channels() {
     setEditing((cur) => {
       if (!cur) return cur;
       const id = cur.id.startsWith(`${cur.kind}-`) ? `${kind}-${crypto.randomUUID().slice(0, 8)}` : cur.id;
-      return { ...cur, id, kind, secrets: {}, options: {}, auth: cur.auth };
+      return { ...cur, id, kind, secrets: {}, secretKeys: [], options: {}, auth: cur.auth };
     });
     setFeishuSetup(null);
     setWechatSetup(null);
@@ -492,7 +498,7 @@ export function Channels() {
                     key={s.key}
                     data-testid={`channels-secret-${s.key}`}
                     type={s.password ? "password" : "text"}
-                    placeholder={s.label}
+                    placeholder={secretPlaceholder(editing, s.key, s.label)}
                     value={String(editing.secrets[s.key] ?? "")}
                     onChange={(e) => patchEditing({ secrets: { ...editing.secrets, [s.key]: e.target.value } })}
                   />
@@ -510,7 +516,7 @@ export function Channels() {
                     key={s.key}
                     data-testid={`channels-secret-${s.key}`}
                     type={s.password ? "password" : "text"}
-                    placeholder={s.label}
+                    placeholder={secretPlaceholder(editing, s.key, s.label)}
                     value={String(editing.secrets[s.key] ?? "")}
                     onChange={(e) => patchEditing({ secrets: { ...editing.secrets, [s.key]: e.target.value } })}
                   />

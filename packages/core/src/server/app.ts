@@ -39,7 +39,12 @@ import { RouterServerManager } from "../engine/router-server-manager.js";
 import { getFreePort } from "../engine/net.js";
 import type { LocalBackend } from "../engine/local-backend.js";
 import { resolveLlamaBin } from "../engine/resolve-llama.js";
-import { ChannelOperations } from "../channels/operations.js";
+import { ChannelOperations, stripChannelSecrets } from "../channels/operations.js";
+import {
+  createChannelSecretStore,
+  MemoryChannelSecretStore,
+  type ChannelSecretStore,
+} from "../channels/secret-store.js";
 import type { CoreHttpContext } from "./context.js";
 import type { RawBodyRequest } from "./http-utils.js";
 import { registerAgentRoutes } from "./routes/agent.js";
@@ -112,6 +117,8 @@ export interface CreateCoreOptions {
   feishuRegister?: typeof registerFeishuApp;
   /** 覆盖 WeChat/iLink 扫码注册（测试用，避免真实外网轮询）。 */
   wechatRegister?: typeof registerWechatAccount;
+  /** 渠道密钥存储（测试可注入内存实现；生产默认使用系统安全存储）。 */
+  channelSecretStore?: ChannelSecretStore;
   /** 统一 `llama`（llama.app）可执行文件路径（默认走 PATH 中的 "llama"）。 */
   llamaBinPath?: string;
 }
@@ -245,6 +252,10 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   // search_knowledge_base 工具按请求所选集合注入（见 /agent/run），不再全局常驻。
 
   const repo = new SqliteConversationRepo(opts.dbPath ?? defaultDbPath());
+  const channelSecretStore = opts.channelSecretStore
+    ?? ((opts.dbPath ?? defaultDbPath()) === ":memory:"
+      ? new MemoryChannelSecretStore()
+      : createChannelSecretStore(defaultDataDir()));
   const localModelSettings = new LocalModelSettingsStore(repo);
 
   // 宿主：pi-coding-agent 内核托管 /agent/run。
@@ -402,14 +413,29 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
   })();
 
   const loadChannelConfigs = (): ChannelConfig[] => {
+    let configs: ChannelConfig[];
     try {
       const raw = repo.getSetting(CHANNELS_KEY);
       if (!raw) return [];
       const parsed = z.array(ChannelConfigSchema).safeParse(JSON.parse(raw));
-      return parsed.success ? parsed.data : [];
+      if (!parsed.success) return [];
+      configs = parsed.data;
     } catch {
       return [];
     }
+    let migrated = false;
+    const hydrated = configs.map((config) => {
+      const legacySecrets = Object.fromEntries(Object.entries(config.secrets).filter(([, value]) => Boolean(value)));
+      const storedSecrets = channelSecretStore.get(config.id);
+      const secrets = { ...storedSecrets, ...legacySecrets };
+      if (Object.keys(legacySecrets).length) {
+        channelSecretStore.set(config.id, secrets);
+        migrated = true;
+      }
+      return { ...config, secrets };
+    });
+    if (migrated) repo.setSetting(CHANNELS_KEY, JSON.stringify(hydrated.map(stripChannelSecrets)));
+    return hydrated;
   };
   const resolveChannelModel = (requested?: string): string => {
     if (requested) return requested;
@@ -487,6 +513,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         /* 持久化失败不影响运行 */
       }
     },
+    secretStore: channelSecretStore,
     feishuRegister: opts.feishuRegister ?? registerFeishuApp,
     wechatRegister: opts.wechatRegister ?? registerWechatAccount,
   });

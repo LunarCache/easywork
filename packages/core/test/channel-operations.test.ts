@@ -7,6 +7,7 @@ import {
 } from "@ew/im-connectors";
 import type { ChannelOutbound, ChannelTarget } from "@ew/shared";
 import { ChannelOperations } from "../src/channels/operations.js";
+import { MemoryChannelSecretStore } from "../src/channels/secret-store.js";
 import { SqliteConversationRepo } from "../src/store/conversation.js";
 
 const telegramMeta = {
@@ -42,6 +43,7 @@ function makeOperations(repo: SqliteConversationRepo, overrides: Partial<Constru
     repo,
     run: async function* () {},
     persistConfigs: () => {},
+    secretStore: new MemoryChannelSecretStore(),
     feishuRegister: async () => {
       throw new Error("unused_feishu_register");
     },
@@ -78,7 +80,7 @@ describe("ChannelOperations", () => {
           expect.objectContaining({
             id: "tg-main",
             kind: "telegram",
-            secrets: { token: "test-token" },
+            secrets: {},
           }),
         ],
       ]);
