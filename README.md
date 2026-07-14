@@ -94,7 +94,7 @@ flowchart LR
 
 ### 记忆、Skills、MCP
 
-- Core Memory 只保存 User Profile / Agent Notes；自动事实保留来源所有权，删除来源对话会级联删除未提升事实。工作区记忆隔离，支持语义/词法召回和 markdown 回灌；外部 Deep Memory 只能追加受限召回，不能替换本地真相源。记忆页把搜索和添加保持为主操作，向量状态常驻，外部 Provider 仅在实际配置后显示；旧版 Skill 迁移审计在无歧义项时折叠为次级信息，有待判断项时自动展开并突出数量。
+- Core Memory 只保存 User Profile / Agent Notes；自动事实保留来源所有权，删除来源对话会级联删除未提升事实。工作区记忆隔离，支持语义/词法召回和 markdown 回灌。外部 Deep Memory 当前只是宿主注入 seam：Desktop / CLI 没有用户配置入口，Mem0 适配器仍是非用户态骨架；宿主实际注入后也只能追加受限召回，不能替换本地真相源，记忆页才显示其状态与启停开关。记忆页把搜索和添加保持为主操作，向量状态常驻；旧版 Skill 迁移审计在无歧义项时折叠为次级信息，有待判断项时自动展开并突出数量。
 - Skills 页面以“已启用 / 待审核 / 已归档”分开全局来源与 learned Skills；自动学习状态常驻摘要，阈值、模型、自动检查和智能合并提案按需展开，避免挤占主要管理流程。Chat 或设置里的“学习 Skill”和受限后台复盘都只生成 Candidate，明确批准后才会激活。候选支持完整 package 验证、工作区 scope、证据、乐观锁 patch；learned Skills 支持遥测、固定、快照、归档、恢复和回滚。
 - MCP 支持 stdio 与 HTTP，工具清单探测、启停、导入和审批一体化。
 

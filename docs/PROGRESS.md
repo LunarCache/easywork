@@ -12,7 +12,7 @@
 - **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi；本地 proxy、云端 pi 与 engine fallback 的全部 SSE 写口均具备断流 error listener 和 ended/destroyed 守卫。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/explore_web）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
 - **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 终端 / 预览）。
-- **记忆（作用域化）**：Core Memory = User Profile / Agent Notes；每工作区私有 conventions / decisions / pitfalls；derived facts 保留来源所有权，manifest 有界；sqlite-vec ⊕ 词法召回，markdown 可手改回灌；外部 provider 仅 additive、受限且可关闭。
+- **记忆（作用域化）**：Core Memory = User Profile / Agent Notes；每工作区私有 conventions / decisions / pitfalls；derived facts 保留来源所有权，manifest 有界；sqlite-vec ⊕ 词法召回，markdown 可手改回灌。外部 provider 当前仅为宿主注入 seam，Desktop / CLI 无配置入口，Mem0 仍是骨架；注入后也只做 additive、受限且可关闭的召回。
 - **Skill 学习闭环**：Chat/设置显式 Learn + restricted background review → pending Candidate → 用户审核批准 → 全局/工作区原子激活；支持证据、package 安全验证、来源删除、乐观锁 patch、使用反馈、pin、stale、可恢复归档、快照与回滚。
 - **思考能力与过程**：`reasoning` 能力由运行时模型投影到 UI，推理模型首次默认中档、显式关闭按模型持久化；reasoning 内容落库并跨会话回放（不回喂模型）。
 - **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 常驻「工作台」面板 + 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；WebView 启用显式 CSP，保留 IPC/daemon/预览来源并禁止远程脚本、对象插件与表单提交。
@@ -39,6 +39,7 @@
 ## 2026-07-14 — 记忆页收敛外部 Provider 空状态
 
 - **可操作状态优先**：未配置 Additive Memory Provider 时不再显示突兀且无入口可操作的“外部记忆 · 未配置”；Provider 实际由宿主注入后仍显示身份、运行状态与启停开关。
+- **能力边界澄清**：Desktop / CLI 当前没有外部记忆接入入口；`CreateCoreOptions.deepMemoryProvider` 是唯一配置来源，`GET/PATCH /memory/provider` 只查询 / 启停宿主已注入实例，Mem0 适配器仍是非用户态骨架，暂不作为产品功能开放。
 - **回归锁定**：Playwright 通过真实 daemon 进入记忆页，断言默认未配置场景不存在外部 Provider 状态块；向量 / 词法召回状态与记忆主流程保持不变。
 - **验证**：`npm run lint`、`npm run typecheck`、`npm run build` 全绿；`npm test` = **350 passed / 1 skipped**；`npm run test:e2e` = **30 passed**；设计文档派生 HTML 保持同步。
 
@@ -97,7 +98,7 @@
 
 ## 2026-07-12 — 记忆与 Skill 学习前端闭环
 
-- **记忆管理可见化**：记忆页新增 Additive Memory Provider 配置 / 启用状态与开关，文案明确本地仍是唯一写入真相源；旧 `global.skills` 迁移池以只读审计面板展示 candidate、Agent Note 和 ambiguous 分类。
+- **记忆管理可见化**：记忆页新增对宿主已注入 Additive Memory Provider 的身份 / 启用状态与开关（不包含接入配置入口），文案明确本地仍是唯一写入真相源；旧 `global.skills` 迁移池以只读审计面板展示 candidate、Agent Note 和 ambiguous 分类。
 - **learned Skill 反馈与版本**：Skills 页可记录成功、失败和修正；修正提交完整 `SKILL.md` 时只生成待审核 optimistic-lock patch。原“回滚最新”升级为快照时间线，可预览并选择指定版本回滚。
 - **来源与提醒闭环**：Candidate 的来源对话和 evidence 可直接打开对应对话；后台待审核数量和上次学习失败会在主侧栏设置入口及 Skills 设置导航显示全局提醒。
 - **回归锁定**：SDK 新增只读迁移池方法和契约测试；Playwright 新增真实 daemon 场景覆盖 Provider / 迁移视图、全局提醒、来源跳转、快照和反馈 patch；真实页面截图验证记忆页布局无溢出。

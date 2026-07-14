@@ -74,7 +74,7 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 
 ### 记忆与 Skill 学习边界
 
-- `LocalMemoryProvider` 是唯一可写真相源：全局 Core Memory 只有 User Profile / Agent Notes，工作区只有 conventions / decisions / pitfalls；Extracted Fact 在提升前带 Source Conversation 所有权。`AdditiveMemoryProvider` 只在 Agent/IM 的 recall 上叠加受扫描、限长、带来源与 untrusted fence 的外部结果，失败/禁用/移除不影响本地。HTTP 管理面仍直接编辑本地记忆。
+- `LocalMemoryProvider` 是唯一可写真相源：全局 Core Memory 只有 User Profile / Agent Notes，工作区只有 conventions / decisions / pitfalls；Extracted Fact 在提升前带 Source Conversation 所有权。`AdditiveMemoryProvider` 只在 Agent/IM 的 recall 上叠加受扫描、限长、带来源与 untrusted fence 的外部结果，失败/禁用/移除不影响本地。外部 provider 当前只能由宿主经 `CreateCoreOptions.deepMemoryProvider` 注入；Desktop / CLI 没有创建、修改或删除配置的入口，`GET/PATCH /memory/provider` 仅在已注入后查询和启停。`Mem0MemoryProvider` 仍是适配骨架，不作为现成用户功能。HTTP 记忆管理面继续只编辑本地记忆。
 - `SessionHost` 同时服务 Chat、Workspace、CLI agent 和 IM，因此这些入口都获得相同记忆、`stage_skill_candidate` 与 pi Skill 发现；`/v1` 只调用模型 runtime helper，不进入上述链路。
 - `SkillCandidateStore/Service/Coordinator` 位于 core：foreground Learn 通过普通 Agent turn 暂存候选，background reviewer 只接收冻结 trajectory 和 Skill catalog，迁移器把旧 memory-layer skills 分类成 candidate/fact/ambiguous。只有用户批准会经过 package/工具/secret/injection/path/symlink/hash 验证并原子写入 Skill source。learned Skills 的遥测、patch、pin、stale/archive、snapshot/restore/rollback 也由该模块拥有。
 
