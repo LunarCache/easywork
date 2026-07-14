@@ -399,7 +399,7 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 
 - **渐进披露**：`ConfigPrimitives.tsx` 的 `ConfigDisclosure` 提供统一的摘要按钮、`aria-expanded` 与按需内容区，供 Skills 自动学习和记忆迁移审计复用；它是页面内层级组件，不是遮罩弹层。
 - **统一弹层**：删除确认 / 文本输入 / 列表选择共用 `.confirm-mask`/`.confirm-box` 外壳——`useConfirm()` hook（promise 化、重入放弃前一个防泄漏）做确认（模型/MCP 删除）；`.confirm-box.wide` 做输入（记忆添加）。**替代 Tauri WKWebView 不可靠的 `window.confirm`/`prompt`**（不阻塞、点一下即"确认"）。
-- **文件类型体系**：`lib/filetype.ts` 统一扩展名→`{label,color,Icon}`（工具行/文件树/汇总卡共用）；`BY_NAME` 处理整名配置（Dockerfile/.gitignore→GIT，避免 `.gitignore`→GITI）。SideDock 的文件预览在普通侧栏保留 520px 折叠上限，放大态则让已展开文件接管剩余高度，HTML/PDF iframe 不再只占窗口上半部。新建技能等改**行内输入**（桌面走 Rust 原生目录选择）。
+- **文件类型体系**：`lib/filetype.ts` 统一扩展名→`{label,color,Icon}`（工具行/文件树/汇总卡共用）；`BY_NAME` 处理整名配置（Dockerfile/.gitignore→GIT，避免 `.gitignore`→GITI）。SideDock 的文件列表使用纵向 flex 布局，已展开文件在普通侧栏和放大态都会接管剩余高度，HTML/PDF iframe 不再只占窗口上半部。新建技能等改**行内输入**（桌面走 Rust 原生目录选择）。
 
 ### 12.8 瘦客户端连接 + Tauri sidecar
 

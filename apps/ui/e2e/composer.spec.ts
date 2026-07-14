@@ -148,8 +148,9 @@ test.describe("composer e2e", () => {
     await expect(page.getByTestId("file-viewer-name")).toHaveText("summary.md");
   });
 
-  test("HTML 交付文件不重复，并在工作台放大时填满剩余高度", async ({ page, openApp, info }) => {
+  test("HTML 交付文件不重复，并在侧栏与放大态都填满剩余高度", async ({ page, openApp, info }) => {
     const absolutePath = "/Users/test/.easywork/workspace/chats/thread/shanghai-weather.html";
+    let listedFiles = [{ path: "shanghai-weather.html", type: "file", size: 1024 }];
     await page.route(`${info.baseUrl}/models`, async (route) => {
       await route.fulfill({
         json: {
@@ -161,7 +162,7 @@ test.describe("composer e2e", () => {
       });
     });
     await page.route(`${info.baseUrl}/chat/*/files?*`, async (route) => {
-      await route.fulfill({ json: { entries: [{ path: "shanghai-weather.html", type: "file", size: 1024 }] } });
+      await route.fulfill({ json: { entries: listedFiles } });
     });
     await page.route(`${info.baseUrl}/files/meta?*`, async (route) => {
       await route.fulfill({
@@ -194,15 +195,34 @@ test.describe("composer e2e", () => {
     await expect(page.locator(".side-dock .af-path")).toHaveText("shanghai-weather.html");
     await expect(page.getByTestId("file-viewer-name")).toHaveText("shanghai-weather.html");
 
+    const previewFillRatio = async () => {
+      const available = await page.locator(".side-dock .sd-body").boundingBox();
+      const preview = await page.locator(".side-dock .af-body").boundingBox();
+      return available && preview ? preview.height / available.height : 0;
+    };
+    await expect.poll(previewFillRatio).toBeGreaterThan(0.9);
+
     await page.getByTitle("放大到窗口").click();
     await expect(page.locator(".side-dock")).toHaveClass(/max/);
+    await expect.poll(previewFillRatio).toBeGreaterThan(0.9);
+
+    // 文件行超过面板高度时，列表应滚动，已展开预览仍需保留可用视口。
+    listedFiles = [
+      { path: "shanghai-weather.html", type: "file", size: 1024 },
+      ...Array.from({ length: 18 }, (_, index) => ({ path: `notes-${index + 1}.txt`, type: "file", size: 128 })),
+    ];
+    await page.getByTitle("还原").click();
+    await page.locator(".side-dock").getByTitle("刷新").click();
+    await expect(page.locator(".side-dock .af-file")).toHaveCount(19);
+    await expect(page.locator(".side-dock .af-file.open")).toHaveCount(1);
     await expect
-      .poll(async () => {
-        const available = await page.locator(".side-dock .sd-body").boundingBox();
-        const preview = await page.locator(".side-dock .af-body").boundingBox();
-        return available && preview ? preview.height / available.height : 0;
-      })
-      .toBeGreaterThan(0.9);
+      .poll(async () => (await page.locator(".side-dock .af-body").boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(350);
+    const scrollMetrics = await page.locator(".side-dock .af-scroll").evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
   });
 
   test("聊天页关闭联网后从请求中排除 explore_web 和 http_get", async ({ page, openApp, info }) => {
