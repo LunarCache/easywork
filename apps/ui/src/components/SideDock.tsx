@@ -13,9 +13,14 @@ import { getClient } from "../lib/client.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { FileViewer } from "./FileViewer.js";
 import { fileType, formatFileSize } from "../lib/filetype.js";
-import { matchFileTarget } from "../lib/file-target.js";
-import { resolvePreviewKind } from "../lib/preview.js";
-import { getTerminalRuntime, type TerminalSessionInfo } from "../lib/terminal-runtime.js";
+import { getTerminalRuntime } from "../lib/terminal-runtime.js";
+import { useWorkbenchViewSession } from "../hooks/useWorkbenchViewSession.js";
+import type {
+  WorkbenchBrowserPage,
+  WorkbenchBrowserTarget,
+  WorkbenchNavigationResult,
+  WorkbenchViewKind,
+} from "../lib/workbench-view-session.js";
 import { TerminalView } from "./TerminalView.js";
 import {
   ChevronIcon,
@@ -45,40 +50,13 @@ export interface GitContext {
   onRefresh: () => Promise<void>;
 }
 
-type StaticTab = "diff" | "files" | "preview";
-type DockViewKind = StaticTab | "terminal";
-
-const TAB_META: Record<DockViewKind, { label: string; icon: () => ReactNode }> = {
+const TAB_META: Record<WorkbenchViewKind, { label: string; icon: () => ReactNode }> = {
   diff: { label: "改动", icon: () => <FileIcon size={14} /> },
   files: { label: "文件", icon: () => <FolderIcon size={14} /> },
   terminal: { label: "终端", icon: () => <TerminalIcon size={14} /> },
-  preview: { label: "浏览器", icon: () => <GlobeIcon size={14} /> },
+  browser: { label: "浏览器", icon: () => <GlobeIcon size={14} /> },
 };
-const TAB_ORDER: DockViewKind[] = ["diff", "terminal", "preview", "files"];
-
-interface DockView {
-  id: string;
-  kind: DockViewKind;
-  label: string;
-  terminal?: TerminalSessionInfo;
-}
-
-function staticDockView(kind: StaticTab): DockView {
-  return { id: kind, kind, label: TAB_META[kind].label };
-}
-
-function terminalDockView(session: TerminalSessionInfo): DockView {
-  return { id: `terminal-${session.sessionId}`, kind: "terminal", label: session.title, terminal: session };
-}
-
-export interface BrowserTarget {
-  url: string;
-  nonce: number;
-}
-
-type BrowserPage =
-  | { kind: "url"; url: string }
-  | { kind: "html"; name: string; html: string };
+export type BrowserTarget = WorkbenchBrowserTarget;
 
 const DOCK_WIDTH_KEY = "easywork.side-dock.width";
 const DOCK_WIDTH_DEFAULT = 420;
@@ -106,25 +84,9 @@ function persistDockWidth(width: number): void {
   }
 }
 
-function normalizeBrowserAddress(value: string): string | null {
-  const input = value.trim();
-  if (!input) return null;
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(input) ? input : `https://${input}`;
-  try {
-    const parsed = new URL(candidate);
-    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
 function fileIconFor(p: string) {
   const ft = fileType(p);
   return <ft.Icon size={14} style={{ color: ft.color }} />;
-}
-
-function isHtmlFile(path: string): boolean {
-  return resolvePreviewKind(path) === "html";
 }
 
 function DockEmpty({ children }: { children: ReactNode }) {
@@ -146,7 +108,6 @@ export function SideDock({
   onRevealDir,
   filesEmpty,
   browserTarget,
-  onClearPreview,
   git,
   target,
 }: {
@@ -161,126 +122,55 @@ export function SideDock({
   filesEmpty: ReactNode;
   /** 消息链接触发的一次浏览器导航；nonce 使重复点击同一 URL 仍能重新激活。 */
   browserTarget: BrowserTarget | null;
-  onClearPreview: () => void;
   git?: GitContext;
   /** 外部请求查看某文件的改动（点「文件改动」卡）：跳到 改动(工作区)/文件(对话) 视图。 */
   target?: { path: string; nonce: number } | null;
 }) {
-  const initialView: StaticTab = git ? "diff" : "files";
-  const [activeViewId, setActiveViewId] = useState<string>(initialView);
-  const [openViews, setOpenViews] = useState<DockView[]>([staticDockView(initialView)]);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [browserPage, setBrowserPage] = useState<BrowserPage | null>(() => {
-    const url = browserTarget ? normalizeBrowserAddress(browserTarget.url) : null;
-    return url ? { kind: "url", url } : null;
-  });
   const [maxed, setMaxed] = useState(false);
   const [dockWidth, setDockWidth] = useState(readDockWidth);
-  const [terminalError, setTerminalError] = useState<string | null>(null);
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
-  const targetHandledRef = useRef<number | null>(null);
   const repo = !!git?.status.repo;
-  // repo 经 ref 读取：仅 target.nonce 变化（点击改动卡）才切视图；
-  // git 状态后台刷新（repo false→true）不应把用户从当前视图（终端/预览）拽回 diff。
-  const repoRef = useRef(repo);
-  repoRef.current = repo;
   const terminalRuntime = useMemo(() => getTerminalRuntime(), []);
   const { confirm: confirmTerminalClose, dialog: terminalConfirmDialog } = useConfirm();
-  const terminalScope = `${previewScope}:${previewId}`;
-  const activeView = openViews.find((candidate) => candidate.id === activeViewId) ?? openViews[0];
-
-  const activateView = useCallback((next: StaticTab) => {
-    setOpenViews((current) => (current.some((candidate) => candidate.id === next) ? current : [...current, staticDockView(next)]));
-    setActiveViewId(next);
-    setAddMenuOpen(false);
-  }, []);
+  const {
+    views: openViews,
+    activeViewId,
+    activeView,
+    error: terminalError,
+    availableKinds,
+    open: openView,
+    activate: activateView,
+    close: closeView,
+    navigateBrowser,
+    openFile,
+    clearFileSelection,
+    clearBrowser,
+    reportError,
+  } = useWorkbenchViewSession({
+    visible: open,
+    onEmpty: onClose,
+    files,
+    previewScope,
+    previewId,
+    browserTarget,
+    fileTarget: target,
+    hasDiff: Boolean(git),
+    routeFileTargetsToDiff: repo,
+    terminalRuntime,
+    confirmTerminalClose: () =>
+      confirmTerminalClose({
+        title: "终端中仍有前台任务",
+        body: "关闭标签会结束该终端及其中正在运行的进程。",
+        danger: true,
+        okLabel: "结束终端",
+      }),
+  });
 
   useEffect(() => {
     setToolbarHost(document.getElementById("side-dock-titlebar-host"));
   }, []);
-
-  useEffect(() => {
-    if (!open || openViews.length > 0) return;
-    setOpenViews([staticDockView(initialView)]);
-    setActiveViewId(initialView);
-  }, [initialView, open, openViews.length]);
-
-  useEffect(() => {
-    if (!terminalRuntime.available) return;
-    let cancelled = false;
-    void terminalRuntime.list(terminalScope).then((sessions) => {
-      if (cancelled || sessions.length === 0) return;
-      setOpenViews((current) => {
-        const known = new Set(current.map((candidate) => candidate.id));
-        return [...current, ...sessions.map(terminalDockView).filter((candidate) => !known.has(candidate.id))];
-      });
-    }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [terminalRuntime, terminalScope]);
-
-  const createTerminal = useCallback(async () => {
-    setAddMenuOpen(false);
-    setTerminalError(null);
-    try {
-      const { cwd } = await getClient().terminalContext(previewScope, previewId);
-      const session = await terminalRuntime.create({ scope: terminalScope, cwd, cols: 80, rows: 24 });
-      const next = terminalDockView(session);
-      setOpenViews((current) => current.some((candidate) => candidate.id === next.id) ? current : [...current, next]);
-      setActiveViewId(next.id);
-    } catch (error) {
-      setTerminalError(error instanceof Error ? error.message : String(error));
-    }
-  }, [previewId, previewScope, terminalRuntime, terminalScope]);
-
-  const closeView = useCallback(async (closingId: string) => {
-    const index = openViews.findIndex((candidate) => candidate.id === closingId);
-    if (index < 0) return;
-    const closing = openViews[index]!;
-    if (closing.terminal) {
-      try {
-        const outcome = await terminalRuntime.close(closing.terminal.sessionId);
-        if (outcome === "confirmation_required") {
-          const confirmed = await confirmTerminalClose({
-            title: "终端中仍有前台任务",
-            body: "关闭标签会结束该终端及其中正在运行的进程。",
-            danger: true,
-            okLabel: "结束终端",
-          });
-          if (!confirmed) return;
-          await terminalRuntime.close(closing.terminal.sessionId, true);
-        }
-      } catch (error) {
-        setTerminalError(error instanceof Error ? error.message : String(error));
-        return;
-      }
-    }
-    const remaining = openViews.filter((candidate) => candidate.id !== closingId);
-    setOpenViews(remaining);
-    if (closing.kind === "preview") {
-      setBrowserPage(null);
-      onClearPreview();
-    }
-    if (activeViewId === closingId && remaining.length > 0) {
-      setActiveViewId(remaining[Math.min(index, remaining.length - 1)]!.id);
-    }
-    if (remaining.length === 0) onClose();
-  }, [activeViewId, confirmTerminalClose, onClearPreview, onClose, openViews, terminalRuntime]);
-
-  const openHtmlFile = useCallback(async (path: string) => {
-    const resolvedPath = matchFileTarget(files, path)?.path ?? path;
-    try {
-      const meta = await getClient().previewMeta(previewScope, previewId, resolvedPath);
-      if (meta.kind !== "html") {
-        activateView("files");
-        return;
-      }
-      setBrowserPage({ kind: "html", name: meta.name, html: meta.text ?? "" });
-      activateView("preview");
-    } catch {
-      activateView("files");
-    }
-  }, [activateView, files, previewId, previewScope]);
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -298,25 +188,6 @@ export function SideDock({
     };
   }, [addMenuOpen]);
 
-  // 「文件改动」卡点击 → git 仓库跳到 diff；否则跳到「文件」视图（FilesTab 按 nonce 定位文件）。
-  useEffect(() => {
-    if (!target || targetHandledRef.current === target.nonce) return;
-    targetHandledRef.current = target.nonce;
-    if (isHtmlFile(target.path)) {
-      void openHtmlFile(target.path);
-      return;
-    }
-    activateView(repoRef.current ? "diff" : "files");
-  }, [target?.nonce, activateView, openHtmlFile]);
-
-  // 点消息里的链接/来源 → 校验地址后自动进「浏览器」（开关由父组件负责）。
-  useEffect(() => {
-    if (!browserTarget) return;
-    const url = normalizeBrowserAddress(browserTarget.url);
-    if (!url) return;
-    setBrowserPage({ kind: "url", url });
-    activateView("preview");
-  }, [browserTarget?.nonce, activateView]);
 
   const onResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -359,7 +230,7 @@ export function SideDock({
                 data-testid={`side-dock-tab-${tab.id}`}
                 role="tab"
                 aria-selected={activeViewId === tab.id}
-                onClick={() => setActiveViewId(tab.id)}
+                onClick={() => activateView(tab.id)}
               >
                 {TAB_META[tab.kind].icon()}
                 <span>{tab.label}</span>
@@ -390,16 +261,19 @@ export function SideDock({
           </button>
           {addMenuOpen && (
             <div className="sd-view-menu" data-testid="side-dock-view-menu" role="menu">
-              {TAB_ORDER.filter((tab) => (tab !== "diff" || git) && (tab !== "terminal" || terminalRuntime.available)).map((tab) => (
+              {availableKinds.map((tab) => (
                 <button
                   type="button"
                   key={tab}
                   role="menuitem"
-                  onClick={() => tab === "terminal" ? void createTerminal() : activateView(tab)}
+                  onClick={() => {
+                    setAddMenuOpen(false);
+                    void openView(tab);
+                  }}
                 >
                   {TAB_META[tab].icon()}
                   <span>{TAB_META[tab].label}</span>
-                  {tab !== "terminal" && openViews.some((candidate) => candidate.id === tab) && <CheckIcon size={14} className="sd-menu-check" />}
+                  {tab !== "terminal" && openViews.some((candidate) => candidate.kind === tab) && <CheckIcon size={14} className="sd-menu-check" />}
                 </button>
               ))}
             </div>
@@ -451,24 +325,22 @@ export function SideDock({
             scope={previewScope}
             id={previewId}
             emptyHint={filesEmpty}
-            openTarget={repo ? null : target}
+            selectedPath={activeView.selection?.path ?? null}
             maxed={maxed}
             onRefresh={onFilesRefresh}
             onRevealDir={onRevealDir}
-            onOpenHtml={(path) => void openHtmlFile(path)}
+            onOpenFile={openFile}
+            onClearSelection={clearFileSelection}
           />
         )}
         {activeView?.kind === "terminal" && activeView.terminal && (
-          <TerminalView runtime={terminalRuntime} session={activeView.terminal} onError={setTerminalError} />
+          <TerminalView runtime={terminalRuntime} session={activeView.terminal} onError={reportError} />
         )}
-        {activeView?.kind === "preview" && (
+        {activeView?.kind === "browser" && (
           <PreviewTab
-            page={browserPage}
-            onNavigate={(url) => setBrowserPage({ kind: "url", url })}
-            onClear={() => {
-              setBrowserPage(null);
-              onClearPreview();
-            }}
+            page={activeView.page ?? null}
+            onNavigate={navigateBrowser}
+            onClear={clearBrowser}
           />
         )}
       </div>
@@ -484,59 +356,29 @@ function FilesTab({
   scope,
   id,
   emptyHint,
-  openTarget,
+  selectedPath,
   maxed,
   onRefresh,
   onRevealDir,
-  onOpenHtml,
+  onOpenFile,
+  onClearSelection,
 }: {
   files: WsEntry[];
   scope: "workspace" | "chat";
   id: string;
   emptyHint: ReactNode;
-  /** 外部请求打开的文件（点「文件改动」卡时定位预览）；nonce 让连点同一文件也触发。 */
-  openTarget?: { path: string; nonce: number } | null;
+  selectedPath: string | null;
   maxed: boolean;
   onRefresh: () => void;
   onRevealDir: () => void;
-  onOpenHtml: (path: string) => void;
+  onOpenFile: (path: string) => Promise<unknown>;
+  onClearSelection: () => void;
 }) {
-  const [sel, setSel] = useState<string | null>(null);
-  const handledRef = useRef<number | null>(null);
-  const targetFile = useMemo(
-    () => (openTarget ? matchFileTarget(files, openTarget.path) : undefined),
-    [files, openTarget],
-  );
   // 交付卡可能指向超过列表默认深度的文件；合成一条可预览项，点击不依赖 FilesTab 是否已列到它。
   const visibleFiles = useMemo(() => {
-    if (!openTarget || targetFile) return files;
-    return [{ path: openTarget.path, type: "file" as const }, ...files];
-  }, [files, openTarget, targetFile]);
-
-  // 选中文件刷新后消失（被删/改名）→ 收起预览。
-  useEffect(() => {
-    if (sel && !visibleFiles.some((f) => f.path === sel)) setSel(null);
-  }, [visibleFiles, sel]);
-
-  // 外部请求打开某文件（文件改动卡）→ 选中。按 nonce 去重（防文件列表轮询重复触发；连点同一文件 nonce 变 → 重新打开）。
-  useEffect(() => {
-    if (!openTarget || handledRef.current === openTarget.nonce) return;
-    handledRef.current = openTarget.nonce;
-    if (isHtmlFile(openTarget.path)) {
-      setSel(null);
-      return;
-    }
-    setSel(targetFile?.path ?? openTarget.path);
-  }, [openTarget, targetFile]);
-
-  const openFile = (path: string) => {
-    if (isHtmlFile(path)) {
-      setSel(null);
-      onOpenHtml(path);
-      return;
-    }
-    setSel(path);
-  };
+    if (!selectedPath || files.some((file) => file.path === selectedPath)) return files;
+    return [{ path: selectedPath, type: "file" as const }, ...files];
+  }, [files, selectedPath]);
 
   const fileList = (
     <div className="files-list">
@@ -557,8 +399,8 @@ function FilesTab({
           <button
             type="button"
             key={file.path}
-            className={`af-file ${sel === file.path ? "active" : ""}`}
-            onClick={() => openFile(file.path)}
+            className={`af-file ${selectedPath === file.path ? "active" : ""}`}
+            onClick={() => void onOpenFile(file.path)}
           >
             {fileIconFor(file.path)}
             <span className="af-path" title={file.path}>{file.path}</span>
@@ -568,11 +410,11 @@ function FilesTab({
       </div>
     </div>
   );
-  const fileViewer = sel ? (
+  const fileViewer = selectedPath ? (
     <FileViewer
-      key={sel}
-      source={{ kind: "fs", scope, id, path: sel }}
-      onBack={maxed ? undefined : () => setSel(null)}
+      key={selectedPath}
+      source={{ kind: "fs", scope, id, path: selectedPath }}
+      onBack={maxed ? undefined : onClearSelection}
     />
   ) : (
     <DockEmpty>从文件列表中选择一个文件进行预览。</DockEmpty>
@@ -586,7 +428,7 @@ function FilesTab({
       </div>
     );
   }
-  return sel ? <div className="files-detail">{fileViewer}</div> : fileList;
+  return selectedPath ? <div className="files-detail">{fileViewer}</div> : fileList;
 }
 
 // ===== 浏览器 tab：消息链接、HTML 文件或用户输入地址 → iframe 浏览 =====
@@ -595,8 +437,8 @@ function PreviewTab({
   onNavigate,
   onClear,
 }: {
-  page: BrowserPage | null;
-  onNavigate: (url: string) => void;
+  page: WorkbenchBrowserPage | null;
+  onNavigate: (url: string) => Promise<WorkbenchNavigationResult>;
   onClear: () => void;
 }) {
   const [nonce, setNonce] = useState(0);
@@ -609,15 +451,14 @@ function PreviewTab({
     setError(null);
   }, [page]);
 
-  const navigate = () => {
-    const next = normalizeBrowserAddress(draft);
-    if (!next) {
+  const navigate = async () => {
+    const result = await onNavigate(draft);
+    if (result.status === "rejected") {
       setError("请输入有效的 http(s) 地址");
       return;
     }
     setError(null);
-    setDraft(next);
-    onNavigate(next);
+    if (result.destination === "browser" && result.url) setDraft(result.url);
   };
 
   return (
@@ -636,11 +477,11 @@ function PreviewTab({
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
-              navigate();
+              void navigate();
             }
           }}
         />
-        <button className="fv-btn" title="前往" onClick={navigate} disabled={!draft.trim()}>
+        <button className="fv-btn" title="前往" onClick={() => void navigate()} disabled={!draft.trim()}>
           <EnterIcon size={14} />
         </button>
         {page && (

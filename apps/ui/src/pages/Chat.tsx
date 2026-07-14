@@ -507,7 +507,6 @@ export function Chat({
         onRevealDir={() => void getClient().chatReveal(threadId)}
         filesEmpty="暂无会话文件。"
         browserTarget={browserTarget}
-        onClearPreview={() => setBrowserTarget(null)}
         target={dockTarget}
       />
     </div>

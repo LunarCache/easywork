@@ -540,7 +540,6 @@ export function Workspace({
         onRevealDir={() => void getClient().wsReveal(project.id)}
         filesEmpty="暂无工作区文件。"
         browserTarget={browserTarget}
-        onClearPreview={() => setBrowserTarget(null)}
         target={dockTarget}
         git={{ projectId: project.id, status: git, remote, onRefresh: refreshGit }}
       />
