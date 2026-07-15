@@ -173,6 +173,20 @@ export function SideDock({
   }, []);
 
   useEffect(() => {
+    const titlebarArea = toolbarHost?.closest<HTMLElement>(".ad-tb-dock-area");
+    if (!titlebarArea) return;
+    titlebarArea.style.setProperty("--side-dock-titlebar-width", maxed ? "100vw" : `${dockWidth}px`);
+    titlebarArea.style.setProperty(
+      "--side-dock-titlebar-responsive-width",
+      maxed ? "100vw" : "min(92vw, 520px)",
+    );
+    return () => {
+      titlebarArea.style.removeProperty("--side-dock-titlebar-width");
+      titlebarArea.style.removeProperty("--side-dock-titlebar-responsive-width");
+    };
+  }, [dockWidth, maxed, toolbarHost]);
+
+  useEffect(() => {
     if (!addMenuOpen) return;
     const onPointerDown = (event: MouseEvent) => {
       if (!addMenuRef.current?.contains(event.target as Node)) setAddMenuOpen(false);
@@ -221,7 +235,7 @@ export function SideDock({
 
   const titlebarTabs = open && toolbarHost
     ? createPortal(
-      <div className="sd-titlebar-toolbar" data-tauri-drag-region>
+      <div className={`sd-titlebar-toolbar ${maxed ? "max" : ""}`} data-tauri-drag-region>
         <div className="sd-open-tabs" role="tablist" aria-label="已打开的工作台视图" data-tauri-drag-region>
           {openViews.map((tab) => (
             <div key={tab.id} className={`sd-tab-shell ${activeViewId === tab.id ? "on" : ""}`} data-tauri-drag-region>

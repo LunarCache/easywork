@@ -241,13 +241,22 @@ test.describe("navigation e2e", () => {
     await page.getByTitle("打开工作台").click();
 
     const dock = page.getByTestId("side-dock");
+    const dockTitlebar = page.getByTestId("side-dock-titlebar-area");
     await expect(dock.locator(".sd-top")).toHaveCount(0);
     await expect(page.locator(".ad-titlebar").getByTestId("side-dock-tab-files")).toBeVisible();
     const tabBox = await page.getByTestId("side-dock-tab-files").boundingBox();
+    const dockBox = await dock.boundingBox();
+    const dockTitlebarBox = await dockTitlebar.boundingBox();
     const drawerBox = await page.getByTitle("关闭工作台").boundingBox();
     expect(tabBox).not.toBeNull();
+    expect(dockBox).not.toBeNull();
+    expect(dockTitlebarBox).not.toBeNull();
     expect(drawerBox).not.toBeNull();
     expect(Math.abs(tabBox!.y + tabBox!.height / 2 - (drawerBox!.y + drawerBox!.height / 2))).toBeLessThan(2);
+    expect(Math.abs(dockTitlebarBox!.x - dockBox!.x)).toBeLessThan(2);
+    expect(Math.abs(dockTitlebarBox!.width - dockBox!.width)).toBeLessThan(2);
+    expect(tabBox!.x - dockTitlebarBox!.x).toBeLessThan(24);
+    await expect(dockTitlebar).toHaveCSS("border-left-width", "1px");
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
 
     await page.getByTestId("side-dock-add-view").click();
