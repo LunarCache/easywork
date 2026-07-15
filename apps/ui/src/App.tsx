@@ -3,7 +3,7 @@ import type { ChannelKind, Project, Skill } from "@ew/shared";
 import type { ModelSourceInfo } from "@ew/sdk";
 import { currentConfig, getClient, initRuntimeConfig } from "./lib/client.js";
 import { applyTheme, loadThemePrefs, saveThemePrefs, type ThemePrefs } from "./lib/prefs.js";
-import { pickWorkspaceDir, isDesktop } from "./lib/desktop.js";
+import { pickWorkspaceDir, isDesktop, isMacOS } from "./lib/desktop.js";
 import { Chat } from "./pages/Chat.js";
 import { Workspace } from "./pages/Workspace.js";
 import { FilesPage } from "./pages/FilesPage.js";
@@ -425,15 +425,17 @@ export function App() {
     mode === "inbox"
       ? "收件箱"
       : activeTitle || (mode === "work" ? project?.name ?? "新任务" : "新任务");
+  const desktop = isDesktop();
+  const macDesktop = desktop && isMacOS();
 
   return (
-    <div className={`ad-app ${isDesktop() ? "is-desktop" : ""} ${sidebarOpen ? "" : "side-collapsed"}`}>
+    <div className={`ad-app ${desktop ? "is-desktop" : ""} ${macDesktop ? "is-macos" : ""} ${sidebarOpen ? "" : "side-collapsed"}`}>
       <Titlebar
         sidebarOpen={sidebarOpen}
         sidebarWidth={sessionWidth}
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
         taskTitle={taskTitle}
-        isDesktop={isDesktop()}
+        isDesktop={desktop}
         showDock={!settingsHost.isOpen && (mode === "chat" || inWorkChat)}
         dockOpen={dockOpen}
         onToggleDock={() => setDockOpen((v) => !v)}

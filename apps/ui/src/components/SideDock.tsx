@@ -173,18 +173,12 @@ export function SideDock({
   }, []);
 
   useEffect(() => {
-    const titlebarArea = toolbarHost?.closest<HTMLElement>(".ad-tb-dock-area");
-    if (!titlebarArea) return;
-    titlebarArea.style.setProperty("--side-dock-titlebar-width", maxed ? "100vw" : `${dockWidth}px`);
-    titlebarArea.style.setProperty(
-      "--side-dock-titlebar-responsive-width",
-      maxed ? "100vw" : "min(92vw, 520px)",
-    );
+    const root = document.documentElement;
+    root.style.setProperty("--side-dock-width", `${dockWidth}px`);
     return () => {
-      titlebarArea.style.removeProperty("--side-dock-titlebar-width");
-      titlebarArea.style.removeProperty("--side-dock-titlebar-responsive-width");
+      root.style.removeProperty("--side-dock-width");
     };
-  }, [dockWidth, maxed, toolbarHost]);
+  }, [dockWidth]);
 
   useEffect(() => {
     if (!addMenuOpen) return;

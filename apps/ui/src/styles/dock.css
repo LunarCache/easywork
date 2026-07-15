@@ -7,7 +7,7 @@
 .sd-resize-handle:hover::after, .sd-resize-handle:focus-visible::after { background: var(--accent); }
 /* —— 标题栏动态标签：与工作台抽屉按钮同一行 —— */
 .sd-titlebar-toolbar { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 4px; }
-.is-desktop .sd-titlebar-toolbar.max { padding-left: var(--ad-traffic-light-safe-x); }
+.is-macos .sd-titlebar-toolbar.max { padding-left: var(--ad-traffic-light-safe-x); }
 .sd-open-tabs { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .sd-open-tabs::-webkit-scrollbar { display: none; }
 .sd-tab-shell { flex: none; min-width: 96px; max-width: 164px; height: 32px; display: flex; align-items: center; border-radius: var(--r); background: transparent; }

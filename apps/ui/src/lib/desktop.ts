@@ -7,6 +7,10 @@ export function isDesktop(): boolean {
   return !!(window as unknown as TauriWindow).__TAURI__?.core?.invoke;
 }
 
+export function isMacOS(): boolean {
+  return navigator.userAgent.includes("Macintosh");
+}
+
 /**
  * 选择本地工作区目录。
  * - 桌面（Tauri）：调用 Rust 自定义命令 select_workspace_dir 打开系统文件夹选择器。

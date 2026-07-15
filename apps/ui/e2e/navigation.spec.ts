@@ -219,6 +219,10 @@ test.describe("navigation e2e", () => {
 
   test("macOS 放大工作台时标题避开 traffic lights", async ({ page, openApp }) => {
     await page.addInitScript(() => {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+      });
       Object.defineProperty(window, "__TAURI__", {
         configurable: true,
         value: { core: { invoke: async () => null } },
@@ -234,6 +238,25 @@ test.describe("navigation e2e", () => {
     const activeTabBox = await activeTab.boundingBox();
     expect(activeTabBox).not.toBeNull();
     expect(activeTabBox!.x >= 88 || activeTabBox!.y >= 46).toBe(true);
+  });
+
+  test("Windows 放大工作台时不预留 macOS traffic lights 空白", async ({ page, openApp }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+      });
+      Object.defineProperty(window, "__TAURI__", {
+        configurable: true,
+        value: { core: { invoke: async () => null } },
+      });
+    });
+    await openApp();
+
+    await page.getByTitle("打开工作台").click();
+    await page.getByTitle("放大到窗口").click();
+
+    await expect(page.locator(".sd-titlebar-toolbar.max")).toHaveCSS("padding-left", "0px");
   });
 
   test("工作台使用顶层动态标签，并支持输入自定义浏览器地址", async ({ page, openApp }) => {
