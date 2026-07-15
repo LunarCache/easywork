@@ -6,21 +6,22 @@
 
 - **本地**：从 HuggingFace 搜索、下载（断点续传）GGUF；默认使用官方源，国内网络可在**设置 → 通用**持久化启用 `hf-mirror.com`，模型搜索、变体查询、普通模型下载和记忆 embedding 下载统一切换，搜索失败会直接显示错误与镜像提示。模型经统一 `llama` 的 **router 模式**运行 —— 单个 `llama serve --models-dir` 进程按请求 `model`（= 模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰（文本 / 视觉）。router 不额外传 `-c`；UI / 上下文压力优先读取 GGUF `context_length`，元数据缺失时 SessionHost 当前按 8192 兜底。记忆嵌入模型走**独立**的 `llama serve -m --embedding` 进程，与 router 分离：启动时只会恢复已持久化且仍存在的模型路径，或启用已下载到默认路径的 nomic 模型（缺失则记忆降级纯词法，不崩）；也可在**设置 →「记忆」页的紧凑运行状态组**一键下载 nomic-embed 并重建索引，状态同步显示在**模型页**（嵌入卡「运行中 / 已启用」）。
 - **云端**：同时支持 pi-ai 内置 provider 与自定义兼容端点。「模型 → 云端 API」按服务商卡片进入配置；自定义端点可选择 OpenAI Chat/Responses、Anthropic Messages、Google Generative AI 等 API family，填写 Base URL / Key，并通过标准 `/models` 接口获取模型列表（失败时仍可手动添加）。每个模型独立保存 ID、上下文窗口、文本/视觉模态、推理能力覆盖和目录模板引用。
-- **目录模板与身份**：自定义模型可按模型 ID 自动匹配或手动选择 pi-ai 模型目录。运行时可跨 API family 继承名称、`reasoning`、`thinkingLevelMap` 与输出上限；上下文窗口和输入模态由 UI 在匹配 / 选择模板时复制进逐模型配置，不会在运行时覆盖已有值；`compat` 属于报文协议，只在模板 API 与当前 API 一致时应用。逻辑 route id 为 `provider:<providerId>:<modelId>`（两段实际会 URL 编码），因此自定义与内置 provider 的同名模型不会互相覆盖；旧线程或外部客户端传入裸模型名时仍保留兼容解析。
+- **目录模板与身份**：Core 的 Provider Model Configuration 从保存配置统一产出 scoped route、上游 model id、最终 runtime model 与列表投影；UI 的自动匹配 / 手动选择只编辑和展示保存投影。运行时可跨 API family 继承名称、`reasoning`、`thinkingLevelMap` 与输出上限；上下文窗口和输入模态由 UI 在匹配 / 选择模板时复制进逐模型配置，不会在运行时覆盖已有值；`compat` 属于报文协议，只在模板 API 与当前 API 一致时应用。逻辑 route id 为 `provider:<providerId>:<modelId>`（两段实际会 URL 编码），因此自定义与内置 provider 的同名模型不会互相覆盖；旧线程或外部客户端传入裸模型名时仍保留兼容解析。缺失 pi 目录的 `pi-native` 模型可继续被列出 / 删除，但实际运行 fail-closed，不会降级成错误协议。
 
 ## Agent 内核 = pi-coding-agent（托管）
 
 - 内核为托管 [`@earendil-works/pi`](https://github.com/earendil-works/pi) 的 `AgentSession`（无头嵌入）：自带编码工具（read/bash/edit/write/grep/ls/find）、自动上下文 compaction、会话管理。EasyWork 是它的宿主 / 集成层。
 - **真实工具审批流（4 档）**：`read-only` / `approve-each` / `auto-edits` / `full-auto`，经 pi `tool_call` 钩子映射；危险工具经 SSE 挂起，UI 在**对话栏上方弹出审批卡**（内嵌、非遮罩弹层；简洁单头行 = 盾牌 + 工具名 accent 胶囊 + 右侧紧凑按钮，下方单行参数预览〔命令/路径/紧凑 JSON，悬停看全〕，Chat/Workspace 共用 `ApprovalCard`）「允许 / 总是允许 / 拒绝」。
+- **Agent Turn 客户端生命周期**：Chat 与 Workspace 共用 `AgentTurnController`，由它统一发送 / 重试 / 编辑重试 / 停止、审批、SSE 事件消费、用量、瞬态提示、工件、错误和完成；页面只提供请求、审批档位同步和工具完成后的刷新 policy。
 - **工作区路径限定**：fs 工具路径经 realpath 解析后硬拦越界（含软链接），bash 由审批把守。
 - **内置工具**（桥成 pi customTool）：`get_time` / `calculator` / `http_get`（带 SSRF 防护）/ `explore_web`（DuckDuckGo 摘要搜索 + 安全取页，`max_results` 可设 1–10，默认 5）。聊天页关闭联网时会从 pi customTools 中同时移除 `explore_web` / `http_get`，工具集变化会触发会话资源重建。
-- **记忆 / 会话检索**：记忆经 pi 扩展接入——**渐进式披露**（记忆「清单」注入系统提示词 + `recall_memory` 工具按需取全文，借鉴 Skill）+ **批量事实抽取**（空闲 / 关闭时，非每轮）。每条记忆显式记录 `origin/state/sourceThreadId`：被动抽取是由来源对话拥有的 Extracted Fact，删除对话时会等待在途抽取并级联删除事实与 pi 会话状态；用户可在记忆页「确认并保留」（固定）为独立 Curated Fact，编辑来源事实也会先提升。会话检索通过 customTool 接入。外部 Provider 目前只能由宿主注入，Desktop / CLI 没有配置入口；未注入时记忆页不显示空状态，注入后才显示启停状态。
+- **记忆 / 会话检索**：记忆经 pi 扩展接入——**渐进式披露**（记忆「清单」注入系统提示词 + `recall_memory` 工具按需取全文，借鉴 Skill）+ **批量事实抽取**（空闲 / 关闭时，非每轮）。每条记忆显式记录 `origin/state/sourceThreadId`：被动抽取是由来源对话拥有的 Extracted Fact；Source Conversation 生命周期在同一 run / delete 屏障内删除其事实、候选证据、消息 / FTS 与 pi 会话状态，并只尽力清理 EasyWork 管理的 scratch 工件，永不删除用户工作区目录。用户可在记忆页「确认并保留」（固定）为独立 Curated Fact，编辑来源事实也会先提升。会话检索通过 customTool 接入。外部 Provider 目前只能由宿主注入，Desktop / CLI 没有配置入口；未注入时记忆页不显示空状态，注入后才显示启停状态。
 - **MCP**：stdio（默认禁用，需开关）+ HTTP；工具桥成 pi customTools；导入标准 `mcpServers` JSON；连接探测（带超时）+ 工具清单预览 + 编辑已有配置（保留 OAuth / env）+ 探测失败错误详情；`callTool` 透传中断信号。
-- **Skills**：pi 自带 skills（resourceLoader 发现）+ 应用内 Skills 管理；管理页用“已启用 / 待审核 / 已归档”分开主流程，只展示全局来源，并按内置主目录 `~/.easywork/pi-agent/skills` 与标准目录 `~/.agents/skills` 分组，项目级 skills 仅在运行时按 cwd 生效。自动学习以可折叠摘要显示开关、运行态与上次结果；展开后按响应式网格配置自动检查、工具调用阈值、学习模型和智能合并提案，在 1280px 桌面宽度下不产生横向溢出。learned Skill 可在页面记录成功 / 失败 / 修正反馈；修正只生成待审核 patch。版本入口展示可选快照时间线并回滚到指定版本，Candidate 的来源对话和证据可直接跳回原对话。
+- **Skills**：pi 自带 skills（resourceLoader 发现）+ 应用内 Skills 管理；`SkillCandidateLifecycle` 是候选 / 审核 / Learned Skill 状态迁移的唯一入口，routes、Agent tool、后台 reviewer 与启动迁移都不能直接访问 candidate store。管理页用“已启用 / 待审核 / 已归档”分开主流程，只展示全局来源，并按内置主目录 `~/.easywork/pi-agent/skills` 与标准目录 `~/.agents/skills` 分组，项目级 skills 仅在运行时按 cwd 生效。自动学习以可折叠摘要显示开关、运行态与上次结果；展开后按响应式网格配置自动检查、工具调用阈值、学习模型和智能合并提案，在 1280px 桌面宽度下不产生横向溢出。learned Skill 可在页面记录成功 / 失败 / 修正反馈；修正只生成待审核 patch。版本入口展示可选快照时间线并回滚到指定版本，Candidate 的来源对话和证据可直接跳回原对话。
 
 ## 工作区模式
 
-在本地项目目录里读写文件 / 跑命令（git 改动审阅面板）。聊天模式也能写文件 / 跑命令，但**限定在每会话工件目录内**。两种模式共用右侧常驻「工作台」面板（见下方桌面 UI）。
+在本地项目目录里读写文件 / 跑命令（git 改动审阅面板）。聊天模式也能写文件 / 跑命令，但**限定在每会话工件目录内**。两种模式共用右侧常驻「工作台」面板（见下方桌面 UI）；独立的 Workbench View Session 统一视图打开 / 激活 / 关闭回退、文件与 URL 导航、终端恢复和前台任务关闭确认，SideDock 只渲染状态。
 
 ## 外部渠道连接器
 

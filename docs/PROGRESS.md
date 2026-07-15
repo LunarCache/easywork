@@ -36,6 +36,15 @@
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
 
+## 2026-07-14 — 五个深模块架构收口
+
+- **Agent Turn**：Chat 与 Workspace 通过 `AgentTurnController` / `useAgentTurn` 共用单轮输入、SSE、取消、审批、usage、重试、compaction、工件和最终消息归并；页面只保留各自的布局、启动参数与领域投影。
+- **Workbench View Session**：`WorkbenchViewSession` 统一拥有工作台标签、选中项、关闭回退、按 scope 隔离的终端会话、浏览器导航以及文件 / HTML 打开语义；`SideDock` 退回渲染和平台适配层。
+- **来源对话与 Skill Candidate 生命周期**：`SourceConversationLifecycle` 把来源删除、在途屏障、derived facts 清理、历史/FTS/会话回收收进同一删除屏障与有序生命周期；`SkillCandidateLifecycle` 成为候选暂存、审批、拒绝、归档、恢复、回滚与来源失效的唯一状态迁移接口。
+- **Provider Model Configuration**：Core 的 `ProviderModelConfiguration` 统一决定 provider-scoped route、上游模型身份、目录继承、协议隔离、最终 pi runtime model 与 `/models` 投影；ProviderManager、HTTP、pi registry、EngineRegistry 和 UI 只消费结果。旧 raw model id、等价 percent-encoded route 与公共 helper 导出仅作为有明确移除条件的兼容适配层保留。
+- **文档与删除证明**：README、AGENTS、FEATURES、ARCHITECTURE、DESIGN 和派生 design-web 已同步；`CONTEXT.md` 只保留实现无关术语。原 Chat/Workspace 双份 turn loop、SideDock 生命周期分支、route 层来源删除序列和 candidate fake casts 均已移除，没有第二套语义实现。
+- **全链路验收**：`git diff --check`、lint、typecheck、build、Vitest（**391 passed / 1 skipped**）、Playwright（**39 passed**）、Rust check/test、版本一致性、macOS arm64 SEA 构建与 `/health` smoke 全绿。Computer Use 真机复核 Chat、Workspace、顶层可关闭标签、HTML 直达 Browser、自定义地址规范化、真实 PTY 输入输出和云端 Provider 编辑页。
+
 ## 2026-07-14 — Desktop 多实例真终端
 
 - **真实 PTY**：删除 SideDock 的 Agent 命令回放式伪终端；Desktop Rust 壳改用 `portable-pty` 启动用户默认 shell，前端以 xterm 渲染，通过 Tauri Channel 接收有序输出，并支持真实输入与 resize。旧 `/workspace/:id/exec`、`/chat/:threadId/exec` 与 SDK exec 方法一并移除。

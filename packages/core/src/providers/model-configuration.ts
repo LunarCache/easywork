@@ -214,6 +214,11 @@ export class ProviderModelConfiguration {
 
 const defaultConfiguration = new ProviderModelConfiguration();
 
+/**
+ * Compatibility facade for existing `@ew/core` imports. These helpers delegate to the
+ * deep module and remain until a major-version migration can remove the public surface.
+ */
+
 export function normalizeProviderConfig(cfg: CloudProviderConfig): NormalizedCloudProviderConfig {
   return defaultConfiguration.normalize(cfg);
 }

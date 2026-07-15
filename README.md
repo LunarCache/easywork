@@ -71,7 +71,7 @@ flowchart LR
   Gateway --> Cloud
 ```
 
-核心原则很简单：**daemon 拥有全部状态和能力，所有界面都是薄壳**。桌面聊天、工作区 agent、外部渠道消息和命令行自动化复用同一套 `SessionHost`、权限、记忆和模型配置；`/v1` 兼容网关只复用同一 daemon 内的模型与 provider runtime。
+核心原则很简单：**daemon 拥有全部状态和能力，所有界面都是薄壳**。桌面聊天、工作区 agent、外部渠道消息和命令行自动化复用同一套 `SessionHost`、权限、记忆和模型配置；`/v1` 兼容网关只复用同一 daemon 内的模型与 provider runtime。客户端的 Agent Turn 与 Workbench View Session、core 的 Source Conversation、Skill Candidate 和 Provider Model Configuration 各自通过一个深模块集中生命周期与正确性规则，页面和 HTTP 路由只提供策略、展示或传输适配。
 
 ---
 
@@ -81,6 +81,7 @@ flowchart LR
 
 - 对话模式：适合问答、总结、联网搜索和多模态输入。
 - 工作区模式：在本地项目目录内读写文件、运行 Agent 工具、查看 git diff，并预览文件。
+- Chat 与 Workspace 共用同一 Agent Turn 生命周期，发送、重试、停止、审批、用量、工件和完成语义不会在两个页面各自演化。
 - 右侧工作台坞：改动、文件、浏览器，以及 Desktop 专属的多标签真终端；用户 shell 由 Tauri PTY 托管，不与 Agent 工具命令混用。
 - 行内工具调用：思考、探索、编辑、运行、web search 等过程结构化展示。
 
@@ -88,14 +89,14 @@ flowchart LR
 
 - 本地模型：HuggingFace 搜索、断点续传下载、GGUF 元数据解析、统一 llama router 运行；国内网络可在「设置 → 通用」持久化启用 `hf-mirror.com`，搜索失败会显示明确错误提示；模型页还可按模型配置默认运行采样参数。
 - 云端 provider：内置 pi-ai 支持的 provider 目录；自定义端点可选择 OpenAI Chat/Responses、Anthropic Messages 等 API 协议，支持从 `/models` 获取模型列表，并逐模型配置上下文、模态与推理能力。
-- 模型目录继承：自定义模型可按模型 ID 自动或手动绑定目录模板。运行时可跨 API 协议继承模板的名称、`reasoning`、`thinkingLevelMap` 和 `maxTokens`；上下文窗口与输入模态只在 UI 选定模板时复制并保存到模型配置，不会在运行时覆盖既有配置。报文级 `compat` 仅在模板 API 与当前 API 一致时应用；同名模型始终以 `provider:<providerId>:<modelId>` 隔离。
+- 模型目录继承：Core 的 Provider Model Configuration 从保存配置统一解析 route identity、上游 identity 与最终 runtime model；UI 只编辑 / 展示投影。运行时可跨 API 协议继承模板的名称、`reasoning`、`thinkingLevelMap` 和 `maxTokens`；上下文窗口与输入模态只在 UI 选定模板时复制并保存到模型配置，不会在运行时覆盖既有配置。报文级 `compat` 仅在模板 API 与当前 API 一致时应用；同名模型始终以 `provider:<providerId>:<modelId>` 隔离。
 - 思考默认值：`/models.modelSources[].reasoning` 将运行时推理能力同步给 Chat / Workspace；推理模型首次使用默认「中」，显式选择「关」后按模型持久化。
 - 多协议 API：OpenAI `/v1/chat/completions`、`/v1/embeddings`、`/v1/models`，以及 Anthropic `/v1/messages`。
 
 ### 记忆、Skills、MCP
 
-- Core Memory 只保存 User Profile / Agent Notes；自动事实保留来源所有权，删除来源对话会级联删除未提升事实。工作区记忆隔离，支持语义/词法召回和 markdown 回灌。外部 Deep Memory 当前只是宿主注入 seam：Desktop / CLI 没有用户配置入口，Mem0 适配器仍是非用户态骨架；宿主实际注入后也只能追加受限召回，不能替换本地真相源，记忆页才显示其状态与启停开关。记忆页把搜索和添加保持为主操作，向量状态常驻；旧版 Skill 迁移审计在无歧义项时折叠为次级信息，有待判断项时自动展开并突出数量。
-- Skills 页面以“已启用 / 待审核 / 已归档”分开全局来源与 learned Skills；自动学习状态常驻摘要，阈值、模型、自动检查和智能合并提案按需展开，避免挤占主要管理流程。Chat 或设置里的“学习 Skill”和受限后台复盘都只生成 Candidate，明确批准后才会激活。候选支持完整 package 验证、工作区 scope、证据、乐观锁 patch；learned Skills 支持遥测、固定、快照、归档、恢复和回滚。
+- Core Memory 只保存 User Profile / Agent Notes；Source Conversation 生命周期在同一删除屏障内处理来源事实、候选证据、消息 / FTS、pi session 与合格 scratch 工件，绝不删除用户工作区目录。工作区记忆隔离，支持语义/词法召回和 markdown 回灌。外部 Deep Memory 当前只是宿主注入 seam：Desktop / CLI 没有用户配置入口，Mem0 适配器仍是非用户态骨架；宿主实际注入后也只能追加受限召回，不能替换本地真相源，记忆页才显示其状态与启停开关。记忆页把搜索和添加保持为主操作，向量状态常驻；旧版 Skill 迁移审计在无歧义项时折叠为次级信息，有待判断项时自动展开并突出数量。
+- Skills 页面以“已启用 / 待审核 / 已归档”分开全局来源与 learned Skills；Skill Candidate 生命周期统一拥有审核资格、验证、来源、批准、遥测、快照、归档、恢复和回滚。Chat 或设置里的“学习 Skill”和受限后台复盘都只生成 Candidate，明确批准后才会激活。
 - MCP 支持 stdio 与 HTTP，工具清单探测、启停、导入和审批一体化。
 
 ### 外部渠道
@@ -186,11 +187,11 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 350 passed / 1 skipped
+npm test               # vitest: 391 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
-npm run test:e2e       # Playwright UI e2e: 30 条，真 daemon + 真 Vite + 隔离 data dir
+npm run test:e2e       # Playwright UI e2e: 39 条，真 daemon + 真 Vite + 隔离 data dir
 
 npm run dev:daemon     # 仅启动 daemon，首行输出 {baseUrl, token, pid}
 npm run dev:ui         # 仅启动 Vite
@@ -214,9 +215,9 @@ npm run release:check-artifacts -- windows
 
 ## 测试覆盖
 
-- Vitest：350 passed / 1 skipped。
+- Vitest：391 passed / 1 skipped。
 - 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
-- Playwright UI e2e 覆盖设置页、模型模板跨协议元数据继承、推理模型默认思考档位、默认工作区直达、渠道/Skills/记忆入口与设置层级、Chat / Workspace composer 无边框控件与上下文用量悬停详情、联网工具门控、图片上传与粘贴、搜索导航、文件页、macOS 工作台安全区、来源事实、记忆 CRUD、Skills 模板/候选 diff/审批与显式学习。
+- Playwright UI e2e 共 39 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、工作台动态标签与真终端、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
 
 ---

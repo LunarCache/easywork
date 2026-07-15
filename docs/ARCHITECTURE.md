@@ -27,6 +27,18 @@
 - **Core daemon 的三种进程形态**：显式 `easywork serve` 在前台运行；需要 daemon 且启用自动启动的 CLI 命令探测不到服务时，会 detached spawn 自身的 `serve` 并 `unref()`（`status` / `stop` 只检查现有服务，不自启）；Tauri 启动的是由桌面主进程持有、随应用退出回收的 child，不是 detached 自启进程。
 - **本地推理**：统一 `llama`（llama.app）的 **router 模式** —— 1 个 `llama serve --models-dir` 进程，按请求 `model`（即模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰。嵌入模型走独立 `llama serve -m --embedding` 进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，供记忆向量召回；缺失则降级纯词法）。
 
+五个高扇出生命周期以深模块集中，调用者只跨越各自的小接口：
+
+| 深模块 | 所有权 | 外部 adapter / caller |
+|---|---|---|
+| Agent Turn（UI） | 发送、重试、停止、审批、AgentEvent 消费、usage、artifacts、错误与完成 | SDK transport；Chat / Workspace policy；React hook |
+| Workbench View Session（UI） | 视图打开 / 激活 / 关闭回退 / 恢复、文件与 URL 导航、terminal 关闭确认 | filesystem / browser / PTY adapter；SideDock renderer |
+| Source Conversation（core） | run claim、thread / Project 删除屏障、来源事实 / Candidate / repo / pi session / scratch 清理 | ConversationRepo、Memory、Skill lifecycle、SessionHost、filesystem |
+| Skill Candidate（core） | 审核资格、验证、来源、批准、遥测、pin / archive / snapshot / restore / rollback | SQLite/filesystem 与 reviewer internal adapters；routes/tools/coordinator callers |
+| Provider Model Configuration（core） | saved config normalization、route / upstream identity、能力继承、最终 runtime model、协议 compat | pi catalog adapter；ProviderManager / AgentProviderRuntime / HTTP projections |
+
+这些 seam 通过接口级行为测试验证；旧页面事件循环、SideDock 生命周期分支、route 级删除顺序和 partial candidate-store casts 已被替换，不再保留第二套语义实现。
+
 ## Monorepo 结构（npm workspaces + Turborepo）
 
 ```
@@ -50,13 +62,13 @@ apps/
 
 ## Provider Catalog 与模型身份
 
-云端模型由 `ProviderManager`、`ProviderCatalog` 与 `AgentProviderRuntime` 分层处理：
+云端模型由 `ProviderModelConfiguration` 统一语义，`ProviderManager`、`ProviderCatalog` 与 `AgentProviderRuntime` 作为状态 / 目录 / runtime adapters：
 
 - `CloudProviderConfig` 记录 provider 身份、API family、端点/鉴权和逐模型配置；内置 provider 复用 pi-ai 原生注册，自定义 provider 由同一契约接入。
-- `ProviderCatalog` 从 pi-ai 生成服务商/模型目录，并提供 `GET /providers/catalog`；自定义端点可经 `POST /providers/probe-models` 调标准 `/models` 拉取模型 ID，UI 失败时回退手工配置。
-- 目录模板的运行时继承范围是名称、`reasoning`、`thinkingLevelMap` 与 `maxTokens`（显式配置的 `reasoning` 优先）；上下文窗口和输入模态始终读取已保存的 `modelConfig`。UI 选择或自动匹配模板时，会把模板的上下文与模态物化进该配置。`compat` 是**报文协议行为**，仅当模板 API 与 provider 当前 API 一致时才进入运行时模型。
-- `auto` 模式可按精确模型 ID 推导唯一/同名前缀模板，因此已有自定义配置无需重新保存也能恢复上述运行时元数据；这不等于运行时覆盖已保存的上下文窗口或输入模态。
-- 云端模型的新 route id 由 `providerModelRouteId` 生成，格式为 `provider:<url-encoded-providerId>:<url-encoded-modelId>`，provider ID 与上游模型 ID 都会 URL 编码；进入 pi `ModelRegistry` 或上游请求前才解码并还原真实 `modelId`。`resolveModelRef` 仍接受 legacy 裸 `modelId` 供旧调用点兼容，但新接口使用 provider-scoped route id，避免不同 provider 的同名模型互相覆盖。`GET /models` 的 `modelSources` 同时返回 `providerId/modelId/reasoning`，供模型分组、展示和对话框默认思考档位使用。
+- `ProviderCatalog` 只从 pi-ai 投影服务商 / 模型目录并负责 `GET /providers/catalog` 与 `POST /providers/probe-models`；它不再组装 runtime model。
+- `ProviderModelConfiguration` 从保存配置一次产出 canonical route identity、上游 identity、最终 pi `Model<Api>` 和安全列表投影。目录模板的运行时继承范围是名称、`reasoning`、`thinkingLevelMap` 与 `maxTokens`（显式配置的 `reasoning` 优先）；上下文窗口和输入模态始终读取已保存的 `modelConfig`。UI 选择或自动匹配模板时把上下文与模态物化进保存配置，但 Core 会重新计算 auto catalog match，UI suggestion 不是运行时真相源。`compat` 是**报文协议行为**，仅当模板 API 与 provider 当前 API 一致时进入 runtime model。
+- provider-scoped route 形如 `provider:<url-encoded-providerId>:<url-encoded-modelId>`；进入 pi 或上游请求前才还原真实 `modelId`。旧线程 / `/v1` 客户端的 raw model id、非 canonical 但可解码的 route，以及旧 `@ew/core` catalog helper exports 暂时保留兼容：它们全部委托新模块，避免破坏持久化线程和现有导入；后续只可在 major 版本迁移后删除，禁止在调用点重建语义。
+- `pi-native` 必须解析到 pi catalog runtime model，缺失时 actual resolve fail-closed；identity / projection 仍允许旧配置被列出、预检和删除。`GET /models.modelSources` 的 `reasoning/context` 来自同一配置模块投影。
 
 Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasoning:true` 的模型默认 `medium`，其它模型默认 `off`；用户显式选择 `off` 后也会按 route id 保存，不会在重载时恢复成 `medium`。
 
@@ -76,7 +88,8 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 
 - `LocalMemoryProvider` 是唯一可写真相源：全局 Core Memory 只有 User Profile / Agent Notes，工作区只有 conventions / decisions / pitfalls；Extracted Fact 在提升前带 Source Conversation 所有权。`AdditiveMemoryProvider` 只在 Agent/IM 的 recall 上叠加受扫描、限长、带来源与 untrusted fence 的外部结果，失败/禁用/移除不影响本地。外部 provider 当前只能由宿主经 `CreateCoreOptions.deepMemoryProvider` 注入；Desktop / CLI 没有创建、修改或删除配置的入口，`GET/PATCH /memory/provider` 仅在已注入后查询和启停。`Mem0MemoryProvider` 仍是适配骨架，不作为现成用户功能。HTTP 记忆管理面继续只编辑本地记忆。
 - `SessionHost` 同时服务 Chat、Workspace、CLI agent 和 IM，因此这些入口都获得相同记忆、`stage_skill_candidate` 与 pi Skill 发现；`/v1` 只调用模型 runtime helper，不进入上述链路。
-- `SkillCandidateStore/Service/Coordinator` 位于 core：foreground Learn 通过普通 Agent turn 暂存候选，background reviewer 只接收冻结 trajectory 和 Skill catalog，迁移器把旧 memory-layer skills 分类成 candidate/fact/ambiguous。只有用户批准会经过 package/工具/secret/injection/path/symlink/hash 验证并原子写入 Skill source。learned Skills 的遥测、patch、pin、stale/archive、snapshot/restore/rollback 也由该模块拥有。
+- `SourceConversationLifecycle` 是来源所有权与删除顺序的唯一 seam：thread / Project route 只请求 claim / discard / delete；模块在同一 SessionHost barrier 内清理 Extracted Facts、Candidate 证据、Conversation / FTS、pi session 和合格 chat scratch。用户 workspace 永不删除，scratch 删除失败非致命，其余所有权清理失败会让删除失败可见。
+- `SkillCandidateLifecycle` 位于 core：foreground Learn、background reviewer、routes、Agent tools 与旧层迁移只通过其接口。SQLite/filesystem store 和 reviewer 是内部 adapters；只有用户批准会经过 package/工具/secret/injection/path/symlink/hash 验证并原子写入 Skill source。learned Skills 的遥测、patch、pin、stale/archive、snapshot/restore/rollback 也由该模块拥有。
 
 ## 技术栈
 

@@ -15,7 +15,12 @@
 ## 关键文件（改宿主层从这里找）
 
 - `packages/core/src/agent/session-host.ts` — pi `createAgentSession` 封装；按 threadId 复用 `AgentSession` + **串行化 run**；`mapSessionEvent`(pi→SSE)；`resolveModel` + 本地模型默认采样注入；SessionManager 落盘 resume；`lastUsage`（上下文用量）。
+- `apps/ui/src/lib/agent-turn.ts` + `hooks/useAgentTurn.ts` — 客户端 **Agent Turn** 深模块：统一发送 / 重试 / 停止 / 审批 / SSE 消费 / usage / artifacts / final；Chat / Workspace 只提供请求与刷新 policy。
+- `apps/ui/src/lib/workbench-view-session.ts` + `hooks/useWorkbenchViewSession.ts` — **Workbench View Session** 深模块：统一视图打开 / 激活 / 关闭回退 / 文件与 URL 导航 / terminal 恢复与关闭确认；`SideDock` 只负责布局和渲染。
 - `packages/core/src/agent/ew-extensions.ts` — 记忆注入(`before_agent_start`)/抽取钩子；`toPiTool`(我们的 `Tool` → pi customTool)；`permissionExtensionFactory` + `escapesCwd`（工作区路径限定）。
+- `packages/core/src/conversations/source-conversation-lifecycle.ts` — **Source Conversation** 删除 / Project 删除深模块：统一 run claim、删除屏障、来源事实 / Skill Candidate / 消息 / FTS / pi session 清理与非致命 scratch 工件回收；不删除用户工作区目录。
+- `packages/core/src/skill-learning/candidate-service.ts` — `SkillCandidateLifecycle`：统一 Candidate 审核资格、验证、来源、批准、Learned Skill 遥测 / 固定 / 快照 / 归档 / 恢复 / 回滚；store / filesystem / reviewer 是内部 adapter。
+- `packages/core/src/providers/model-configuration.ts` — **Provider Model Configuration** 的唯一语义所有者：从保存配置解析 scoped route、上游 model id、最终 runtime model 与安全投影；`ProviderCatalog` 只负责目录 / probe，Manager / Agent runtime / HTTP 只消费结果。
 - `packages/core/src/server/app.ts` — Fastify 应用装配入口（`/agent/run`、`/v1`、`/models`、`/workspace/*`、`/threads/*`、`/providers`、`/local/runtime` …）；跨路由生命周期对象在这里创建并在 `stop()` 中统一收尾。
 - `packages/core/src/models/local-model-settings.ts` — 本地模型运行设置存储；`models.local.settings` 按模型保存默认采样参数，供聊天 / 工作区 / 渠道在未显式传参时共用。
 - `packages/core/src/channels/operations.ts` — Channel Operations 应用层模块：包住 `ChannelGateway` + `ConnectorHost`，集中连接器生命周期、Feishu/WeChat 扫码 setup session、inbox read model 与 SSE invalidation；HTTP routes 只做请求/响应适配。
@@ -33,7 +38,7 @@
 - `ChatStreamEvent`：判别联合 `text-delta` / `tool-call-start|args-delta|end` / `reasoning-delta` / `usage` / `done` / `error`。**不用裸字符串流**（无法表达 text 与 tool call 交织）。
 - `Tool` / `ToolProvider`：内置工具、MCP 工具统一成 `Tool`，再经 `toPiTool` 桥成 pi customTool（含 `ApprovalGate`）。**自研 `ToolRegistry`/agent loop 已删除**，agent 内核 = pi `AgentSession`。
 - `MemoryProvider`：`recall/write/edit/list/delete/deleteBySession/deleteByScope/observe`（均带 `scope`）。本地 Core Memory = 全局 User Profile / Agent Notes（markdown 投影）+ 工作区 conventions / decisions / pitfalls（DB-only）+ source-owned derived facts；sqlite-vec 语义 ⊕ 词法混合召回。外部 provider 只能通过 `CreateCoreOptions.deepMemoryProvider` 由宿主注入，再由 `AdditiveMemoryProvider` 追加受限、不可信召回，永不接管写入；Desktop / CLI 当前没有配置入口，`Mem0MemoryProvider` 仍是非用户态适配骨架。
-- `SkillCandidate` / `LearnedSkill`：foreground Learn、restricted background review 与旧层迁移只可暂存候选；批准前验证 package/路径/symlink/工具/secret/injection/content hash，批准才原子写入全局或工作区 Skill source 并失效会话。learned Skills 可记录反馈、固定、快照、可恢复归档和回滚。
+- `SkillCandidate` / `LearnedSkill`：foreground Learn、restricted background review、HTTP routes、Agent tools 与旧层迁移都只通过 `SkillCandidateLifecycle`；批准前验证 package/路径/symlink/工具/secret/injection/content hash，批准才原子写入全局或工作区 Skill source 并失效会话。learned Skills 可记录反馈、固定、快照、可恢复归档和回滚。
 - `AgentEvent`（SSE 对外）：`text/reasoning/tool-start/tool-end/tool-progress/approval-request/memory-recall/usage/retry/compaction/artifacts/final/error`。`mapSessionEvent` 把 pi 事件映射到它；`artifacts` 由 `SessionHost.run` 在普通对话的 thread 串行边界内生成，并在成功持久化后由 `/agent/run` 发出。
 - `ChannelAdapter` / `ChannelGateway` / `ChannelOperations`：平台 adapter 实现 `start/stop/send/handleWebhook?`，gateway 负责配置/状态/allowlist/webhook/出站 target；core 侧只通过 `ChannelOperations` 管理 gateway/host 生命周期、扫码 setup session、inbox read model 与失效事件。`ConnectorHost` 经 `resolveThreadForChannel(kind, channelUserId)` 映射渠道身份到 thread。渠道 secret 由 `ChannelSecretStore` 保存，SQLite 的 `im.connectors` 只保留非敏感配置；读取 API 的 `secrets` 恒为空，并以独立 read view 返回 `secretKeys`，空白编辑保留已存密钥，删除连接器同步删密钥。管理 API 走 daemon Bearer；外部 webhook 入口不要求内部 Bearer，需由平台 adapter 校验平台签名/secret；core 只为 webhook 捕获 raw body 供签名计算，并在读取前/读取中执行 32MiB 上限。Feishu/Lark 另有 `/im/feishu/register` 管理面扫码注册 helper，成功后自动保存 websocket connector；WeChat 另有 `/im/wechat/register`，对齐 Hermes 的腾讯 iLink QR 注册并保存 `accountId/token/baseUrl`；取消或 core stop 会 abort 未完成扫码会话。`/inbox/threads` 是基于现有 channel thread/message history 的只读 UI 聚合视图，不是第二套消息真相源；`/inbox/events` 只发 ready/changed 失效事件，前端收到后重新读取 read model，不做 4 秒轮询。旧 `ChannelConnector` 仍保留兼容测试和 Telegram long-poll 基础实现。
 
@@ -51,11 +56,15 @@
 8. **sqlite-vec**：`vec0` 表 rowid 须 `BigInt`；`distance_metric=cosine`；扩展为可选依赖，无二进制时降级纯词法（勿让其抛错中断启动）。
 9. **个人微信路线**：个人微信只走腾讯 iLink Bot API 的 bot 身份（扫码登录 + long-poll），不要回到 Web 微信/逆向普通号；群聊能力取决于 iLink 是否投递事件，默认关闭。企业微信仍走 WeCom。
 10. **渠道密钥不落 SQLite**：新增/扫码/迁移得到的渠道 secret 必须先写 `ChannelSecretStore`；SQLite 不存 secret，GET 响应只返回字段名。安全存储失败不得清除旧明文或伪装成保存成功。
+11. **Agent Turn 单一客户端生命周期**：Chat / Workspace 不得重新实现 `runAgent` 事件循环、审批、重试、停止或完成逻辑；差异经 `AgentTurnPolicy` 注入。
+12. **Workbench View Session 单一视图生命周期**：SideDock 不持有打开 / 关闭 / 恢复 / 导航规则；普通文件 / 浏览器 / diff 不跨应用重启持久化，只有 Desktop runtime 仍存在的 terminal 可重新附着。
+13. **Source Conversation 删除屏障**：thread / Project 删除、空 shell 回滚与 run claim 必须经 `SourceConversationLifecycle`；所有 source-owned 清理同序完成，scratch 失败非致命，用户 workspace 永不删除。
+14. **Skill Candidate 生命周期**：routes / tools / coordinator / migration 不得直接访问 candidate store；后台学习只生成 pending Candidate，只有显式批准可激活 Skill。
 
 ## 约定
 
 - **统一 npm**（环境无 pnpm）。
-- **测试 350 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 30 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
+- **测试 391 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 39 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
 - **已移除 node-llama-cpp + 经典 `llama-server`**：本地推理走外部统一 `llama`（llama.app）的 router 模式（`resolveLlamaBin` 只解析 `llama`；嵌入子进程也跑 `llama serve`）。**勿重新引入** node-llama-cpp，也**勿回退每模型一进程的经典 `llama-server`**（含 brew llama.cpp，已完全移除）。
 - **打包**：daemon → Node SEA **单文件二进制**（`scripts/build-daemon-sea.mjs`，运行免 Node；必须用参数化子进程调用，兼容 Windows 路径）；llama 运行时缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime` + `install.sh` / `install.ps1`）；Tauri WebView 启用显式 CSP；`v*` tag 先经 `release:check-version` 校验 npm/Tauri/Cargo 版本一致，再由 GitHub Actions 出 macOS dmg 与 Windows x64 NSIS/MSI。两端发布前必须跑 `smoke:daemon-sea`，Windows 还须跑 `release:check-artifacts`。
 - **改 Tauri Rust（`apps/desktop/src-tauri`）**：本环境有 `cargo`，可 `cargo check` 验证。
@@ -65,10 +74,10 @@
 ```bash
 npm install            # 装依赖
 npm run build          # turbo 构建全部包（含 ui/daemon dist）
-npm test               # vitest（350 通过；另 1 个真机 e2e 默认 skip）
+npm test               # vitest（391 通过；另 1 个真机 e2e 默认 skip）
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
-npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 30 条）
+npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 39 条）
 npm run typecheck      # 全量类型检查　·　npm run lint
 npm run release:check-version # 校验发布清单版本一致
 npm run smoke:daemon-sea      # 启动打包后的 SEA daemon 并验证 /health

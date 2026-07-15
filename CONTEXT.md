@@ -37,7 +37,7 @@ A bounded interaction that starts with one user submission and ends with a final
 _Avoid_: conversation, message, agent session
 
 **Workbench View Session**:
-The lifecycle of one open view in the workbench. Different view kinds may have different restoration rules.
+The lifecycle of the open-view set and its active view within one workbench scope, including creation, switching, hiding, restoration, and close fallback. Different view kinds may have different restoration rules.
 _Avoid_: dock tab, panel, window
 
 **Provider Model Configuration**:
