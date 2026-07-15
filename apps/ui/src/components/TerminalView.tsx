@@ -11,6 +11,17 @@ function decodeBase64(value: string): Uint8Array {
   return bytes;
 }
 
+function terminalTheme(host: HTMLElement) {
+  const hostStyle = getComputedStyle(host);
+  const rootStyle = getComputedStyle(document.documentElement);
+  return {
+    background: hostStyle.backgroundColor,
+    foreground: hostStyle.color,
+    cursor: hostStyle.color,
+    selectionBackground: rootStyle.getPropertyValue("--color-bg-tertiary").trim(),
+  };
+}
+
 export function TerminalView({
   runtime,
   session,
@@ -34,12 +45,7 @@ export function TerminalView({
       fontSize: 12,
       lineHeight: 1.25,
       scrollback: 10_000,
-      theme: {
-        background: "#0a0c10",
-        foreground: "#e8edf4",
-        cursor: "#e8edf4",
-        selectionBackground: "#334155",
-      },
+      theme: terminalTheme(host),
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
@@ -73,12 +79,17 @@ export function TerminalView({
     };
     const observer = new ResizeObserver(resize);
     observer.observe(host);
+    const themeObserver = new MutationObserver(() => {
+      terminal.options.theme = terminalTheme(host);
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     resize();
 
     return () => {
       disposed = true;
       detach?.();
       observer.disconnect();
+      themeObserver.disconnect();
       input.dispose();
       terminal.dispose();
     };
