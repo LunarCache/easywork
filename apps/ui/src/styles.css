@@ -1,5 +1,5 @@
 /* EasyWork UI — Tailwind v4 + "Agent Tasks" 设计语言（明暗双主题 · IBM Plex Sans/JetBrains Mono）。
-   策略：分层导入 Tailwind + @theme token；深色保留原黑灰 + 蓝色，浅色使用冷灰 + 青绿。
+   策略：分层导入 Tailwind + @theme token；深色保留原黑灰底，明暗主题统一使用青绿色强调色。
    旧语义别名（--bg/--surface/--text/--accent…）重映射到新 token，存量组件规则平滑过渡。
    明暗由 <html> data-theme 切换。 */
 
@@ -92,17 +92,16 @@
 @variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* ================================================================
-   深色基础强调色（蓝）；浅色主题覆盖为青绿
-   （逐字取自 Agent Tasks.dc.html / Design Spec.dc.html）
+   深色基础强调色（青绿）；浅色主题使用同色相的实色衍生 token
    ================================================================ */
 :root {
-  --acc: #3B82F6; --acc-weak: rgba(59, 130, 246, .15); --acc-bd: rgba(59, 130, 246, .42);
+  --acc: #0E9F8A; --acc-weak: rgba(14, 159, 138, .15); --acc-bd: rgba(14, 159, 138, .42);
   --logo-bg-start: #FFFFFF;
-  --logo-bg-end: #EDEEF4;
-  --logo-border: #D6DAE6;
-  --logo-glow: #5256E0;
-  --logo-mark-start: #5B5FEA;
-  --logo-mark-end: #4145CE;
+  --logo-bg-end: #EEF4F3;
+  --logo-border: #B8D8D3;
+  --logo-glow: #0E9F8A;
+  --logo-mark-start: #16AD97;
+  --logo-mark-end: #087F70;
 }
 
 /* ================================================================
@@ -155,7 +154,7 @@
 
 /* ================================================================
    浅色主题（[data-theme="light"]）—— 冷灰画布 + 青绿强调色。
-   深色主题继续使用 :root / @theme 的原黑灰 + 蓝色 token。
+   深色主题继续使用 :root / @theme 的原黑灰背景 token。
    ================================================================ */
 [data-theme="light"] {
   color-scheme: light;
@@ -163,12 +162,7 @@
   --acc-weak: #E2F4F0;
   --acc-bd: #8ACFC3;
 
-  --logo-bg-start: #FFFFFF;
-  --logo-bg-end: #EEF4F3;
   --logo-border: #D7E0E3;
-  --logo-glow: #0E9F8A;
-  --logo-mark-start: #16AD97;
-  --logo-mark-end: #087F70;
 
   --color-bg-primary: #F5F8F9;
   --color-bg-secondary: #EEF2F3;

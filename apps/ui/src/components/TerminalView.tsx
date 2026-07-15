@@ -15,7 +15,7 @@ function terminalTheme(host: Element) {
     background: computed.backgroundColor || "#0d0e12",
     foreground: computed.color || "#e7e9ed",
     cursor: computed.color || "#e7e9ed",
-    selectionBackground: cssToken(root, "--acc-weak", "rgba(59, 130, 246, .15)"),
+    selectionBackground: cssToken(root, "--acc-weak", "rgba(14, 159, 138, .15)"),
   };
 }
 

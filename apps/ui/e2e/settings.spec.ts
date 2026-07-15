@@ -10,6 +10,9 @@ test.describe("settings e2e", () => {
     await page.getByRole("button", { name: "浅色", exact: true }).click();
     await page.getByRole("button", { name: "深色", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect.poll(async () =>
+      page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--acc").trim()),
+    ).toBe("#0E9F8A");
 
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
