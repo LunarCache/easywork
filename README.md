@@ -82,7 +82,7 @@ flowchart LR
 - 对话模式：适合问答、总结、联网搜索和多模态输入。
 - 工作区模式：在本地项目目录内读写文件、运行 Agent 工具、查看 git diff，并预览文件。
 - Chat 与 Workspace 共用同一 Agent Turn 生命周期，发送、重试、停止、审批、用量、工件和完成语义不会在两个页面各自演化。
-- 右侧工作台坞：空态先显示新任务、浏览器与 Desktop 终端快捷入口，不自动创建“文件”标签；按需打开改动、文件、浏览器视图，关闭最后标签后回到空态。Desktop 专属的多标签真终端仍使用独立生命周期，在对话区底部打开并跟随主题。用户 shell 由 Tauri PTY 托管，不与 Agent 工具命令混用。
+- 右侧工作台坞：空态先显示新任务、浏览器与 Desktop 终端快捷入口，不自动创建“文件”标签；按需打开改动、文件、浏览器视图，关闭最后标签后回到空态。Desktop 远程网页使用原生子 WebView，能打开拒绝 iframe 嵌入的网站；Web 运行时保留 sandbox iframe。Desktop 专属的多标签真终端仍使用独立生命周期，在对话区底部打开并跟随主题。用户 shell 由 Tauri PTY 托管，不与 Agent 工具命令混用。
 - 行内工具调用：思考、探索、编辑、运行、web search 等过程结构化展示。
 
 ### 模型与网关
@@ -187,11 +187,11 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 395 passed / 1 skipped
+npm test               # vitest: 396 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
-npm run test:e2e       # Playwright UI e2e: 45 条，真 daemon + 真 Vite + 隔离 data dir
+npm run test:e2e       # Playwright UI e2e: 46 条，真 daemon + 真 Vite + 隔离 data dir
 
 npm run dev:daemon     # 仅启动 daemon，首行输出 {baseUrl, token, pid}
 npm run dev:ui         # 仅启动 Vite
@@ -209,15 +209,15 @@ npm run smoke:daemon-sea
 npm run release:check-artifacts -- windows
 ```
 
-发布流程：推送 `v*` tag 触发 [`release.yml`](.github/workflows/release.yml)，先运行 `npm run release:check-version` 校验 npm / Tauri / Cargo 版本与 tag 一致；macOS Apple Silicon runner 构建 dmg，Windows x64 runner 构建 NSIS + MSI，两端都先对 SEA daemon `/health` 做真实冒烟，Windows 还会检查 sidecar、`vec0.dll` 与安装包完整性后再上传 Releases。普通 CI 也会执行 Windows NSIS 关键路径构建。Desktop WebView 启用显式 CSP，保留 Tauri IPC、本地 daemon 与沙盒预览所需来源，同时禁止远程脚本、对象插件和表单提交。
+发布流程：推送 `v*` tag 触发 [`release.yml`](.github/workflows/release.yml)，先运行 `npm run release:check-version` 校验 npm / Tauri / Cargo 版本与 tag 一致；macOS Apple Silicon runner 构建 dmg，Windows x64 runner 构建 NSIS + MSI，两端都先对 SEA daemon `/health` 做真实冒烟，Windows 还会检查 sidecar、`vec0.dll` 与安装包完整性后再上传 Releases。普通 CI 也会执行 Windows NSIS 关键路径构建。Desktop 主 WebView 启用显式 CSP；capability 只授权本地 `main` WebView，承载任意远程网页的子 WebView 不继承 Tauri IPC 权限。
 
 ---
 
 ## 测试覆盖
 
-- Vitest：395 passed / 1 skipped。
+- Vitest：396 passed / 1 skipped。
 - 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
-- Playwright UI e2e 共 45 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、`/learn` 对话学习入口、工作台无标签空态、动态标签与独立真终端、贯穿式布局拖拽边界、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
+- Playwright UI e2e 共 46 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、`/learn` 对话学习入口、工作台无标签空态、动态标签与独立真终端、贯穿式布局拖拽边界、Desktop 原生网页 surface 生命周期、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
 
 ---

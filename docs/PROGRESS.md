@@ -15,7 +15,7 @@
 - **记忆（作用域化）**：Core Memory = User Profile / Agent Notes；每工作区私有 conventions / decisions / pitfalls；derived facts 保留来源所有权，manifest 有界；sqlite-vec ⊕ 词法召回，markdown 可手改回灌。外部 provider 当前仅为宿主注入 seam，Desktop / CLI 无配置入口，Mem0 仍是骨架；注入后也只做 additive、受限且可关闭的召回。
 - **Skill 学习闭环**：Chat `/learn` / 设置显式 Learn + restricted background review → pending Candidate → 用户审核批准 → 全局/工作区原子激活；支持证据、package 安全验证、来源删除、乐观锁 patch、使用反馈、pin、stale、可恢复归档、快照与回滚。
 - **思考能力与过程**：`reasoning` 能力由运行时模型投影到 UI，推理模型首次默认中档、显式关闭按模型持久化；reasoning 内容落库并跨会话回放（不回喂模型）。
-- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon，并以 `portable-pty` 托管窗口级真终端）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 可调宽「工作台」面板（无标签空态快捷入口、标题栏可关闭动态标签、HTML 直达浏览器、文件主从 / 放大双栏、窄屏浮层）+ 标题栏独立终端按钮与对话区底部多终端面板 + 外部渠道聊天优先收件箱（唯一顶层标题、紧凑列表头、统一渠道品牌图标）+ 整页设置（`SettingsHost` page-host，模型/渠道/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；WebView 启用显式 CSP，保留 IPC/daemon/预览来源并禁止远程脚本、对象插件与表单提交。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon，以 `portable-pty` 托管窗口级真终端，并以无 IPC 权限的原生子 WebView 承载远程网页）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 可调宽「工作台」面板（无标签空态快捷入口、标题栏可关闭动态标签、HTML 直达浏览器、文件主从 / 放大双栏、窄屏浮层）+ 标题栏独立终端按钮与对话区底部多终端面板 + 外部渠道聊天优先收件箱（唯一顶层标题、紧凑列表头、统一渠道品牌图标）+ 整页设置（`SettingsHost` page-host，模型/渠道/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；主 WebView 启用显式 CSP，capability 只授权本地 `main` WebView。
 - **外部渠道**：`@ew/im-connectors` Channel Gateway（adapter registry + 配置/状态 + allowlist + webhook 分发），core 侧 `ChannelOperations` 统一连接器生命周期、Feishu/WeChat 扫码 setup session、收件箱 read model 与 SSE invalidation；Telegram 已迁入同一抽象并支持可取消 long-poll；Feishu/Lark 默认走官方 SDK WebSocket 长连接并支持扫码创建应用，高级模式保留 webhook（URL verification、token/signature、加密回调解密、文本收发），且 public webhook 只在 `transport:webhook` + 验证 secret 配置完整时启用；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；渠道 secret 已迁到 macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI，旧 SQLite 明文自动迁移并去敏；Discord / 企业微信待补平台 adapter。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP / IM 非敏感配置）+ 系统渠道密钥存储。
 - **命令行（CLI）**：SEA daemon 二进制同时也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性；无位置参数时可从 stdin 读取，`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。macOS / Windows 安装包仅把该二进制作为 desktop sidecar，不会把 `easywork` 命令安装到 `PATH`。
@@ -35,6 +35,14 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-15 — Desktop 工作台浏览器改用原生 WebView
+
+- **根因**：远程 URL 原先始终放入 React iframe；百度等站点通过 CSP `frame-ancestors` / `X-Frame-Options` 拒绝第三方嵌入，所以地址已规范化且 iframe 已导航，内容区仍保持白屏。
+- **原生 surface**：Desktop http(s) 页面改由 Tauri `browser_surface` 子 WebView 承载，React 只保留地址 chrome 和内容 host；边界随 SideDock 拖拽、窄屏浮层、放大与隐藏同步，关闭和 scope dispose 由 Workbench View Session 统一回收。Web 运行时继续 sandbox iframe，HTML 工件继续受控 `srcDoc`。
+- **安全隔离**：capability 从窗口级 `windows:["main"]` 收紧为 `webviews:["main"]`，任意远程页面不会继承本地 Tauri IPC；Rust 入口再次限制 http(s)、有限边界和弹窗拒绝。
+- **回归与真机**：配置测试锁定 capability，Rust 单测覆盖 URL / 边界校验，Playwright 锁定 show / reload / hide / close 生命周期；debug `.app` 真机确认 `baidu.com` 实际加载、关闭抽屉无残留、放大后边界正确。
+- **全量验收**：Vitest **396 passed / 1 skipped**、Playwright **46 passed**、Rust **5 passed**；lint、typecheck、build、`cargo check`、debug `.app` 构建与真实页面视觉检查均通过。
 
 ## 2026-07-15 — 工作台无标签空态启动器
 

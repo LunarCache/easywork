@@ -3,6 +3,7 @@ import type { WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { matchFileTarget } from "../lib/file-target.js";
 import { resolvePreviewKind } from "../lib/preview.js";
+import type { NativeBrowserRuntime } from "../lib/native-browser-runtime.js";
 import {
   WorkbenchViewSession,
   type WorkbenchBrowserTarget,
@@ -19,6 +20,7 @@ interface WorkbenchViewSessionOptions {
   fileTarget?: WorkbenchFileTarget | null;
   hasDiff: boolean;
   routeFileTargetsToDiff: boolean;
+  nativeBrowserRuntime: NativeBrowserRuntime;
 }
 
 /** React/daemon adapter for the framework-independent Workbench View Session module. */
@@ -50,6 +52,7 @@ export function useWorkbenchViewSession(options: WorkbenchViewSessionOptions) {
             ? { kind: "html", name: meta.name, html: meta.text ?? "" }
             : null;
         },
+        closeSurface: () => latest.current.nativeBrowserRuntime.close(),
       },
     });
   }
@@ -62,6 +65,10 @@ export function useWorkbenchViewSession(options: WorkbenchViewSessionOptions) {
   );
 
   useEffect(() => session.reconcileFiles(), [options.files, session]);
+
+  useEffect(() => () => {
+    void session.dispose();
+  }, [session]);
 
   useEffect(() => {
     if (options.browserTarget) {

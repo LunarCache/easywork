@@ -12,7 +12,9 @@ use serde::Serialize;
 use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
+mod browser_surface;
 mod terminal;
+use browser_surface::BrowserSurfaceManager;
 use terminal::TerminalSessionManager;
 
 #[derive(Clone, Serialize)]
@@ -89,10 +91,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .manage(BrowserSurfaceManager::default())
         .manage(TerminalSessionManager::default())
         .invoke_handler(tauri::generate_handler![
             get_config,
             select_workspace_dir,
+            browser_surface::browser_surface_show,
+            browser_surface::browser_surface_hide,
+            browser_surface::browser_surface_reload,
+            browser_surface::browser_surface_close,
             terminal::terminal_list,
             terminal::terminal_create,
             terminal::terminal_attach,
@@ -140,6 +147,9 @@ pub fn run() {
         .expect("Tauri 初始化失败")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(window) = app_handle.get_window("main") {
+                    app_handle.state::<BrowserSurfaceManager>().close(&window);
+                }
                 app_handle.state::<TerminalSessionManager>().close_all();
                 // 退出时回收 daemon 子进程。
                 if let Some(mut child) = app_handle.state::<AppState>().child.lock().unwrap().take()

@@ -17,6 +17,7 @@
 - `packages/core/src/agent/session-host.ts` — pi `createAgentSession` 封装；按 threadId 复用 `AgentSession` + **串行化 run**；`mapSessionEvent`(pi→SSE)；`resolveModel` + 本地模型默认采样注入；SessionManager 落盘 resume；`lastUsage`（上下文用量）。
 - `apps/ui/src/lib/agent-turn.ts` + `hooks/useAgentTurn.ts` — 客户端 **Agent Turn** 深模块：统一发送 / 重试 / 停止 / 审批 / SSE 消费 / usage / artifacts / final；Chat / Workspace 只提供请求与刷新 policy。
 - `apps/ui/src/lib/workbench-view-session.ts` + `hooks/useWorkbenchViewSession.ts` — **Workbench View Session** 深模块：统一工作台零视图初态、视图打开 / 激活 / 关闭回退与文件、URL 导航；`SideDock` 只负责布局、空态动作和渲染。
+- `apps/ui/src/lib/native-browser-runtime.ts` + `apps/desktop/src-tauri/src/browser_surface.rs` — Desktop Browser surface adapter：远程 http(s) 页面由无 IPC 权限的 Tauri 子 WebView 承载并同步 SideDock 边界；关闭 / dispose 仍由 Workbench View Session 统一拥有，Web 运行时仍使用 sandbox iframe，HTML 工件仍用受控 `srcDoc`。
 - `apps/ui/src/lib/terminal-panel-session.ts` + `hooks/useTerminalPanelSession.ts` — **Terminal Panel Session** 深模块：统一 Desktop PTY 恢复、创建、激活、关闭回退与前台任务确认；终端独立于 SideDock，在对话区底部渲染。
 - `packages/core/src/agent/ew-extensions.ts` — 记忆注入(`before_agent_start`)/抽取钩子；`toPiTool`(我们的 `Tool` → pi customTool)；`permissionExtensionFactory` + `escapesCwd`（工作区路径限定）。
 - `packages/core/src/conversations/source-conversation-lifecycle.ts` — **Source Conversation** 删除 / Project 删除深模块：统一 run claim、删除屏障、来源事实 / Skill Candidate / 消息 / FTS / pi session 清理与非致命 scratch 工件回收；不删除用户工作区目录。
@@ -65,7 +66,7 @@
 ## 约定
 
 - **统一 npm**（环境无 pnpm）。
-- **测试 395 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 45 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
+- **测试 396 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 46 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
 - **已移除 node-llama-cpp + 经典 `llama-server`**：本地推理走外部统一 `llama`（llama.app）的 router 模式（`resolveLlamaBin` 只解析 `llama`；嵌入子进程也跑 `llama serve`）。**勿重新引入** node-llama-cpp，也**勿回退每模型一进程的经典 `llama-server`**（含 brew llama.cpp，已完全移除）。
 - **打包**：daemon → Node SEA **单文件二进制**（`scripts/build-daemon-sea.mjs`，运行免 Node；必须用参数化子进程调用，兼容 Windows 路径）；llama 运行时缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime` + `install.sh` / `install.ps1`）；Tauri WebView 启用显式 CSP；`v*` tag 先经 `release:check-version` 校验 npm/Tauri/Cargo 版本一致，再由 GitHub Actions 出 macOS dmg 与 Windows x64 NSIS/MSI。两端发布前必须跑 `smoke:daemon-sea`，Windows 还须跑 `release:check-artifacts`。
 - **改 Tauri Rust（`apps/desktop/src-tauri`）**：本环境有 `cargo`，可 `cargo check` 验证。
@@ -75,10 +76,10 @@
 ```bash
 npm install            # 装依赖
 npm run build          # turbo 构建全部包（含 ui/daemon dist）
-npm test               # vitest（395 通过；另 1 个真机 e2e 默认 skip）
+npm test               # vitest（396 通过；另 1 个真机 e2e 默认 skip）
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
-npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 45 条）
+npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 46 条）
 npm run typecheck      # 全量类型检查　·　npm run lint
 npm run release:check-version # 校验发布清单版本一致
 npm run smoke:daemon-sea      # 启动打包后的 SEA daemon 并验证 /health

@@ -77,6 +77,7 @@ async function installFakeTerminalRuntime(page: import("@playwright/test").Page,
               persistSessions();
               return "closed";
             }
+            if (command.startsWith("browser_surface_")) return null;
             throw new Error(`unexpected command: ${command}`);
           },
         },
@@ -118,6 +119,62 @@ test.describe("navigation e2e", () => {
     await expect(page.getByTestId("terminal-toggle")).toHaveCount(0);
     await page.getByTitle("打开工作台").click();
     await expect(page.getByTestId("side-dock-empty").getByRole("button", { name: /终端/ })).toHaveCount(0);
+  });
+
+  test("Desktop 远程网页使用无 iframe 限制的原生 WebView surface", async ({ page, openApp, info }) => {
+    await installFakeTerminalRuntime(page, info);
+    await openApp();
+    await page.getByTitle("打开工作台").click();
+    await page.getByTestId("side-dock-empty").getByRole("button", { name: /浏览器/ }).click();
+
+    const address = page.getByRole("textbox", { name: "浏览器地址" });
+    await address.fill("baidu.com");
+    await address.press("Enter");
+
+    await expect(page.getByTestId("native-browser-surface")).toBeVisible();
+    await expect(page.locator(".side-dock .wpv-frame")).toHaveCount(0);
+    await expect.poll(async () => page.evaluate(() => {
+      const calls = (window as unknown as {
+        __fakeTerminal: { calls: Array<{ command: string; args: Record<string, unknown> }> };
+      }).__fakeTerminal.calls;
+      return calls.findLast((call) => call.command === "browser_surface_show") ?? null;
+    })).toMatchObject({
+      command: "browser_surface_show",
+      args: {
+        url: "https://baidu.com/",
+        bounds: {
+          x: expect.any(Number),
+          y: expect.any(Number),
+          width: expect.any(Number),
+          height: expect.any(Number),
+        },
+      },
+    });
+
+    await page.locator(".preview-tab").getByTitle("刷新").click();
+    await expect.poll(async () => page.evaluate(() => {
+      const calls = (window as unknown as {
+        __fakeTerminal: { calls: Array<{ command: string }> };
+      }).__fakeTerminal.calls;
+      return calls.at(-1)?.command;
+    })).toBe("browser_surface_reload");
+
+    await page.getByTitle("关闭工作台").click();
+    await expect.poll(async () => page.evaluate(() => {
+      const calls = (window as unknown as {
+        __fakeTerminal: { calls: Array<{ command: string }> };
+      }).__fakeTerminal.calls;
+      return calls.at(-1)?.command;
+    })).toBe("browser_surface_hide");
+
+    await page.getByTitle("打开工作台").click();
+    await page.getByTitle("关闭浏览器标签").click();
+    await expect.poll(async () => page.evaluate(() => {
+      const calls = (window as unknown as {
+        __fakeTerminal: { calls: Array<{ command: string }> };
+      }).__fakeTerminal.calls;
+      return calls.some((call) => call.command === "browser_surface_close");
+    })).toBe(true);
   });
 
   test("Desktop PTY 在对话区底部独立打开，支持多会话、隐藏恢复和关闭", async ({ page, openApp, info }) => {

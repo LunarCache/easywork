@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import type { GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { isMacOS } from "../lib/desktop.js";
+import { getNativeBrowserRuntime, type NativeBrowserRuntime } from "../lib/native-browser-runtime.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { FileViewer } from "./FileViewer.js";
 import { fileType, formatFileSize } from "../lib/filetype.js";
@@ -124,6 +125,7 @@ export function SideDock({
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const repo = !!git?.status.repo;
+  const nativeBrowserRuntime = useMemo(() => getNativeBrowserRuntime(), []);
   const {
     views: openViews,
     activeViewId,
@@ -144,6 +146,7 @@ export function SideDock({
     fileTarget: target,
     hasDiff: Boolean(git),
     routeFileTargetsToDiff: repo,
+    nativeBrowserRuntime,
   });
   const mac = isMacOS();
   const terminalAvailable = Boolean(onOpenTerminal);
@@ -332,7 +335,9 @@ export function SideDock({
           <PreviewTab
             page={activeView.page ?? null}
             onNavigate={navigateBrowser}
-            onClear={clearBrowser}
+            onClear={() => void clearBrowser()}
+            nativeRuntime={nativeBrowserRuntime}
+            visible={open}
           />
         )}
       </div>
@@ -422,15 +427,19 @@ function FilesTab({
   return selectedPath ? <div className="files-detail">{fileViewer}</div> : fileList;
 }
 
-// ===== 浏览器 tab：消息链接、HTML 文件或用户输入地址 → iframe 浏览 =====
+// ===== 浏览器 tab：Desktop URL → 原生子 WebView；Web URL / HTML 文件 → iframe =====
 function PreviewTab({
   page,
   onNavigate,
   onClear,
+  nativeRuntime,
+  visible,
 }: {
   page: WorkbenchBrowserPage | null;
   onNavigate: (url: string) => Promise<WorkbenchNavigationResult>;
   onClear: () => void;
+  nativeRuntime: NativeBrowserRuntime;
+  visible: boolean;
 }) {
   const [nonce, setNonce] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -499,14 +508,24 @@ function PreviewTab({
       </div>
       {error && <div className="wpv-error">{error}</div>}
       {page?.kind === "url" ? (
-        <iframe
-          key={`${page.url}#${nonce}`}
-          className="wpv-frame"
-          src={page.url}
-          title="网页预览"
-          referrerPolicy="no-referrer"
-          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-        />
+        nativeRuntime.available ? (
+          <NativeBrowserSurface
+            url={page.url}
+            refreshNonce={nonce}
+            runtime={nativeRuntime}
+            visible={visible}
+            onError={setError}
+          />
+        ) : (
+          <iframe
+            key={`${page.url}#${nonce}`}
+            className="wpv-frame"
+            src={page.url}
+            title="网页预览"
+            referrerPolicy="no-referrer"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+          />
+        )
       ) : page?.kind === "html" ? (
         <iframe
           key={`${page.name}#${nonce}`}
@@ -520,6 +539,76 @@ function PreviewTab({
       )}
     </div>
   );
+}
+
+function NativeBrowserSurface({
+  url,
+  refreshNonce,
+  runtime,
+  visible,
+  onError,
+}: {
+  url: string;
+  refreshNonce: number;
+  runtime: NativeBrowserRuntime;
+  visible: boolean;
+  onError: (message: string) => void;
+}) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const refreshRef = useRef(refreshNonce);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || !visible) {
+      void runtime.hide();
+      return;
+    }
+
+    let frame = 0;
+    let lastBounds = "";
+    const sync = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rect = host.getBoundingClientRect();
+        if (rect.width < 1 || rect.height < 1) {
+          lastBounds = "";
+          void runtime.hide();
+          return;
+        }
+        const bounds = {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
+        const nextBounds = `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`;
+        if (nextBounds === lastBounds) return;
+        lastBounds = nextBounds;
+        void runtime.show(url, bounds).catch((error: unknown) => {
+          onError(`无法打开原生浏览器：${error instanceof Error ? error.message : String(error)}`);
+        });
+      });
+    };
+
+    const observer = new ResizeObserver(sync);
+    observer.observe(host);
+    window.addEventListener("resize", sync);
+    sync();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", sync);
+      void runtime.hide();
+    };
+  }, [onError, runtime, url, visible]);
+
+  useEffect(() => {
+    if (refreshRef.current === refreshNonce) return;
+    refreshRef.current = refreshNonce;
+    if (visible) void runtime.reload();
+  }, [refreshNonce, runtime, visible]);
+
+  return <div ref={hostRef} className="wpv-native-surface" data-testid="native-browser-surface" />;
 }
 
 // ===== 改动 tab：git 审查（分组/hunk/commit/push/pull/history）=====

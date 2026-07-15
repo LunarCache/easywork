@@ -1,17 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { WorkbenchViewSession, type WorkbenchViewAdapters } from "./workbench-view-session.js";
 
 function localAdapters(): WorkbenchViewAdapters {
   return {
     diff: { available: () => true, routeFileTargets: () => true },
     files: { resolve: (path) => ({ path, kind: "file" }), contains: () => true },
-    browser: { loadHtml: async () => null },
+    browser: { loadHtml: async () => null, closeSurface: vi.fn(async () => undefined) },
   };
 }
 
 describe("WorkbenchViewSession", () => {
   it("owns opening, activation, adjacent close fallback, and the empty-view lifecycle", async () => {
-    const session = new WorkbenchViewSession(localAdapters());
+    const adapters = localAdapters();
+    const session = new WorkbenchViewSession(adapters);
 
     expect(session.getState()).toEqual({ views: [], activeViewId: null, error: null });
 
@@ -27,7 +28,9 @@ describe("WorkbenchViewSession", () => {
     });
 
     await session.close("preview");
+    expect(session.getState().views.some((view) => view.kind === "browser")).toBe(false);
     expect(session.getState().activeViewId).toBe("diff");
+    expect(adapters.browser.closeSurface).toHaveBeenCalledOnce();
     await session.close("diff");
     expect(session.getState()).toMatchObject({ views: [], activeViewId: null });
   });
@@ -61,7 +64,7 @@ describe("WorkbenchViewSession", () => {
     expect(session.getState().views[0]).toMatchObject({
       page: { kind: "html", name: "report.html", html: "<h1>Report</h1>" },
     });
-    session.clearBrowser();
+    await session.clearBrowser();
     expect(session.getState().views[0]).toMatchObject({ page: null });
 
     await session.navigate({ kind: "file", path: "src/index.ts" });
@@ -75,5 +78,9 @@ describe("WorkbenchViewSession", () => {
     adapters.files.contains = () => false;
     session.reconcileFiles();
     expect(session.getState().views.find((view) => view.kind === "files")).toMatchObject({ selection: null });
+
+    const surfaceCloseCalls = vi.mocked(adapters.browser.closeSurface).mock.calls.length;
+    await session.dispose();
+    expect(adapters.browser.closeSurface).toHaveBeenCalledTimes(surfaceCloseCalls + 1);
   });
 });

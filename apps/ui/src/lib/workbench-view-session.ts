@@ -42,7 +42,10 @@ export interface WorkbenchViewAdapters {
     resolve(path: string): { path: string; kind: "file" | "html" };
     contains(path: string): boolean;
   };
-  browser: { loadHtml(path: string): Promise<WorkbenchBrowserPage | null> };
+  browser: {
+    loadHtml(path: string): Promise<WorkbenchBrowserPage | null>;
+    closeSurface(): Promise<void>;
+  };
 }
 
 export type WorkbenchNavigation =
@@ -106,12 +109,14 @@ export class WorkbenchViewSession {
   async close(id: string): Promise<boolean> {
     const index = this.state.views.findIndex((view) => view.id === id);
     if (index < 0) return false;
+    const closing = this.state.views[index];
     const remaining = this.state.views.filter((view) => view.id !== id);
     const activeViewId =
       this.state.activeViewId === id
         ? remaining[Math.min(index, remaining.length - 1)]?.id ?? null
         : this.state.activeViewId;
     this.setState({ views: remaining, activeViewId });
+    if (closing?.kind === "browser") await this.releaseBrowserSurface();
     return true;
   }
 
@@ -130,6 +135,7 @@ export class WorkbenchViewSession {
         const page = await this.adapters.browser.loadHtml(resolved.path);
         if (page?.kind === "html") {
           this.setBrowserPage(page);
+          await this.releaseBrowserSurface();
           return { status: "navigated", destination: "browser" };
         }
       } catch {
@@ -152,11 +158,17 @@ export class WorkbenchViewSession {
     return { status: "navigated", destination: "files" };
   }
 
-  clearBrowser(): void {
+  async clearBrowser(): Promise<void> {
     const views = this.state.views.map((view) =>
       view.kind === "browser" ? { ...view, page: null } : view,
     );
     this.setState({ views });
+    await this.releaseBrowserSurface();
+  }
+
+  async dispose(): Promise<void> {
+    this.listeners.clear();
+    await this.releaseBrowserSurface();
   }
 
   clearFileSelection(): void {
@@ -174,6 +186,14 @@ export class WorkbenchViewSession {
 
   reportError(error: unknown): void {
     this.setState({ error: error instanceof Error ? error.message : String(error) });
+  }
+
+  private async releaseBrowserSurface(): Promise<void> {
+    try {
+      await this.adapters.browser.closeSurface();
+    } catch {
+      // Surface cleanup is best-effort; view state must still finish transitioning.
+    }
   }
 
   private staticView(kind: "diff" | "files" | "browser"): WorkbenchView {

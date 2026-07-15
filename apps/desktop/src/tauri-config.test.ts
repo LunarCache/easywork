@@ -18,4 +18,17 @@ describe("Tauri desktop security config", () => {
     expect(csp?.["object-src"]).toEqual(["'none'"]);
     expect(csp?.["base-uri"]).toEqual(["'self'"]);
   });
+
+  it("grants IPC permissions only to the bundled main webview", () => {
+    const capabilityPath = path.resolve(import.meta.dirname, "../src-tauri/capabilities/default.json");
+    const capability = JSON.parse(fs.readFileSync(capabilityPath, "utf8")) as {
+      windows?: string[];
+      webviews?: string[];
+      remote?: unknown;
+    };
+
+    expect(capability.windows).toBeUndefined();
+    expect(capability.webviews).toEqual(["main"]);
+    expect(capability.remote).toBeUndefined();
+  });
 });

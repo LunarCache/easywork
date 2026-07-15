@@ -23,7 +23,7 @@
   └──────────────────┘  └──────────────┘  └────────────────┘  └────────────────┘
 ```
 
-- **Tauri 主进程（Rust）**：创建窗口并持有 daemon child；读取 child stdout 首行的 `{baseUrl, token}`，保存后通过 `get_config` 返回给 webview，退出时杀掉 child。它还拥有 Desktop 专属的窗口内 PTY 会话：`portable-pty` 启动用户默认 shell，Tauri Channel 把有序字节流送到 xterm，IPC 负责创建 / 附着 / 输入 / resize / 关闭；浏览器 UI 不暴露该能力。PTY 只在应用进程内存活，抽屉隐藏、标签切换或 WebView reload 可重新附着，关闭标签结束会话，应用退出统一回收，不写入 daemon / SQLite，也不与 Agent `bash` 工具混用。Rust 层目前没有菜单或自动更新，也不负责 HTTP 探活；React UI 会重试 `get_config`，再请求 `/health`。WebView 使用显式 CSP：放行 Tauri IPC、本地 daemon、data/blob 媒体与沙盒预览来源，禁止远程脚本、对象插件、表单提交和外部页面嵌入主窗口。**打包时启动随附的单文件 daemon 二进制（Node SEA，免 Node）**；开发时运行 `node $EW_DAEMON_ENTRY serve`。
+- **Tauri 主进程（Rust）**：创建窗口并持有 daemon child；读取 child stdout 首行的 `{baseUrl, token}`，保存后通过 `get_config` 返回给 webview，退出时杀掉 child。它还拥有两类 Desktop 专属资源：① 窗口内 PTY 会话——`portable-pty` 启动用户默认 shell，Tauri Channel 把有序字节流送到 xterm，IPC 负责创建 / 附着 / 输入 / resize / 关闭；② 工作台远程浏览 surface——`browser_surface` 为任意 http(s) URL 创建同窗 Tauri 子 WebView，按 React host 的逻辑像素边界移动 / 缩放 / 隐藏，避免第三方 `frame-ancestors` / `X-Frame-Options` 拒绝 iframe。PTY 只在应用进程内存活，抽屉隐藏、标签切换或 WebView reload 可重新附着，关闭标签结束会话，应用退出统一回收，不写入 daemon / SQLite，也不与 Agent `bash` 工具混用。Rust 层目前没有菜单或自动更新，也不负责 HTTP 探活；React UI 会重试 `get_config`，再请求 `/health`。主 WebView 使用显式 CSP，并且 capability 只绑定本地 `main` WebView；加载不可信网页的子 WebView 无远程 capability，不能调用 Tauri IPC。**打包时启动随附的单文件 daemon 二进制（Node SEA，免 Node）**；开发时运行 `node $EW_DAEMON_ENTRY serve`。
 - **Core daemon 的三种进程形态**：显式 `easywork serve` 在前台运行；需要 daemon 且启用自动启动的 CLI 命令探测不到服务时，会 detached spawn 自身的 `serve` 并 `unref()`（`status` / `stop` 只检查现有服务，不自启）；Tauri 启动的是由桌面主进程持有、随应用退出回收的 child，不是 detached 自启进程。
 - **本地推理**：统一 `llama`（llama.app）的 **router 模式** —— 1 个 `llama serve --models-dir` 进程，按请求 `model`（即模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰。嵌入模型走独立 `llama serve -m --embedding` 进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，供记忆向量召回；缺失则降级纯词法）。
 
@@ -54,7 +54,7 @@ packages/
   im-connectors/  @ew/im-connectors Channel Gateway + adapter registry（Telegram long-poll；Feishu/Lark WebSocket 默认 + webhook 高级模式；WeChat iLink QR + long-poll；Discord / WeCom 规划中）
   sdk/            @ew/sdk           daemon HTTP API 的类型化客户端
 apps/
-  desktop/        @ew/desktop       Tauri 2 外壳（Rust src-tauri）+ daemon child + 窗口级 PTY 会话
+  desktop/        @ew/desktop       Tauri 2 外壳（Rust src-tauri）+ daemon child + 窗口级 PTY / Browser WebView
   ui/             @ew/ui            React 19 + Vite 前端
   daemon/         @ew/daemon        CLI 入口 easywork + core daemon 的 serve 宿主
 ```
