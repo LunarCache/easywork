@@ -62,9 +62,7 @@ import {
   modelsDir as defaultModelsDir,
   chatWorkspaceDir,
 } from "../config/paths.js";
-import { SkillCandidateStore } from "../skill-learning/candidate-store.js";
-import { SkillCandidateService } from "../skill-learning/candidate-service.js";
-import { SkillLearningCoordinator } from "../skill-learning/coordinator.js";
+import { SkillCandidateLifecycle } from "../skill-learning/candidate-service.js";
 import {
   createSourceConversationLifecycle,
   type SourceConversationLifecycle,
@@ -264,34 +262,21 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     builtins: builtinTools,
     localModelSettings,
   });
-  const skillCandidateStore = new SkillCandidateStore(
-    opts.skillLearningDbPath ?? fsPath.join(defaultDataDir(), "skill-learning.db"),
-  );
   const primarySkillSource = skillSources.find((source) => source.primary) ?? skillSources[0];
   const skillsDir = primarySkillSource?.dir ?? fsPath.join(agentDir, "skills");
-  const skillCandidates = new SkillCandidateService({
-    store: skillCandidateStore,
+  const skillLifecycle = new SkillCandidateLifecycle({
+    dbPath: opts.skillLearningDbPath ?? fsPath.join(defaultDataDir(), "skill-learning.db"),
     skills,
     skillsDir,
     repo,
-    sessionHost,
+    sessionInvalidator: sessionHost,
     archiveDir: fsPath.join(fsPath.dirname(agentDir), "skill-archive"),
     knownTools: () => [
       "read", "write", "edit", "bash", "grep", "find", "ls",
       "manage_memory", "recall_memory", "session_search", "stage_skill_candidate",
       ...builtinTools.map((tool) => tool.definition.name),
     ],
-  });
-  const sourceConversations = createSourceConversationLifecycle(sessionHost, memory, skillCandidates, repo);
-  skills.setOpenListener((skill) => skillCandidates.recordUseByPath(skill.bodyPath));
-  sessionHost.setSkillCandidateStager((input) => skillCandidates.stage(input));
-  const skillLearning = new SkillLearningCoordinator({
-    store: skillCandidateStore,
-    candidates: skillCandidates,
-    skills,
-    reviewer: async ({ trajectory, catalog }) => {
-      const settings = skillCandidateStore.getState<{ learnerModel?: string }>("settings", {});
-      const model = settings.learnerModel ?? trajectory.model;
+    reviewer: async ({ trajectory, catalog }, model) => {
       let engine;
       try {
         engine = registry.resolve(model);
@@ -327,6 +312,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       return parsed.action === "candidate" ? (parsed.candidate as never) : null;
     },
   });
+  const sourceConversations = createSourceConversationLifecycle(sessionHost, memory, skillLifecycle, repo);
+  skills.setOpenListener((skill) => skillLifecycle.recordUseByPath(skill.bodyPath));
+  sessionHost.setSkillCandidateStager((input) => skillLifecycle.stage(input));
   // 一次性收口旧 global.skills：程序化条目进入待审核候选，事实进入 Agent Notes，歧义项只读保留。
   for (const legacy of memory.listLegacySkillMemory().filter((item) => !item.disposition)) {
     const procedural = /(?:^|\s)(?:npm|pnpm|yarn|git|docker|curl|python|node)\s|(?:先|然后|步骤|流程|运行|执行|命令)/i.test(legacy.text);
@@ -334,7 +322,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     try {
       if (procedural) {
         const name = `legacy-${legacy.id.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "workflow"}`;
-        skillCandidates.stage({
+        skillLifecycle.stage({
           name,
           description: "Imported legacy procedural memory pending review",
           triggerConditions: ["when the imported legacy workflow is relevant"],
@@ -470,7 +458,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
         })) {
           if (event.type === "tool-start") {
             toolCalls.set(event.call.id, { name: event.call.name, ok: true });
-            const learnedId = skillCandidates.learnedIdForToolCall(
+            const learnedId = skillLifecycle.learnedIdForToolCall(
               event.call.name,
               event.call.arguments,
               chatWorkspaceDir(input.threadId),
@@ -489,9 +477,9 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
           yield event;
         }
         if (sawFinal && !input.signal?.aborted) {
-          for (const learnedId of usedLearnedSkills) skillCandidates.recordTelemetry(learnedId, "use");
+          for (const learnedId of usedLearnedSkills) skillLifecycle.recordTelemetry(learnedId, "use");
           const calls = [...toolCalls.values()];
-          skillLearning.schedule({
+          skillLifecycle.schedule({
             threadId: input.threadId,
             memoryScope: GLOBAL_SCOPE,
             model: modelId,
@@ -616,8 +604,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     sessionHost,
     skills,
     skillsDir,
-    skillCandidates,
-    skillLearning,
+    skillLifecycle,
     mcp,
     channels,
     channelOps,
@@ -730,6 +717,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       } catch {
         /* ignore */
       }
+      await skillLifecycle.close().catch(() => {});
       await local.stopAll().catch(() => {});
       await channelOps.stopAll().catch(() => {});
       await embeddings.stop().catch(() => {});
@@ -740,11 +728,6 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
       }
       try {
         memory.close();
-      } catch {
-        /* ignore */
-      }
-      try {
-        skillCandidateStore.close();
       } catch {
         /* ignore */
       }

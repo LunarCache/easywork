@@ -1,13 +1,13 @@
 import {
   SkillCandidateCreateSchema,
   SkillLearningSettingsSchema,
+  type LearnedSkill,
+  type SkillCandidate,
   type SkillCandidateCreate,
   type SkillLearningSettings,
   type SkillLearningStatus,
 } from "@ew/shared";
 import type { SkillManager } from "@ew/skills";
-import type { SkillCandidateService } from "./candidate-service.js";
-import type { SkillCandidateStore } from "./candidate-store.js";
 
 export interface SkillTrajectorySnapshot {
   threadId: string;
@@ -38,7 +38,24 @@ export interface RestrictedSkillReviewInput {
 
 export type RestrictedSkillReviewer = (
   input: RestrictedSkillReviewInput,
+  model: string,
 ) => Promise<SkillCandidateCreate | null>;
+
+export interface SkillCandidateReviewPort {
+  stage(input: SkillCandidateCreate): SkillCandidate;
+  reviewContextForSkill(skillPath: string, includePackage?: boolean): {
+    id: string;
+    contentHash: string;
+    skillMd?: string;
+    packageFiles?: Record<string, string>;
+  } | null;
+  listLearned(): LearnedSkill[];
+}
+
+export interface SkillLearningStatePort {
+  get<T>(key: string, fallback: T): T;
+  set(key: string, value: unknown): void;
+}
 
 const DEFAULT_SETTINGS: SkillLearningSettings = {
   enabled: true,
@@ -50,27 +67,30 @@ const DEFAULT_STATUS: SkillLearningStatus = { running: false };
 const SECRET_BEARING = /(?:\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*\S{6,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk|ghp|xox[baprs])-[-_a-z0-9]{8,})/i;
 
 export class SkillLearningCoordinator {
+  private readonly scheduledReviews = new Set<Promise<void>>();
+  private closing = false;
+
   constructor(
     private readonly deps: {
-      store: SkillCandidateStore;
-      candidates: SkillCandidateService;
+      state: SkillLearningStatePort;
+      candidates: SkillCandidateReviewPort;
       skills: SkillManager;
       reviewer: RestrictedSkillReviewer;
     },
   ) {}
 
   settings(): SkillLearningSettings {
-    return SkillLearningSettingsSchema.parse(this.deps.store.getState("settings", DEFAULT_SETTINGS));
+    return SkillLearningSettingsSchema.parse(this.deps.state.get("settings", DEFAULT_SETTINGS));
   }
 
   updateSettings(patch: Partial<SkillLearningSettings>): SkillLearningSettings {
     const next = SkillLearningSettingsSchema.parse({ ...this.settings(), ...patch });
-    this.deps.store.setState("settings", next);
+    this.deps.state.set("settings", next);
     return next;
   }
 
   status(): SkillLearningStatus {
-    return this.deps.store.getState("status", DEFAULT_STATUS);
+    return this.deps.state.get("status", DEFAULT_STATUS);
   }
 
   shouldReview(snapshot: SkillTrajectorySnapshot): boolean {
@@ -82,17 +102,25 @@ export class SkillLearningCoordinator {
   }
 
   schedule(snapshot: SkillTrajectorySnapshot): void {
-    if (snapshot.model) this.deps.store.setState("last-model", snapshot.model);
+    if (this.closing) return;
+    if (snapshot.model) this.deps.state.set("last-model", snapshot.model);
     const settings = this.settings();
     if (!settings.automaticReview || !this.shouldReview(snapshot)) {
       this.writeStatus({ running: false, lastRunAt: new Date().toISOString(), lastResult: "skipped" });
       return;
     }
-    void this.review(snapshot).catch(() => {});
+    const scheduled = this.review(snapshot).then(() => {}, () => {});
+    this.scheduledReviews.add(scheduled);
+    void scheduled.finally(() => this.scheduledReviews.delete(scheduled));
+  }
+
+  async close(): Promise<void> {
+    this.closing = true;
+    await Promise.allSettled([...this.scheduledReviews]);
   }
 
   async review(snapshot: SkillTrajectorySnapshot, opts: { independent?: boolean } = {}): Promise<SkillLearningStatus> {
-    if (snapshot.model) this.deps.store.setState("last-model", snapshot.model);
+    if (snapshot.model) this.deps.state.set("last-model", snapshot.model);
     if (!this.shouldReview(snapshot)) {
       const status: SkillLearningStatus = { running: false, lastRunAt: new Date().toISOString(), lastResult: "skipped" };
       this.writeStatus(status);
@@ -132,10 +160,11 @@ export class SkillLearningCoordinator {
           ...(include && full ? { skillMd: full.skillMd, packageFiles: full.packageFiles } : {}),
         });
       }
+      const model = this.settings().learnerModel ?? snapshot.model;
       const proposal = await this.deps.reviewer({
         trajectory: Object.freeze({ ...snapshot, toolCalls: snapshot.toolCalls.map((call) => ({ ...call })) }),
         catalog,
-      });
+      }, model);
       if (!proposal) {
         const status: SkillLearningStatus = { running: false, lastRunAt: new Date().toISOString(), lastResult: "nothing" };
         this.writeStatus(status);
@@ -198,7 +227,7 @@ export class SkillLearningCoordinator {
     const usedLearnedSkillIds = eligible
       .filter((skill) => skill.scope === first.scope && skill.workspaceId === first.workspaceId)
       .map((skill) => skill.id);
-    const model = settings.learnerModel ?? this.deps.store.getState<string>("last-model", "");
+    const model = settings.learnerModel ?? this.deps.state.get<string>("last-model", "");
     if (!model) {
       const status: SkillLearningStatus = {
         running: false,
@@ -222,6 +251,6 @@ export class SkillLearningCoordinator {
   }
 
   private writeStatus(status: SkillLearningStatus): void {
-    this.deps.store.setState("status", status);
+    this.deps.state.set("status", status);
   }
 }

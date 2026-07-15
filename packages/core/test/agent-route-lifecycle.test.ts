@@ -43,11 +43,11 @@ describe("agent route Source Conversation lifecycle", () => {
         discardEmpty,
         deleteProject: vi.fn(),
       },
-      skillCandidates: {
+      skillLifecycle: {
         learnedIdForToolCall: () => undefined,
         recordTelemetry: vi.fn(),
+        schedule: vi.fn(),
       },
-      skillLearning: { schedule: vi.fn() },
     } as unknown as CoreHttpContext;
     registerAgentRoutes(context);
 

@@ -52,7 +52,7 @@ const ApproveSchema = z.object({
 });
 
 export function registerAgentRoutes(ctx: CoreHttpContext): void {
-  const { app, registry, providers, repo, sessionHost, sourceConversations, skillCandidates, skillLearning } = ctx;
+  const { app, registry, providers, repo, sessionHost, sourceConversations, skillLifecycle } = ctx;
   const approvalRegistry = new ApprovalRegistry();
 
   app.post("/agent/run", async (req, reply) => {
@@ -169,7 +169,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
         }
         if (ev.type === "tool-start") {
           learningToolCalls.set(ev.call.id, { name: ev.call.name, ok: true });
-          const learnedId = skillCandidates.learnedIdForToolCall(ev.call.name, ev.call.arguments, runWorkspaceDir);
+          const learnedId = skillLifecycle.learnedIdForToolCall(ev.call.name, ev.call.arguments, runWorkspaceDir);
           if (learnedId) learnedSkillReads.set(ev.call.id, learnedId);
         }
         if (ev.type === "tool-end") {
@@ -240,9 +240,9 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
         });
         if (committed) {
           if (artifacts.length) send({ type: "artifacts", artifacts });
-          for (const learnedId of usedLearnedSkills) skillCandidates.recordTelemetry(learnedId, "use");
+          for (const learnedId of usedLearnedSkills) skillLifecycle.recordTelemetry(learnedId, "use");
           const toolCalls = [...learningToolCalls.values()];
-          skillLearning.schedule({
+          skillLifecycle.schedule({
             threadId,
             memoryScope: isWorkspace && projectId ? workspaceScope(projectId) : GLOBAL_SCOPE,
             model: parsed.data.model,

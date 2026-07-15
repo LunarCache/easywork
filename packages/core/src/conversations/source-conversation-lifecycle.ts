@@ -3,7 +3,7 @@ import { workspaceScope } from "@ew/shared";
 import { chatWorkspaceDir } from "../config/paths.js";
 import type { SessionHost } from "../agent/session-host.js";
 import type { LocalMemoryProvider } from "@ew/memory";
-import type { SkillCandidateService } from "../skill-learning/candidate-service.js";
+import type { SkillCandidateLifecycle } from "../skill-learning/candidate-service.js";
 import type { SqliteConversationRepo } from "../store/conversation.js";
 
 export interface SourceConversationDeleteResult {
@@ -41,7 +41,7 @@ class DefaultSourceConversationLifecycle implements SourceConversationLifecycle 
   constructor(
     private readonly sessionHost: SessionHost,
     private readonly memory: LocalMemoryProvider,
-    private readonly skillCandidates: SkillCandidateService,
+    private readonly skillLifecycle: Pick<SkillCandidateLifecycle, "deleteWorkspace" | "removeSource">,
     private readonly repo: SqliteConversationRepo,
   ) {}
 
@@ -107,13 +107,13 @@ class DefaultSourceConversationLifecycle implements SourceConversationLifecycle 
       await this.delete(thread.id);
     }
     await this.memory.deleteByScope(workspaceScope(projectId));
-    this.skillCandidates.deleteWorkspace(projectId);
+    this.skillLifecycle.deleteWorkspace(projectId);
     this.repo.deleteProject(projectId);
   }
 
   private async removeOwnedState(threadId: string): Promise<number> {
     const factsRemoved = await this.memory.deleteBySession(threadId);
-    this.skillCandidates.removeSource(threadId);
+    this.skillLifecycle.removeSource(threadId);
     this.repo.deleteThread(threadId);
     return factsRemoved;
   }
@@ -130,8 +130,8 @@ class DefaultSourceConversationLifecycle implements SourceConversationLifecycle 
 export function createSourceConversationLifecycle(
   sessionHost: SessionHost,
   memory: LocalMemoryProvider,
-  skillCandidates: SkillCandidateService,
+  skillLifecycle: Pick<SkillCandidateLifecycle, "deleteWorkspace" | "removeSource">,
   repo: SqliteConversationRepo,
 ): SourceConversationLifecycle {
-  return new DefaultSourceConversationLifecycle(sessionHost, memory, skillCandidates, repo);
+  return new DefaultSourceConversationLifecycle(sessionHost, memory, skillLifecycle, repo);
 }

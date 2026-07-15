@@ -12,8 +12,7 @@ import type { ProviderManager } from "../providers/manager.js";
 import type { SessionHost } from "../agent/session-host.js";
 import type { SqliteConversationRepo } from "../store/conversation.js";
 import type { EmbeddingService } from "../memory/embedding-service.js";
-import type { SkillCandidateService } from "../skill-learning/candidate-service.js";
-import type { SkillLearningCoordinator } from "../skill-learning/coordinator.js";
+import type { SkillCandidateLifecycle } from "../skill-learning/candidate-service.js";
 import type { SourceConversationLifecycle } from "../conversations/source-conversation-lifecycle.js";
 
 export interface CoreHttpContext {
@@ -26,8 +25,7 @@ export interface CoreHttpContext {
   sessionHost: SessionHost;
   skills: SkillManager;
   skillsDir: string;
-  skillCandidates: SkillCandidateService;
-  skillLearning: SkillLearningCoordinator;
+  skillLifecycle: SkillCandidateLifecycle;
   mcp: McpClientManager;
   channels: ChannelGateway;
   channelOps: ChannelOperations;

@@ -3,7 +3,7 @@ import fsPath from "node:path";
 import type { CoreHttpContext } from "../context.js";
 
 export function registerSkillRoutes(ctx: CoreHttpContext): void {
-  const { app, skills, skillsDir, skillCandidates } = ctx;
+  const { app, skills, skillsDir, skillLifecycle } = ctx;
 
   app.get("/skills", async () => {
     await skills.discover().catch(() => {});
@@ -16,7 +16,7 @@ export function registerSkillRoutes(ctx: CoreHttpContext): void {
     if (!skill) return reply.code(404).send({ error: "not_found" });
     try {
       const body = fs.readFileSync(skill.bodyPath, "utf8");
-      skillCandidates.recordViewByPath(skill.bodyPath);
+      skillLifecycle.recordViewByPath(skill.bodyPath);
       return { body, bodyPath: skill.bodyPath };
     } catch (e) {
       return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });

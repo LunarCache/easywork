@@ -45,16 +45,16 @@ async function readBoundedText(response: Response, maxBytes = 256_000): Promise<
 }
 
 export function registerSkillLearningRoutes(ctx: CoreHttpContext): void {
-  const { app, skillCandidates, skillLearning, repo } = ctx;
+  const { app, skillLifecycle, repo } = ctx;
 
   app.get("/skill-learning/status", async () => ({
-    settings: skillLearning.settings(),
-    status: skillLearning.status(),
+    settings: skillLifecycle.settings(),
+    status: skillLifecycle.status(),
   }));
   app.patch("/skill-learning/settings", async (req, reply) => {
     const patch = SkillLearningSettingsSchema.partial().safeParse(req.body ?? {});
     if (!patch.success) return reply.code(400).send({ error: "invalid_skill_learning_settings" });
-    return { settings: skillLearning.updateSettings(patch.data) };
+    return { settings: skillLifecycle.updateSettings(patch.data) };
   });
   app.post("/skill-learning/review", async (req, reply) => {
     const requested = (req.body ?? {}) as { threadId?: string };
@@ -70,7 +70,7 @@ export function registerSkillLearningRoutes(ctx: CoreHttpContext): void {
     const calls = history.flatMap((message) => message.toolCalls ?? []);
     const results = history.flatMap((message) => message.toolResults ?? []);
     const toolCalls = calls.map((call, index) => ({ name: call.name, ok: results[index] ? !results[index]!.isError : false }));
-    return skillLearning.review({
+    return skillLifecycle.review({
       threadId: thread.id,
       memoryScope: thread.projectId ? `ws:${thread.projectId}` : "global",
       model: thread.modelId,
@@ -79,7 +79,7 @@ export function registerSkillLearningRoutes(ctx: CoreHttpContext): void {
       toolCalls,
     });
   });
-  app.post("/skill-learning/consolidate", async () => skillLearning.consolidate());
+  app.post("/skill-learning/consolidate", async () => skillLifecycle.consolidate());
 
   app.post("/skill-learning/prepare", async (req, reply) => {
     const parsed = LearnPrepareSchema.safeParse(req.body);
@@ -131,14 +131,14 @@ export function registerSkillLearningRoutes(ctx: CoreHttpContext): void {
     return { prompt, ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}) };
   });
 
-  app.get("/skill-candidates", async () => ({ candidates: skillCandidates.list() }));
+  app.get("/skill-candidates", async () => ({ candidates: skillLifecycle.list() }));
   app.get("/skill-candidates/:id", async (req, reply) => {
-    const candidate = skillCandidates.get((req.params as { id: string }).id);
+    const candidate = skillLifecycle.get((req.params as { id: string }).id);
     return candidate ?? reply.code(404).send({ error: "candidate_not_found" });
   });
   app.get("/skill-candidates/:id/diff", async (req, reply) => {
     try {
-      return { diff: skillCandidates.diff((req.params as { id: string }).id) };
+      return { diff: skillLifecycle.diff((req.params as { id: string }).id) };
     } catch (error) {
       return failure(reply, error);
     }
@@ -147,7 +147,7 @@ export function registerSkillLearningRoutes(ctx: CoreHttpContext): void {
     const parsed = SkillCandidateCreateSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_candidate", detail: parsed.error.format() });
     try {
-      return skillCandidates.stage(parsed.data);
+      return skillLifecycle.stage(parsed.data);
     } catch (error) {
       return failure(reply, error);
     }
@@ -156,7 +156,7 @@ export function registerSkillLearningRoutes(ctx: CoreHttpContext): void {
     const patch = CandidateRevisionSchema.safeParse(req.body ?? {});
     if (!patch.success) return reply.code(400).send({ error: "invalid_candidate_revision" });
     try {
-      return skillCandidates.revise((req.params as { id: string }).id, patch.data);
+      return skillLifecycle.revise((req.params as { id: string }).id, patch.data);
     } catch (error) {
       return failure(reply, error);
     }
@@ -165,14 +165,14 @@ export function registerSkillLearningRoutes(ctx: CoreHttpContext): void {
     const body = (req.body ?? {}) as { scope?: "global" | "workspace"; workspaceId?: string };
     if (body.scope !== "global" && body.scope !== "workspace") return reply.code(400).send({ error: "invalid_scope" });
     try {
-      return skillCandidates.changeScope((req.params as { id: string }).id, body.scope, body.workspaceId);
+      return skillLifecycle.changeScope((req.params as { id: string }).id, body.scope, body.workspaceId);
     } catch (error) {
       return failure(reply, error);
     }
   });
   app.post("/skill-candidates/:id/reject", async (req, reply) => {
     try {
-      return skillCandidates.reject(
+      return skillLifecycle.reject(
         (req.params as { id: string }).id,
         (req.body as { reason?: string } | undefined)?.reason,
       );
@@ -182,16 +182,16 @@ export function registerSkillLearningRoutes(ctx: CoreHttpContext): void {
   });
   app.post("/skill-candidates/:id/approve", async (req, reply) => {
     try {
-      return await skillCandidates.approve((req.params as { id: string }).id);
+      return await skillLifecycle.approve((req.params as { id: string }).id);
     } catch (error) {
       return failure(reply, error);
     }
   });
 
-  app.get("/learned-skills", async () => ({ skills: skillCandidates.listLearned() }));
+  app.get("/learned-skills", async () => ({ skills: skillLifecycle.listLearned() }));
   app.post("/learned-skills/:id/pin", async (req, reply) => {
     try {
-      return skillCandidates.pinLearned(
+      return skillLifecycle.pinLearned(
         (req.params as { id: string }).id,
         (req.body as { pinned?: boolean } | undefined)?.pinned ?? true,
       );
@@ -209,7 +209,7 @@ export function registerSkillLearningRoutes(ctx: CoreHttpContext): void {
       };
       if (!body.outcome) return reply.code(400).send({ error: "outcome_required" });
       return {
-        candidate: skillCandidates.stagePatchFromFeedback((req.params as { id: string }).id, {
+        candidate: skillLifecycle.stagePatchFromFeedback((req.params as { id: string }).id, {
           outcome: body.outcome,
           ...(body.sourceThreadId ? { sourceThreadId: body.sourceThreadId } : {}),
           ...(body.proposedSkillMd ? { proposedSkillMd: body.proposedSkillMd } : {}),
@@ -222,29 +222,29 @@ export function registerSkillLearningRoutes(ctx: CoreHttpContext): void {
   });
   app.post("/learned-skills/:id/archive", async (req, reply) => {
     try {
-      return skillCandidates.archiveLearned((req.params as { id: string }).id);
+      return skillLifecycle.archiveLearned((req.params as { id: string }).id);
     } catch (error) {
       return failure(reply, error);
     }
   });
   app.post("/learned-skills/:id/restore", async (req, reply) => {
     try {
-      return skillCandidates.restoreLearned((req.params as { id: string }).id);
+      return skillLifecycle.restoreLearned((req.params as { id: string }).id);
     } catch (error) {
       return failure(reply, error);
     }
   });
   app.get("/learned-skills/:id/snapshots", async (req) => ({
-    snapshots: skillCandidates.listSnapshots((req.params as { id: string }).id),
+    snapshots: skillLifecycle.listSnapshots((req.params as { id: string }).id),
   }));
   app.post("/learned-skills/:id/rollback", async (req, reply) => {
     const snapshotId = (req.body as { snapshotId?: string } | undefined)?.snapshotId;
     if (!snapshotId) return reply.code(400).send({ error: "snapshot_required" });
     try {
-      return skillCandidates.rollbackLearned((req.params as { id: string }).id, snapshotId);
+      return skillLifecycle.rollbackLearned((req.params as { id: string }).id, snapshotId);
     } catch (error) {
       return failure(reply, error);
     }
   });
-  app.post("/skill-learning/curate", async () => ({ report: skillCandidates.curate() }));
+  app.post("/skill-learning/curate", async () => ({ report: skillLifecycle.curate() }));
 }

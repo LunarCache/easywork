@@ -12,8 +12,12 @@ import {
   type SkillValidationReport,
 } from "@ew/shared";
 import type { SqliteConversationRepo } from "../store/conversation.js";
-import type { SessionHost } from "../agent/session-host.js";
 import { SkillCandidateStore } from "./candidate-store.js";
+import {
+  SkillLearningCoordinator,
+  type RestrictedSkillReviewer,
+  type SkillTrajectorySnapshot,
+} from "./coordinator.js";
 
 const SECRET_PATTERNS = [
   /\b(?:sk|ghp|xox[baprs])-[-_a-z0-9]{8,}\b/i,
@@ -50,18 +54,86 @@ function packageContentHash(skillMd: string, packageFiles: Record<string, string
   return contentHash(JSON.stringify({ skillMd, files }));
 }
 
-export interface SkillCandidateServiceDeps {
-  store: SkillCandidateStore;
+export interface SkillCandidateLifecycleDeps {
+  dbPath: string;
   skills: SkillManager;
   skillsDir: string;
   repo: SqliteConversationRepo;
-  sessionHost: SessionHost;
+  sessionInvalidator: { invalidateAll(): void };
   archiveDir: string;
+  reviewer: RestrictedSkillReviewer;
   knownTools?: () => Iterable<string>;
 }
 
-export class SkillCandidateService {
-  constructor(private readonly deps: SkillCandidateServiceDeps) {}
+interface SkillCandidateLifecycleInternalDeps extends Omit<SkillCandidateLifecycleDeps, "dbPath" | "reviewer" | "sessionInvalidator"> {
+  store: SkillCandidateStore;
+  sessionHost: SkillCandidateLifecycleDeps["sessionInvalidator"];
+}
+
+export class SkillCandidateLifecycle {
+  private readonly deps: SkillCandidateLifecycleInternalDeps;
+  private readonly learning: SkillLearningCoordinator;
+  private closePromise?: Promise<void>;
+
+  constructor(deps: SkillCandidateLifecycleDeps) {
+    const store = new SkillCandidateStore(deps.dbPath);
+    this.deps = {
+      store,
+      skills: deps.skills,
+      skillsDir: deps.skillsDir,
+      repo: deps.repo,
+      sessionHost: deps.sessionInvalidator,
+      archiveDir: deps.archiveDir,
+      ...(deps.knownTools ? { knownTools: deps.knownTools } : {}),
+    };
+    this.learning = new SkillLearningCoordinator({
+      state: {
+        get: <T>(key: string, fallback: T) => store.getState(key, fallback),
+        set: (key: string, value: unknown) => store.setState(key, value),
+      },
+      candidates: this,
+      skills: deps.skills,
+      reviewer: deps.reviewer,
+    });
+  }
+
+  close(): Promise<void> {
+    this.closePromise ??= this.closeOwnedResources();
+    return this.closePromise;
+  }
+
+  private async closeOwnedResources(): Promise<void> {
+    await this.learning.close();
+    this.deps.store.close();
+  }
+
+  settings() {
+    return this.learning.settings();
+  }
+
+  updateSettings(patch: Parameters<SkillLearningCoordinator["updateSettings"]>[0]) {
+    return this.learning.updateSettings(patch);
+  }
+
+  status() {
+    return this.learning.status();
+  }
+
+  shouldReview(snapshot: SkillTrajectorySnapshot): boolean {
+    return this.learning.shouldReview(snapshot);
+  }
+
+  schedule(snapshot: SkillTrajectorySnapshot): void {
+    this.learning.schedule(snapshot);
+  }
+
+  review(snapshot: SkillTrajectorySnapshot, opts?: { independent?: boolean }) {
+    return this.learning.review(snapshot, opts);
+  }
+
+  consolidate() {
+    return this.learning.consolidate();
+  }
 
   validate(input: SkillCandidateCreate | SkillCandidate): SkillValidationReport {
     const findings: SkillValidationFinding[] = [];
