@@ -119,13 +119,13 @@ test.describe("settings e2e", () => {
     await page.getByPlaceholder("openrouter").fill("mixed-provider");
     await page.getByPlaceholder("https://.../v1").fill("https://mixed.example/v1");
 
-    await page.getByTitle("默认连接 API 协议").selectOption("anthropic-messages");
     await expect(page.getByTestId("provider-connection-default").locator(".provider-connection-preview"))
-      .toContainText("https://mixed.example/v1/messages");
+      .toContainText("https://mixed.example/v1/chat/completions");
     await page.getByRole("button", { name: "添加连接方式" }).click();
     const override = page.getByTestId("provider-connection-override");
-    await override.getByTitle("连接 2 API 协议").selectOption("openai-completions");
-    await override.getByTitle("连接 2 Base URL").fill("https://mixed-openai.example/v1");
+    await override.getByTitle("连接 2 API 协议").selectOption("anthropic-messages");
+    await expect(override.locator(".provider-connection-preview"))
+      .toContainText("https://mixed.example/v1/messages");
 
     const entry = page.locator(".provider-model-entry").first();
     const row = entry.locator(".provider-model-row");
@@ -152,8 +152,8 @@ test.describe("settings e2e", () => {
     await expect(page.locator(".provider-model-bulkbar label")).toHaveCSS("white-space", "nowrap");
 
     await page.getByRole("button", { name: "添加 Provider" }).click();
-    await expect.poll(() => savedProvider?.modelConfigs?.[0]?.api).toBe("openai-completions");
-    expect(savedProvider?.modelConfigs?.[0]?.baseUrl).toBe("https://mixed-openai.example/v1");
+    await expect.poll(() => savedProvider?.modelConfigs?.[0]?.api).toBe("anthropic-messages");
+    expect(savedProvider?.modelConfigs?.[0]?.baseUrl).toBeUndefined();
   });
 
   test("编辑自定义模型商时保留模型连接字段的独立继承", async ({ page, openApp }) => {

@@ -36,6 +36,12 @@
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
 
+## 2026-07-15 — Anthropic Messages 请求路径与预览对齐
+
+- **根因**：混合协议 Provider 的默认 OpenAI Base URL 常以 `/v1` 结尾；Anthropic 连接留空继承该地址后，Core 原样交给会自行追加 `/v1/messages` 的 SDK，真实请求成为 `/v1/v1/messages`，但 UI 预览显示 `/v1/messages`。
+- **运行时修复**：Provider Model Configuration 在有效协议为 `anthropic-messages` 时仅规范化 runtime Base URL，移除末尾 `/v1` 或 `/v1/messages`；保存配置和 UI 输入不改，OpenAI Chat / Responses 路径不受影响。
+- **回归锁定**：Core + pi 真实调用测试直接捕获最终 HTTP URL，修复前为 `/v1/v1/messages`，修复后必须为 `/v1/messages`；Playwright 覆盖默认 OpenAI + 新增 Anthropic + 空 Base URL 的界面预览与保存。全量验收：Vitest **399 passed / 1 skipped**、Playwright **46 passed**，`lint` / `typecheck` / `build` 均通过。
+
 ## 2026-07-15 — Desktop bundle 强制重建 SEA daemon
 
 - **根因**：直接调用 `tauri build` 只重建 UI / Rust 壳，可能复用旧 `dist-sea`；本次因此出现新 UI 已提交 `connections[]`，旧 daemon schema 却静默丢弃字段并返回成功。

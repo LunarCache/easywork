@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { complete, type Api, type Model } from "@earendil-works/pi-ai";
 import { ProviderModelConfiguration } from "../src/providers/model-configuration.js";
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("Provider Model Configuration", () => {
   it("owns the final runtime model derived from saved configuration and catalog metadata", () => {
@@ -47,7 +49,7 @@ describe("Provider Model Configuration", () => {
         name: "DeepSeek V4 Pro",
         api: "anthropic-messages",
         provider: "cloud/prime",
-        baseUrl: "https://cloudprime.example/v1",
+        baseUrl: "https://cloudprime.example",
         reasoning: true,
         thinkingLevelMap: { high: "high", xhigh: "max" },
         input: ["text"],
@@ -162,6 +164,36 @@ describe("Provider Model Configuration", () => {
       api: "anthropic-messages",
       baseUrl: "https://mixed.example",
     });
+  });
+
+  it("does not duplicate /v1 when Anthropic Messages inherits an OpenAI-style base URL", async () => {
+    let requestedUrl = "";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      requestedUrl = input instanceof Request ? input.url : String(input);
+      return new Response(JSON.stringify({ error: { message: "test stop" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+    }));
+    const configuration = new ProviderModelConfiguration({ providers: () => [], model: () => undefined });
+    const saved = configuration.normalize({
+      id: "mixed-protocol",
+      baseUrl: "https://mixed.example/v1",
+      api: "openai-completions",
+      modelConfigs: [{
+        id: "anthropic-model",
+        api: "anthropic-messages",
+        contextWindow: 32_768,
+        inputModalities: ["text"],
+      }],
+    });
+    const runtimeModel = configuration.resolve(saved, "anthropic-model")!.runtimeModel;
+
+    await complete(runtimeModel, {
+      messages: [{ role: "user", content: "ping", timestamp: 0 }],
+    }, { apiKey: "test-only", maxRetries: 0 });
+
+    expect(requestedUrl).toBe("https://mixed.example/v1/messages");
   });
 
   it("keeps pi-native protocol identity and cost while applying saved capability overrides", () => {

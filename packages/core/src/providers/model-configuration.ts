@@ -159,6 +159,7 @@ export class ProviderModelConfiguration {
     template: Model<Api> | undefined,
   ): Model<Api> {
     const api = (modelConfig.api ?? cfg.api ?? "openai-completions") as Api;
+    const baseUrl = runtimeBaseUrlForApi(api, modelConfig.baseUrl ?? cfg.baseUrl ?? "");
     const inheritedCompat = template?.api === api ? materializeCatalogCompat(template) : undefined;
     const compat = api === "openai-completions"
       ? { ...SAFE_CUSTOM_OPENAI_COMPLETIONS_COMPAT, ...inheritedCompat }
@@ -168,7 +169,7 @@ export class ProviderModelConfiguration {
       name: template?.name ?? modelConfig.id,
       api,
       provider: cfg.id,
-      baseUrl: modelConfig.baseUrl ?? cfg.baseUrl ?? "",
+      baseUrl,
       reasoning: modelConfig.reasoning ?? template?.reasoning ?? false,
       ...(template?.thinkingLevelMap ? { thinkingLevelMap: template.thinkingLevelMap } : {}),
       input: normalizeModalities(modelConfig.inputModalities),
@@ -213,6 +214,12 @@ export class ProviderModelConfiguration {
     return candidates.find((model) => lowerId.startsWith(model.provider.toLowerCase()))
       ?? (candidates.length === 1 ? candidates[0] : undefined);
   }
+}
+
+/** pi-ai's Anthropic client appends `/v1/messages`; accept user-facing API roots ending in `/v1`. */
+function runtimeBaseUrlForApi(api: Api, baseUrl: string): string {
+  if (api !== "anthropic-messages") return baseUrl;
+  return baseUrl.replace(/\/v1(?:\/messages)?$/, "");
 }
 
 const defaultConfiguration = new ProviderModelConfiguration();

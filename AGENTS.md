@@ -22,7 +22,7 @@
 - `packages/core/src/agent/ew-extensions.ts` — 记忆注入(`before_agent_start`)/抽取钩子；`toPiTool`(我们的 `Tool` → pi customTool)；`permissionExtensionFactory` + `escapesCwd`（工作区路径限定）。
 - `packages/core/src/conversations/source-conversation-lifecycle.ts` — **Source Conversation** 删除 / Project 删除深模块：统一 run claim、删除屏障、来源事实 / Skill Candidate / 消息 / FTS / pi session 清理与非致命 scratch 工件回收；不删除用户工作区目录。
 - `packages/core/src/skill-learning/candidate-service.ts` — `SkillCandidateLifecycle`：统一 Candidate 审核资格、验证、来源、批准、Learned Skill 遥测 / 固定 / 快照 / 归档 / 恢复 / 回滚；store / filesystem / reviewer 是内部 adapter。
-- `packages/core/src/providers/model-configuration.ts` — **Provider Model Configuration** 的唯一语义所有者：从保存配置解析 scoped route、上游 model id、最终 runtime model 与安全投影；Provider 可另存仅供编辑复用的 `connections[]` 预设，实际运行仍只消费 provider 默认值与 `modelConfigs[]` 内联覆盖；`ProviderCatalog` 只负责目录 / probe。
+- `packages/core/src/providers/model-configuration.ts` — **Provider Model Configuration** 的唯一语义所有者：从保存配置解析 scoped route、上游 model id、协议对应的 runtime Base URL、最终 runtime model 与安全投影；Provider 可另存仅供编辑复用的 `connections[]` 预设，实际运行仍只消费 provider 默认值与 `modelConfigs[]` 内联覆盖；`ProviderCatalog` 只负责目录 / probe。
 - `packages/core/src/server/app.ts` — Fastify 应用装配入口（`/agent/run`、`/v1`、`/models`、`/workspace/*`、`/threads/*`、`/providers`、`/local/runtime` …）；跨路由生命周期对象在这里创建并在 `stop()` 中统一收尾。
 - `packages/core/src/models/local-model-settings.ts` — 本地模型运行设置存储；`models.local.settings` 按模型保存默认采样参数，供聊天 / 工作区 / 渠道在未显式传参时共用。
 - `packages/core/src/channels/operations.ts` — Channel Operations 应用层模块：包住 `ChannelGateway` + `ConnectorHost`，集中连接器生命周期、Feishu/WeChat 扫码 setup session、inbox read model 与 SSE invalidation；HTTP routes 只做请求/响应适配。
@@ -52,7 +52,7 @@
 2. **事件映射唯一边界**：`mapSessionEvent`（pi→SSE）+ `pi-adapt.ts`（pi↔OpenAI/Anthropic）是仅有的边界翻译。协议翻译器必须处理 `error` 事件并正确终止（OpenAI error 帧 / Anthropic `event: error`，**不可伪装成 `end_turn`**）。
 3. **工作区路径限定**：pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。`escapesCwd`（`ew-extensions.ts`）经 `realpath` 解软链后硬拦 read/edit/write/ls/grep/find 越界（所有审批档位）；bash 靠审批把守。锁定测试：`workspace-confinement.test` + `permission.test`。
 4. **0.0.0.0 暴露强制 api-key**：`RouterServerManager` 绑 0.0.0.0 时必须设 `--api-key`（`/settings/local-net` 校验，切换重启 router）；内部回环调用（pi/proxy/fact-extractor）一并带 Bearer；自连接恒走 127.0.0.1。
-5. **Provider 模型身份、协议与目录继承**：云端 provider 模型在 EasyWork 内部使用 `provider:<providerId>:<modelId>` route id，`/models.modelSources[].modelId` 才是展示/上游真实模型名；进入 pi `ModelRegistry` 或上游前必须还原裸 `modelId`，避免自定义 provider 与内置 provider 的同名模型互相覆盖。有效 API / Base URL 按 `modelConfig` 覆盖 → provider 默认值解析，以支持同一聚合商内 OpenAI 与 Anthropic-only 模型并存；自定义 OpenAI-compatible 未声明细粒度能力时使用保守 `compat`（例如 system role、`max_tokens`），不可假定支持 developer role。目录模板的名称、`reasoning`、`thinkingLevelMap` 与 `maxTokens` 可跨 API family 在运行时继承；上下文窗口与输入模态只在 UI 选定模板时复制并保存到模型配置，既有配置不会在运行时被覆盖。`compat` 是报文协议行为，只能在模板 API 与有效模型 API 一致时物化。云端思考报文字段由 pi-ai 按有效模型 API / compat 生成，`SessionHost` 只给本地 llama 注入 `chat_template_kwargs`，不得向全部云端模型统一塞 `thinking` / `reasoning_effort`。`modelSources[].reasoning` 是 Chat/Workspace 默认思考档位的能力来源，勿在 UI 里按 provider 名硬编码。
+5. **Provider 模型身份、协议与目录继承**：云端 provider 模型在 EasyWork 内部使用 `provider:<providerId>:<modelId>` route id，`/models.modelSources[].modelId` 才是展示/上游真实模型名；进入 pi `ModelRegistry` 或上游前必须还原裸 `modelId`，避免自定义 provider 与内置 provider 的同名模型互相覆盖。有效 API / Base URL 按 `modelConfig` 覆盖 → provider 默认值解析，以支持同一聚合商内 OpenAI 与 Anthropic-only 模型并存；Anthropic SDK 会自行追加 `/v1/messages`，因此 runtime model 必须移除用户态 Base URL 末尾已有的 `/v1` 或 `/v1/messages`，保证界面预览与真实请求一致。自定义 OpenAI-compatible 未声明细粒度能力时使用保守 `compat`（例如 system role、`max_tokens`），不可假定支持 developer role。目录模板的名称、`reasoning`、`thinkingLevelMap` 与 `maxTokens` 可跨 API family 在运行时继承；上下文窗口与输入模态只在 UI 选定模板时复制并保存到模型配置，既有配置不会在运行时被覆盖。`compat` 是报文协议行为，只能在模板 API 与有效模型 API 一致时物化。云端思考报文字段由 pi-ai 按有效模型 API / compat 生成，`SessionHost` 只给本地 llama 注入 `chat_template_kwargs`，不得向全部云端模型统一塞 `thinking` / `reasoning_effort`。`modelSources[].reasoning` 是 Chat/Workspace 默认思考档位的能力来源，勿在 UI 里按 provider 名硬编码。
 6. **SSE 健壮性**：所有 SSE 写口（`/agent/run`、`/v1` 透传、云端分支）须 `raw.on("error")` + `writableEnded/destroyed` 守卫，避免客户端断开后 write-after-end 崩 async handler。
 7. **记忆召回**：相关度下限 + topK 上限防 context 稀释；markdown 为真相源、embedding 为派生缓存（变更才重嵌）；召回缓存挂 `RunRuntime`，每轮 `run()` 重置。
 8. **sqlite-vec**：`vec0` 表 rowid 须 `BigInt`；`distance_metric=cosine`；扩展为可选依赖，无二进制时降级纯词法（勿让其抛错中断启动）。
@@ -66,7 +66,7 @@
 ## 约定
 
 - **统一 npm**（环境无 pnpm）。
-- **测试 398 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 46 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
+- **测试 399 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 46 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
 - **已移除 node-llama-cpp + 经典 `llama-server`**：本地推理走外部统一 `llama`（llama.app）的 router 模式（`resolveLlamaBin` 只解析 `llama`；嵌入子进程也跑 `llama serve`）。**勿重新引入** node-llama-cpp，也**勿回退每模型一进程的经典 `llama-server`**（含 brew llama.cpp，已完全移除）。
 - **打包**：daemon → Node SEA **单文件二进制**（`scripts/build-daemon-sea.mjs`，运行免 Node；必须用参数化子进程调用，兼容 Windows 路径）；Tauri 的 `beforeBuildCommand` 会无条件重建 SEA，禁止把新 UI 与旧 sidecar 打进同一应用；llama 运行时缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime` + `install.sh` / `install.ps1`）；Tauri WebView 启用显式 CSP；`v*` tag 先经 `release:check-version` 校验 npm/Tauri/Cargo 版本一致，再由 GitHub Actions 出 macOS dmg 与 Windows x64 NSIS/MSI。两端发布前必须跑 `smoke:daemon-sea`，Windows 还须跑 `release:check-artifacts`。
 - **改 Tauri Rust（`apps/desktop/src-tauri`）**：本环境有 `cargo`，可 `cargo check` 验证。
@@ -76,7 +76,7 @@
 ```bash
 npm install            # 装依赖
 npm run build          # turbo 构建全部包（含 ui/daemon dist）
-npm test               # vitest（398 通过；另 1 个真机 e2e 默认 skip）
+npm test               # vitest（399 通过；另 1 个真机 e2e 默认 skip）
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
 npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 46 条）
