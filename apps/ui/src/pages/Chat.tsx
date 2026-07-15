@@ -301,6 +301,7 @@ export function Chat({
     onThink: changeThink,
     onModel: setModel,
     onCompact: doCompact,
+    onLearn: learnCurrentConversation,
   });
 
   const send = (over?: { text: string; images: UiImage[]; regenerate?: boolean }) => {
@@ -458,14 +459,6 @@ export function Chat({
               <div className="composer-bar-left">
                 <button className="cbtn" data-testid="chat-upload-button" title="上传图片" onClick={() => fileRef.current?.click()}>
                   <PlusBtnIcon size={18} />
-                </button>
-                <button
-                  className="cbtn"
-                  data-testid="chat-learn-skill-button"
-                  title="从当前对话学习 Skill"
-                  onClick={() => void learnCurrentConversation()}
-                >
-                  <SparkIcon size={17} />
                 </button>
                 {images.length > 0 && (
                   <span className="cmini-chip" data-testid="chat-image-chip" title={`已附加 ${images.length} 张图片`}>

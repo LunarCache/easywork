@@ -11,6 +11,7 @@ export interface SlashCmd {
 export const SLASH_CMDS: SlashCmd[] = [
   { name: "model", arg: "来源 / 模型", desc: "先选模型来源，再切换当前会话模型" },
   { name: "skill", arg: "技能名", desc: "手动调用一个 Skill" },
+  { name: "learn", desc: "从当前对话准备 Skill 学习提示" },
   { name: "think", arg: "off|low|medium|high", desc: "调整思考强度" },
   { name: "compact", desc: "压缩上下文" },
 ];

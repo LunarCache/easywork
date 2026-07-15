@@ -431,6 +431,36 @@ test.describe("composer e2e", () => {
     await expect(page.getByTestId("chat-think-pill")).toContainText("思考 中");
   });
 
+  test("普通对话通过 /learn 准备当前对话的 Skill 学习提示", async ({ page, openApp, client, info, workspaceDir }) => {
+    const project = await client.createProject({ name: "Learn Command Workspace", workspaceDir });
+    let preparedThreadId = "";
+    await page.route(`${info.baseUrl}/skill-learning/prepare`, async (route) => {
+      const payload = route.request().postDataJSON() as { kind?: string; threadId?: string };
+      preparedThreadId = payload.threadId ?? "";
+      expect(payload.kind).toBe("conversation");
+      await route.fulfill({ json: { prompt: "请从当前对话提炼一个可复用 Skill" } });
+    });
+
+    await openApp();
+
+    await expect(page.getByTestId("chat-learn-skill-button")).toHaveCount(0);
+    const threadId = await page.getByTestId("chat-root").getAttribute("data-thread-id");
+    const input = page.getByTestId("chat-composer-input");
+    await input.fill("/learn");
+    await expect(page.getByTestId("slash-item-learn")).toBeVisible();
+    await input.press("Enter");
+
+    await expect(input).toHaveValue("请从当前对话提炼一个可复用 Skill");
+    await expect(page.getByText("已生成 Skill 学习提示，请检查后发送")).toBeVisible();
+    expect(preparedThreadId).toBe(threadId);
+
+    await page.getByTestId(`sidebar-project-${project.id}`).click();
+    const workspaceInput = page.getByTestId("workspace-composer-input");
+    await workspaceInput.fill("/learn");
+    await expect(page.getByTestId("slash-item-learn")).toHaveCount(0);
+    await expect(page.getByTestId("slash-palette")).toHaveCount(0);
+  });
+
   test("聊天页 slash palette 支持选择全局 skill", async ({ page, openApp, client }) => {
     await client.createSkillTemplate("review-flow");
     await openApp();

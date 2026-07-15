@@ -1,5 +1,5 @@
 // 斜杠命令自动补全面板 + 键盘交互 hook（Chat / Workspace composer 共用）。
-// 两阶段：① 命令名（/think /model /skill /compact，按前缀过滤）→ 选带参命令补入参数前缀；
+// 两阶段：① 命令名（/think /model /skill /learn /compact，按前缀过滤）→ 选带参命令补入参数前缀；
 //         ② 参数（think 4 档 / model 先 provider 后模型 / skill 按名称搜索）→ 选中即执行或填入。
 import { useCallback, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { Skill, ThinkLevel } from "@ew/shared";
@@ -21,6 +21,7 @@ export interface SlashHandlers {
   onThink: (level: ThinkLevel) => void;
   onModel: (model: string) => void;
   onCompact: () => void;
+  onLearn?: () => void;
 }
 
 interface Item {
@@ -173,7 +174,7 @@ export function useSlashPalette(
     const hasSpace = q.includes(" ");
     if (!hasSpace) {
       const usagePct = h.usagePct == null ? null : Math.max(0, Math.min(100, h.usagePct));
-      return matchCmds(q).map((c) => {
+      return matchCmds(q).filter((c) => c.name !== "learn" || h.onLearn).map((c) => {
         if (c.name === "model") {
           return {
             key: c.name,
@@ -206,6 +207,19 @@ export function useSlashPalette(
             value: enabledSkills.length ? `${enabledSkills.length} 个` : undefined,
             Icon: SparkIcon,
             run: () => setInput("/skill:"),
+          } satisfies Item;
+        }
+        if (c.name === "learn") {
+          return {
+            key: c.name,
+            title: "从对话学习 Skill",
+            desc: c.desc,
+            cmd: "/learn",
+            Icon: SparkIcon,
+            run: () => {
+              h.onLearn?.();
+              setInput("");
+            },
           } satisfies Item;
         }
         return {

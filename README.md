@@ -96,7 +96,7 @@ flowchart LR
 ### 记忆、Skills、MCP
 
 - Core Memory 只保存 User Profile / Agent Notes；Source Conversation 生命周期在同一删除屏障内处理来源事实、候选证据、消息 / FTS、pi session 与合格 scratch 工件，绝不删除用户工作区目录。工作区记忆隔离，支持语义/词法召回和 markdown 回灌。外部 Deep Memory 当前只是宿主注入 seam：Desktop / CLI 没有用户配置入口，Mem0 适配器仍是非用户态骨架；宿主实际注入后也只能追加受限召回，不能替换本地真相源，记忆页才显示其状态与启停开关。记忆页把搜索和添加保持为主操作，向量状态常驻；旧版 Skill 迁移审计在无歧义项时折叠为次级信息，有待判断项时自动展开并突出数量。
-- Skills 页面以“已启用 / 待审核 / 已归档”分开全局来源与 learned Skills；Skill Candidate 生命周期统一拥有审核资格、验证、来源、批准、遥测、快照、归档、恢复和回滚。Chat 或设置里的“学习 Skill”和受限后台复盘都只生成 Candidate，明确批准后才会激活。
+- Skills 页面以“已启用 / 待审核 / 已归档”分开全局来源与 learned Skills；Skill Candidate 生命周期统一拥有审核资格、验证、来源、批准、遥测、快照、归档、恢复和回滚。Chat 的 `/learn`、Skills 设置里的“学习 Skill”和受限后台复盘都只生成 Candidate，明确批准后才会激活。
 - MCP 支持 stdio 与 HTTP，工具清单探测、启停、导入和审批一体化。
 
 ### 外部渠道
@@ -191,7 +191,7 @@ npm test               # vitest: 395 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
-npm run test:e2e       # Playwright UI e2e: 43 条，真 daemon + 真 Vite + 隔离 data dir
+npm run test:e2e       # Playwright UI e2e: 44 条，真 daemon + 真 Vite + 隔离 data dir
 
 npm run dev:daemon     # 仅启动 daemon，首行输出 {baseUrl, token, pid}
 npm run dev:ui         # 仅启动 Vite
@@ -217,7 +217,7 @@ npm run release:check-artifacts -- windows
 
 - Vitest：395 passed / 1 skipped。
 - 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
-- Playwright UI e2e 共 43 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、工作台动态标签与独立真终端、贯穿式布局拖拽边界、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
+- Playwright UI e2e 共 44 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、`/learn` 对话学习入口、工作台动态标签与独立真终端、贯穿式布局拖拽边界、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
 
 ---
