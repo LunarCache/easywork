@@ -7,7 +7,7 @@
     "frontendDist": "../../ui/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm run dev --workspace @ew/ui",
-    "beforeBuildCommand": "npm run build --workspace @ew/ui"
+    "beforeBuildCommand": "node ../../scripts/build-daemon-sea.mjs && npm run build --workspace @ew/ui"
   },
   "app": {
     "withGlobalTauri": true,

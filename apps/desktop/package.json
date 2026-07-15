@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "EW_DAEMON_ENTRY=\"$PWD/../daemon/dist/cli.js\" tauri dev",
     "tauri": "tauri",
-    "app:build": "node ../../scripts/build-daemon-sea.mjs && tauri build",
+    "app:build": "tauri build",
     "clean": "rimraf src-tauri/target"
   },
   "devDependencies": {

@@ -36,6 +36,12 @@
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
 
+## 2026-07-15 — Desktop bundle 强制重建 SEA daemon
+
+- **根因**：直接调用 `tauri build` 只重建 UI / Rust 壳，可能复用旧 `dist-sea`；本次因此出现新 UI 已提交 `connections[]`，旧 daemon schema 却静默丢弃字段并返回成功。
+- **构建收口**：SEA 重建迁入 Tauri `beforeBuildCommand`，`app:build` 只保留统一的 `tauri build` 入口；无论从 npm 包装脚本还是直接调用 Tauri，都不会再生成 UI / sidecar 版本错配的应用。
+- **回归锁定**：Desktop 配置测试要求每次 bundle 都包含 `build-daemon-sea.mjs` 前置步骤；真实隔离 sidecar 回放已从 `connections: null` 变为完整恢复连接预设。全量验收：Vitest **398 passed / 1 skipped**，`lint` / `typecheck` 通过，直接 `tauri build` 已确认自动重建 SEA 并成功产出应用。
+
 ## 2026-07-15 — Provider 新增 API 连接方式可独立保存
 
 - **根因**：设置页的新增连接方式只存在于 React 表单；保存时仅把已被模型引用的协议 / Base URL 内联进 `modelConfigs[]`，因此暂未分配模型的新协议提交后直接消失。

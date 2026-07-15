@@ -3,6 +3,15 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("Tauri desktop security config", () => {
+  it("rebuilds the SEA daemon for every Tauri bundle", () => {
+    const configPath = path.resolve(import.meta.dirname, "../src-tauri/tauri.conf.json");
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
+      build?: { beforeBuildCommand?: string };
+    };
+
+    expect(config.build?.beforeBuildCommand).toContain("build-daemon-sea.mjs");
+  });
+
   it("ships a CSP that keeps Tauri IPC and the local daemon reachable", () => {
     const configPath = path.resolve(import.meta.dirname, "../src-tauri/tauri.conf.json");
     const config = JSON.parse(fs.readFileSync(configPath, "utf8")) as {
