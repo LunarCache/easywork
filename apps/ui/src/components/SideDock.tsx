@@ -9,6 +9,7 @@ import {
 import { createPortal } from "react-dom";
 import type { GitCommit, GitFile, GitRemoteInfo, GitStatus, WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
+import { isMacOS } from "../lib/desktop.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { FileViewer } from "./FileViewer.js";
 import { fileType, formatFileSize } from "../lib/filetype.js";
@@ -25,6 +26,7 @@ import {
   CommitIcon,
   CopyIcon,
   CheckIcon,
+  ChatIcon,
   DownloadIcon,
   EnterIcon,
   FileIcon,
@@ -34,6 +36,7 @@ import {
   MinimizeIcon,
   PlusIcon,
   RefreshIcon,
+  TerminalIcon,
   UndoIcon,
   UploadIcon,
   XIcon,
@@ -75,7 +78,6 @@ function DockEmpty({ children }: { children: ReactNode }) {
  */
 export function SideDock({
   open,
-  onClose,
   files,
   previewScope,
   previewId,
@@ -85,9 +87,10 @@ export function SideDock({
   browserTarget,
   git,
   target,
+  onNewTask,
+  onOpenTerminal,
 }: {
   open: boolean;
-  onClose: () => void;
   files: WsEntry[];
   /** 统一文件预览的作用域 + id（FileViewer 据此走 /files/meta + /files/raw）。 */
   previewScope: "workspace" | "chat";
@@ -100,6 +103,10 @@ export function SideDock({
   git?: GitContext;
   /** 外部请求查看某文件的改动（点「文件改动」卡）：跳到 改动(工作区)/文件(对话) 视图。 */
   target?: { path: string; nonce: number } | null;
+  /** 空态入口：创建一个新的主任务。 */
+  onNewTask: () => void;
+  /** Desktop 空态入口：在对话区下方打开独立终端。 */
+  onOpenTerminal?: () => void;
 }) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [maxed, setMaxed] = useState(false);
@@ -130,8 +137,6 @@ export function SideDock({
     clearFileSelection,
     clearBrowser,
   } = useWorkbenchViewSession({
-    visible: open,
-    onEmpty: onClose,
     files,
     previewScope,
     previewId,
@@ -140,6 +145,8 @@ export function SideDock({
     hasDiff: Boolean(git),
     routeFileTargetsToDiff: repo,
   });
+  const mac = isMacOS();
+  const terminalAvailable = Boolean(onOpenTerminal);
 
   useEffect(() => {
     setToolbarHost(document.getElementById("side-dock-titlebar-host"));
@@ -168,6 +175,18 @@ export function SideDock({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [addMenuOpen]);
+
+  useEffect(() => {
+    if (!open || openViews.length > 0) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        void openView("browser");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, openViews.length, openView]);
 
 
   const titlebarTabs = open && toolbarHost
@@ -274,6 +293,26 @@ export function SideDock({
       style={maxed ? undefined : { width: dockWidth }}
     >
       <div className="sd-body">
+        {!activeView && (
+          <div className="sd-launcher" data-testid="side-dock-empty">
+            <button type="button" className="sd-launcher-action" onClick={onNewTask}>
+              <ChatIcon size={17} />
+              <span>新任务</span>
+              <kbd>{mac ? "⌘N" : "Ctrl N"}</kbd>
+            </button>
+            <button type="button" className="sd-launcher-action" onClick={() => void openView("browser")}>
+              <GlobeIcon size={17} />
+              <span>浏览器</span>
+              <kbd>{mac ? "⌘T" : "Ctrl T"}</kbd>
+            </button>
+            {terminalAvailable && (
+              <button type="button" className="sd-launcher-action" onClick={onOpenTerminal}>
+                <TerminalIcon size={17} />
+                <span>终端</span>
+              </button>
+            )}
+          </div>
+        )}
         {activeView?.kind === "diff" && git && <DiffTab git={git} />}
         {activeView?.kind === "files" && (
           <FilesTab

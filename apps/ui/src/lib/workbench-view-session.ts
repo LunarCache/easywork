@@ -45,12 +45,6 @@ export interface WorkbenchViewAdapters {
   browser: { loadHtml(path: string): Promise<WorkbenchBrowserPage | null> };
 }
 
-export interface WorkbenchViewSessionOptions {
-  defaultView(): "diff" | "files";
-  adapters: WorkbenchViewAdapters;
-  onEmpty(): void;
-}
-
 export type WorkbenchNavigation =
   | { kind: "browser"; url: string }
   | { kind: "file"; path: string; mode?: "external" | "browse" };
@@ -73,9 +67,8 @@ export class WorkbenchViewSession {
   private state: WorkbenchViewState;
   private readonly listeners = new Set<Listener>();
 
-  constructor(private readonly options: WorkbenchViewSessionOptions) {
-    const initial = this.staticView(options.defaultView());
-    this.state = { views: [initial], activeViewId: initial.id, error: null };
+  constructor(private readonly adapters: WorkbenchViewAdapters) {
+    this.state = { views: [], activeViewId: null, error: null };
   }
 
   getState(): WorkbenchViewState {
@@ -89,13 +82,13 @@ export class WorkbenchViewSession {
 
   availableKinds(): WorkbenchOpenKind[] {
     return (["diff", "browser", "files"] as const).filter((kind) => {
-      if (kind === "diff") return this.options.adapters.diff.available();
+      if (kind === "diff") return this.adapters.diff.available();
       return true;
     });
   }
 
   async open(kind: WorkbenchOpenKind): Promise<boolean> {
-    if (kind === "diff" && !this.options.adapters.diff.available()) return false;
+    if (kind === "diff" && !this.adapters.diff.available()) return false;
     const view = this.staticView(kind);
     const views = this.state.views.some((candidate) => candidate.id === view.id)
       ? this.state.views
@@ -119,7 +112,6 @@ export class WorkbenchViewSession {
         ? remaining[Math.min(index, remaining.length - 1)]?.id ?? null
         : this.state.activeViewId;
     this.setState({ views: remaining, activeViewId });
-    if (remaining.length === 0) this.options.onEmpty();
     return true;
   }
 
@@ -131,11 +123,11 @@ export class WorkbenchViewSession {
       return { status: "navigated", destination: "browser", url };
     }
 
-    const resolved = this.options.adapters.files.resolve(target.path);
-    const routeToDiff = this.options.adapters.diff.routeFileTargets();
+    const resolved = this.adapters.files.resolve(target.path);
+    const routeToDiff = this.adapters.diff.routeFileTargets();
     if (resolved.kind === "html") {
       try {
-        const page = await this.options.adapters.browser.loadHtml(resolved.path);
+        const page = await this.adapters.browser.loadHtml(resolved.path);
         if (page?.kind === "html") {
           this.setBrowserPage(page);
           return { status: "navigated", destination: "browser" };
@@ -177,17 +169,11 @@ export class WorkbenchViewSession {
   reconcileFiles(): void {
     const view = this.state.views.find((candidate) => candidate.kind === "files");
     if (!view?.selection || view.selection.retainWhenUnlisted) return;
-    if (!this.options.adapters.files.contains(view.selection.path)) this.clearFileSelection();
+    if (!this.adapters.files.contains(view.selection.path)) this.clearFileSelection();
   }
 
   reportError(error: unknown): void {
     this.setState({ error: error instanceof Error ? error.message : String(error) });
-  }
-
-  ensureVisible(visible: boolean): void {
-    if (!visible || this.state.views.length > 0) return;
-    const view = this.staticView(this.options.defaultView());
-    this.setState({ views: [view], activeViewId: view.id });
   }
 
   private staticView(kind: "diff" | "files" | "browser"): WorkbenchView {

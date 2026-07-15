@@ -12,8 +12,6 @@ import {
 } from "../lib/workbench-view-session.js";
 
 interface WorkbenchViewSessionOptions {
-  visible: boolean;
-  onEmpty(): void;
   files: WsEntry[];
   previewScope: "workspace" | "chat";
   previewId: string;
@@ -33,28 +31,24 @@ export function useWorkbenchViewSession(options: WorkbenchViewSessionOptions) {
 
   if (!sessionRef.current) {
     sessionRef.current = new WorkbenchViewSession({
-      defaultView: () => (latest.current.hasDiff ? "diff" : "files"),
-      onEmpty: () => latest.current.onEmpty(),
-      adapters: {
-        diff: {
-          available: () => latest.current.hasDiff,
-          routeFileTargets: () => latest.current.routeFileTargetsToDiff,
+      diff: {
+        available: () => latest.current.hasDiff,
+        routeFileTargets: () => latest.current.routeFileTargetsToDiff,
+      },
+      files: {
+        resolve: (path) => {
+          const resolved = matchFileTarget(latest.current.files, path)?.path ?? path;
+          return { path: resolved, kind: resolvePreviewKind(resolved) === "html" ? "html" : "file" };
         },
-        files: {
-          resolve: (path) => {
-            const resolved = matchFileTarget(latest.current.files, path)?.path ?? path;
-            return { path: resolved, kind: resolvePreviewKind(resolved) === "html" ? "html" : "file" };
-          },
-          contains: (path) => latest.current.files.some((file) => file.path === path),
-        },
-        browser: {
-          loadHtml: async (path) => {
-            const { previewScope, previewId } = latest.current;
-            const meta = await getClient().previewMeta(previewScope, previewId, path);
-            return meta.kind === "html"
-              ? { kind: "html", name: meta.name, html: meta.text ?? "" }
-              : null;
-          },
+        contains: (path) => latest.current.files.some((file) => file.path === path),
+      },
+      browser: {
+        loadHtml: async (path) => {
+          const { previewScope, previewId } = latest.current;
+          const meta = await getClient().previewMeta(previewScope, previewId, path);
+          return meta.kind === "html"
+            ? { kind: "html", name: meta.name, html: meta.text ?? "" }
+            : null;
         },
       },
     });
@@ -66,8 +60,6 @@ export function useWorkbenchViewSession(options: WorkbenchViewSessionOptions) {
     () => session.getState(),
     () => session.getState(),
   );
-
-  useEffect(() => session.ensureVisible(options.visible), [options.visible, session]);
 
   useEffect(() => session.reconcileFiles(), [options.files, session]);
 

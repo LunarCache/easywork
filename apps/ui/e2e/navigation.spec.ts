@@ -86,9 +86,38 @@ async function installFakeTerminalRuntime(page: import("@playwright/test").Page,
 }
 
 test.describe("navigation e2e", () => {
+  test("空工作台显示任务、浏览器和终端入口，关闭最后标签后回到空态", async ({ page, openApp, info }) => {
+    await installFakeTerminalRuntime(page, info);
+    await openApp();
+    await page.getByTitle("打开工作台").click();
+
+    const dock = page.getByTestId("side-dock");
+    const empty = page.getByTestId("side-dock-empty");
+    await expect(empty).toBeVisible();
+    await expect(page.locator('[data-testid^="side-dock-tab-"]')).toHaveCount(0);
+    await expect(empty.getByRole("button", { name: /新任务/ })).toBeVisible();
+    await expect(empty.getByRole("button", { name: /浏览器/ })).toBeVisible();
+    await expect(empty.getByRole("button", { name: /终端/ })).toBeVisible();
+
+    await empty.getByRole("button", { name: /浏览器/ }).click();
+    await expect(page.getByTestId("side-dock-tab-preview")).toHaveClass(/on/);
+    await page.getByTitle("关闭浏览器标签").click();
+    await expect(dock).toBeVisible();
+    await expect(empty).toBeVisible();
+
+    await empty.getByRole("button", { name: /终端/ }).click();
+    await expect(page.getByTestId("terminal-panel")).toBeVisible();
+
+    await empty.getByRole("button", { name: /新任务/ }).click();
+    await expect(dock).not.toBeVisible();
+    await expect(page.getByTestId("terminal-panel")).not.toBeVisible();
+  });
+
   test("浏览器运行时不暴露 Desktop PTY 终端", async ({ page, openApp }) => {
     await openApp();
     await expect(page.getByTestId("terminal-toggle")).toHaveCount(0);
+    await page.getByTitle("打开工作台").click();
+    await expect(page.getByTestId("side-dock-empty").getByRole("button", { name: /终端/ })).toHaveCount(0);
   });
 
   test("Desktop PTY 在对话区底部独立打开，支持多会话、隐藏恢复和关闭", async ({ page, openApp, info }) => {
@@ -214,9 +243,10 @@ test.describe("navigation e2e", () => {
     await page.getByTitle("打开工作台").click();
     await expect(page.locator(".sd-titlebar-toolbar")).toHaveAttribute("data-tauri-drag-region", "true");
     await expect(page.locator(".sd-open-tabs")).toHaveAttribute("data-tauri-drag-region", "true");
+    await page.getByTestId("side-dock-empty").getByRole("button", { name: /浏览器/ }).click();
     await expect(page.locator(".sd-tab-shell").first()).toHaveAttribute("data-tauri-drag-region", "true");
     await expect(page.locator(".sd-add-wrap")).toHaveAttribute("data-tauri-drag-region", "true");
-    await expect(page.getByTestId("side-dock-tab-files")).not.toHaveAttribute("data-tauri-drag-region", "true");
+    await expect(page.getByTestId("side-dock-tab-preview")).not.toHaveAttribute("data-tauri-drag-region", "true");
   });
 
   test("macOS 放大工作台时标题避开 traffic lights", async ({ page, openApp }) => {
@@ -233,10 +263,11 @@ test.describe("navigation e2e", () => {
     await openApp();
 
     await page.getByTitle("打开工作台").click();
+    await page.getByTestId("side-dock-empty").getByRole("button", { name: /浏览器/ }).click();
     await page.getByTitle("放大到窗口").click();
 
-    const activeTab = page.locator(".ad-titlebar").getByTestId("side-dock-tab-files");
-    await expect(activeTab).toHaveText(/文件/);
+    const activeTab = page.locator(".ad-titlebar").getByTestId("side-dock-tab-preview");
+    await expect(activeTab).toHaveText(/浏览器/);
     const activeTabBox = await activeTab.boundingBox();
     expect(activeTabBox).not.toBeNull();
     expect(activeTabBox!.x >= 88 || activeTabBox!.y >= 46).toBe(true);
@@ -268,31 +299,29 @@ test.describe("navigation e2e", () => {
     const dock = page.getByTestId("side-dock");
     const dockTitlebar = page.getByTestId("side-dock-titlebar-area");
     await expect(dock.locator(".sd-top")).toHaveCount(0);
-    await expect(page.locator(".ad-titlebar").getByTestId("side-dock-tab-files")).toBeVisible();
-    const tabBox = await page.getByTestId("side-dock-tab-files").boundingBox();
+    await expect(page.getByTestId("side-dock-empty")).toBeVisible();
+    await expect(page.locator('[data-testid^="side-dock-tab-"]')).toHaveCount(0);
+    const addBox = await page.getByTestId("side-dock-add-view").boundingBox();
     const dockBox = await dock.boundingBox();
     const dockTitlebarBox = await dockTitlebar.boundingBox();
     const drawerBox = await page.getByTitle("关闭工作台").boundingBox();
-    expect(tabBox).not.toBeNull();
+    expect(addBox).not.toBeNull();
     expect(dockBox).not.toBeNull();
     expect(dockTitlebarBox).not.toBeNull();
     expect(drawerBox).not.toBeNull();
-    expect(Math.abs(tabBox!.y + tabBox!.height / 2 - (drawerBox!.y + drawerBox!.height / 2))).toBeLessThan(2);
+    expect(Math.abs(addBox!.y + addBox!.height / 2 - (drawerBox!.y + drawerBox!.height / 2))).toBeLessThan(2);
     expect(Math.abs(dockTitlebarBox!.x - dockBox!.x)).toBeLessThan(2);
     expect(Math.abs(dockTitlebarBox!.width - dockBox!.width)).toBeLessThan(2);
-    expect(tabBox!.x - dockTitlebarBox!.x).toBeLessThan(24);
+    expect(addBox!.x - dockTitlebarBox!.x).toBeLessThan(24);
     await expect(dockTitlebar).toHaveCSS("border-left-width", "1px");
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
 
     await page.getByTestId("sidebar-settings").click();
     await expect(dockTitlebar).toBeHidden();
     await page.getByTestId("settings-back").click();
-    await expect(page.getByTestId("side-dock-tab-files")).toBeVisible();
+    await expect(page.getByTestId("side-dock-empty")).toBeVisible();
 
-    await page.getByTestId("side-dock-add-view").click();
-    const menu = page.getByTestId("side-dock-view-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("menuitem", { name: "浏览器" }).click();
+    await page.getByTestId("side-dock-empty").getByRole("button", { name: /浏览器/ }).click();
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveClass(/on/);
 
     const address = page.getByRole("textbox", { name: "浏览器地址" });
@@ -309,7 +338,8 @@ test.describe("navigation e2e", () => {
 
     await page.getByTitle("关闭浏览器标签").click();
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
-    await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
+    await expect(dock).toBeVisible();
+    await expect(page.getByTestId("side-dock-empty")).toBeVisible();
 
     await page.setViewportSize({ width: 960, height: 720 });
     await page.getByTestId("side-dock-add-view").click();
@@ -318,10 +348,15 @@ test.describe("navigation e2e", () => {
     expect(narrowMenuBox!.x).toBeGreaterThanOrEqual(0);
     expect(narrowMenuBox!.x + narrowMenuBox!.width).toBeLessThanOrEqual(960);
     await page.keyboard.press("Escape");
+    await page.getByTestId("side-dock-add-view").click();
+    await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "文件" }).click();
     await page.getByTitle("关闭文件标签").click();
+    await expect(dock).toBeVisible();
+    await expect(page.getByTestId("side-dock-empty")).toBeVisible();
+    await page.getByTitle("关闭工作台").click();
     await expect(dock).not.toBeVisible();
     await page.getByTitle("打开工作台").click();
-    await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
+    await expect(page.getByTestId("side-dock-empty")).toBeVisible();
   });
 
   test("消息链接在重复点击时会重新激活浏览器标签", async ({ page, openApp, info }) => {

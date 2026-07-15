@@ -68,6 +68,8 @@ export function Chat({
   setDockOpen,
   terminalOpen,
   setTerminalOpen,
+  onNewTask,
+  terminalAvailable,
 }: {
   models: string[];
   modelSources?: ModelSourceInfo[];
@@ -79,6 +81,8 @@ export function Chat({
   setDockOpen: React.Dispatch<React.SetStateAction<boolean>>;
   terminalOpen: boolean;
   setTerminalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  onNewTask: () => void;
+  terminalAvailable: boolean;
 }) {
   const { model, setModel } = useAvailableModel(models);
   const [input, setInput] = useState("");
@@ -505,7 +509,6 @@ export function Chat({
       </div>
       <SideDock
         open={dockOpen}
-        onClose={() => setDockOpen(false)}
         files={files}
         previewScope="chat"
         previewId={threadId}
@@ -514,6 +517,8 @@ export function Chat({
         filesEmpty="暂无会话文件。"
         browserTarget={browserTarget}
         target={dockTarget}
+        onNewTask={onNewTask}
+        onOpenTerminal={terminalAvailable ? () => setTerminalOpen(true) : undefined}
       />
     </div>
   );

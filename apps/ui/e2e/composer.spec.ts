@@ -291,6 +291,9 @@ test.describe("composer e2e", () => {
 
     await page.getByTitle("关闭浏览器标签").click();
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
+    await expect(page.getByTestId("side-dock-empty")).toBeVisible();
+    await page.getByTestId("side-dock-add-view").click();
+    await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "文件" }).click();
     await expect(page.getByTestId("side-dock-tab-files")).toHaveClass(/on/);
     await page.locator(".side-dock .af-file").click();
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveClass(/on/);

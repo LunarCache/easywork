@@ -502,6 +502,8 @@ export function App() {
               setDockOpen={setDockOpen}
               terminalOpen={terminalOpen}
               setTerminalOpen={setTerminalOpen}
+              onNewTask={newChat}
+              terminalAvailable={desktop}
             />
           )}
           {mode === "work" &&
@@ -526,6 +528,8 @@ export function App() {
                 setDockOpen={setDockOpen}
                 terminalOpen={terminalOpen}
                 setTerminalOpen={setTerminalOpen}
+                onNewTask={newChat}
+                terminalAvailable={desktop}
               />
             ) : (
               <div className="app-empty">

@@ -31,6 +31,12 @@
 /* 放大到标题栏下方的整个工作区；标签与抽屉按钮继续留在同一标题栏。 */
 .side-dock.max { position: fixed; top: var(--ad-titlebar-height); right: 0; bottom: 0; left: 0; width: auto; height: auto; z-index: 30; }
 .sd-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.sd-launcher { flex: 1; width: min(100%, 360px); margin: auto; padding: 0 34px; display: flex; flex-direction: column; justify-content: center; gap: 14px; transform: translateY(-2%); }
+.sd-launcher-action { width: 100%; min-height: 42px; padding: 8px 10px; border: 0; border-radius: var(--r); background: transparent; color: var(--text); display: flex; align-items: center; gap: 13px; font: 500 15px var(--font); text-align: left; cursor: pointer; }
+.sd-launcher-action:hover { background: var(--surface-3); }
+.sd-launcher-action > svg { flex: none; color: var(--muted); }
+.sd-launcher-action > span { flex: 1; }
+.sd-launcher-action > kbd { flex: none; padding: 2px 8px; border: 0; border-radius: 999px; background: var(--surface-3); color: var(--muted); font: 500 11px var(--font); box-shadow: none; }
 .sd-url { flex: none; }
 .rev-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 650; }
 .rev-count { font-size: 11px; font-weight: 600; color: var(--muted); background: var(--surface-3); border-radius: 999px; padding: 1px 7px; }

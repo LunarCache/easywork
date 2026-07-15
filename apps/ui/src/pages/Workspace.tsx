@@ -70,6 +70,8 @@ export function Workspace({
   setDockOpen,
   terminalOpen,
   setTerminalOpen,
+  onNewTask,
+  terminalAvailable,
 }: {
   project: Project;
   /** 全部工作区（供 composer 上下文条切换）。 */
@@ -93,6 +95,8 @@ export function Workspace({
   setDockOpen: React.Dispatch<React.SetStateAction<boolean>>;
   terminalOpen: boolean;
   setTerminalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  onNewTask: () => void;
+  terminalAvailable: boolean;
 }) {
   const { model, setModel } = useAvailableModel(models);
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>(project.approvalMode ?? "approve-each");
@@ -545,7 +549,6 @@ export function Workspace({
 
       <SideDock
         open={dockOpen}
-        onClose={() => setDockOpen(false)}
         files={wsFiles}
         previewScope="workspace"
         previewId={project.id}
@@ -555,6 +558,8 @@ export function Workspace({
         browserTarget={browserTarget}
         target={dockTarget}
         git={{ projectId: project.id, status: git, remote, onRefresh: refreshGit }}
+        onNewTask={onNewTask}
+        onOpenTerminal={terminalAvailable ? () => setTerminalOpen(true) : undefined}
       />
     </div>
   );
