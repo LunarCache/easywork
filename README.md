@@ -88,7 +88,7 @@ flowchart LR
 ### 模型与网关
 
 - 本地模型：HuggingFace 搜索、断点续传下载、GGUF 元数据解析、统一 llama router 运行；国内网络可在「设置 → 通用」持久化启用 `hf-mirror.com`，搜索失败会显示明确错误提示；模型页还可按模型配置默认运行采样参数。
-- 云端 provider：内置 pi-ai 支持的 provider 目录；自定义端点可选择 OpenAI Chat/Responses、Anthropic Messages 等 API 协议，支持从 `/models` 获取模型列表，并逐模型配置上下文、模态与推理能力。
+- 云端 provider：内置 pi-ai 支持的 provider 目录；自定义端点可选择 OpenAI Chat/Responses、Anthropic Messages 等默认 API 协议，支持从 `/models` 获取模型列表，并逐模型配置上下文、模态、推理能力，以及 API 协议 / Base URL 覆盖；同一聚合服务商可同时承载 OpenAI 与 Anthropic-only 模型。
 - 模型目录继承：Core 的 Provider Model Configuration 从保存配置统一解析 route identity、上游 identity 与最终 runtime model；UI 只编辑 / 展示投影。运行时可跨 API 协议继承模板的名称、`reasoning`、`thinkingLevelMap` 和 `maxTokens`；上下文窗口与输入模态只在 UI 选定模板时复制并保存到模型配置，不会在运行时覆盖既有配置。报文级 `compat` 仅在模板 API 与当前 API 一致时应用；同名模型始终以 `provider:<providerId>:<modelId>` 隔离。
 - 思考默认值：`/models.modelSources[].reasoning` 将运行时推理能力同步给 Chat / Workspace；推理模型首次使用默认「中」，显式选择「关」后按模型持久化。
 - 多协议 API：OpenAI `/v1/chat/completions`、`/v1/embeddings`、`/v1/models`，以及 Anthropic `/v1/messages`。

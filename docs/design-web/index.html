@@ -262,12 +262,10 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 `resolveModel`（`session-host.ts`）：**先本地**（`local.baseUrlFor(modelId)` 命中 → `provider:"local"`, `input:["text","image"]`, ctx 来自 `local.contexts()`），**再云端**（`providers.resolveModelRef` → pi `ModelRegistry`）。云端 provider 模型在 EasyWork 内部使用 `provider:<providerId>:<modelId>` route id，避免不同 provider 的同名模型互相覆盖；进入 pi / 上游 OpenAI-compatible 请求前再还原为真实 `modelId`。本地 server 设了 `--api-key`（0.0.0.0 暴露）时把 key 注入 pi auth，连回环也带 Bearer。
 
-**streamFn 包装（采样 + 思考 + 缓存）**：pi 不在 `createAgentSession` 暴露这些，故统一包装 `session.agent.streamFn`：
+**streamFn 包装（采样 + 本地思考字段 + 缓存）**：pi 不在 `createAgentSession` 暴露本地 llama 扩展字段，故统一包装 `session.agent.streamFn`：
 - **采样**：本轮显式 `input.sampling` 优先；未显式传入且模型为本地模型时，`SessionHost` 从 `LocalModelSettingsStore` 读取模型页保存的默认运行参数。`temperature/maxTokens` 走 StreamOptions，其余经 `onPayload` 注入请求体；`top_k/min_p/repeat_penalty` 是 llama.cpp 扩展，**仅 `provider==="local"` 注入**。云端 provider 默认采样不由本地模型页管理。
-- **思考（分级，off/low/medium/high）**：每轮 `session.setThinkingLevel(level)`（pi 已登记的推理模型据此真分级）+ `onPayload` 注入 provider 实际识别的参数：
-  - **云端** `injectCloudThinking`：`thinking:{type:"enabled"/"disabled"}`（off→真关，省 reasoning token）+ `reasoning_effort:<档位>`（DeepSeek-V4 等 OpenAI-SDK 思考模型扩展，经请求体顶层透传 = 其 SDK 的 extra_body）。
-  - **本地** `injectLocalThinking`：`chat_template_kwargs.enable_thinking`（llama.cpp 思考开关）+ `thinking_budget_tokens`（off=0/low=1024/medium=4096/high=16384）。取代旧 `/think` 文本 hack。
-  - 不支持该字段的 provider 会忽略/拒绝——故按 local/cloud 分别注入；不在显示层藏 reasoning（参数层即关）。
+- **思考（分级，off/low/medium/high）**：每轮 `session.setThinkingLevel(level)`；云端请求由 pi-ai 根据运行时模型的有效 API / `compat` 生成对应字段，`SessionHost` 不再向所有云端模型统一注入 `thinking` / `reasoning_effort`（部分 OpenAI-compatible 上游会拒绝错误形状或要求 `enable_thinking=true`）。仅本地模型通过 `onPayload` 的 `injectLocalThinking` 注入 `chat_template_kwargs.enable_thinking`（llama.cpp 思考开关）+ `thinking_budget_tokens`（off=0/low=1024/medium=4096/high=16384），取代旧 `/think` 文本 hack。
+  - 不在显示层隐藏 reasoning；云端开关能力服从 pi-ai 的模型协议契约，本地在参数层真开关。
   - `/models.modelSources[].reasoning` 把运行时能力投影给 UI。没有已保存偏好时，推理模型按 pi 默认 `medium`、其它模型 `off`；显式 `off` 也写入 `ew.think`，避免重载后重新启用。
 - **prompt caching**：仅当运行时模型 API 为 `anthropic-messages` 时加 `cacheRetention:"long"` + `sessionId:threadId`；OpenAI-shaped 云端与本地模型都不注入这组 Anthropic 缓存选项。
 - **自动重试**：`createAgentSession` 后 `setAutoRetryEnabled(true)`，provider 抖动/限流时 pi 自带退避重试。
@@ -308,9 +306,9 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 ### 5.4 云端 provider
 
-`ProviderManager`（`providers/manager.ts`）保存 pi-ai 内置 provider 与自定义兼容端点，并把引擎 / auth / HTTP callers 接到 `ProviderModelConfiguration`。`CloudProviderConfig = {id, kind, baseUrl?, api?, apiKey?, headers?, modelConfigs[]}`；`modelConfigs[]` 逐模型记录 `contextWindow/inputModalities/reasoning?/compatibilityMode/catalogRef?`。配置序列化进 SQLite `providers` 键，开机恢复。
+`ProviderManager`（`providers/manager.ts`）保存 pi-ai 内置 provider 与自定义兼容端点，并把引擎 / auth / HTTP callers 接到 `ProviderModelConfiguration`。`CloudProviderConfig = {id, kind, baseUrl?, api?, apiKey?, headers?, modelConfigs[]}`；provider 的 `api/baseUrl` 是默认值，`modelConfigs[]` 可用自己的 `api/baseUrl` 覆盖，并逐模型记录 `contextWindow/inputModalities/reasoning?/compatibilityMode/catalogRef?`。配置序列化进 SQLite `providers` 键，开机恢复。
 
-`ProviderCatalog`（`providers/catalog.ts`）只把 pi-ai 注册表投影成设置页目录，并通过 `/providers/probe-models` 经标准 `/models` 探测自定义端点。`ProviderModelConfiguration`（`providers/model-configuration.ts`）才是 Provider Model Configuration 的唯一语义所有者：它从保存配置一次产出 canonical route identity、上游 identity、最终 `Model<Api>` 与列表投影；`auto` 在 Core 内按精确模型 ID 选择唯一 / provider 前缀候选，`catalog` 固定显式引用，`generic` 禁用模板。这里必须区分**运行时继承**、**保存时物化**与**协议行为**：名称、`reasoning`、`thinkingLevelMap`、输出上限可跨 API family 在运行时继承；上下文窗口与输入模态由 UI 在匹配 / 选择模板时复制进 `modelConfigs[]`，运行时不会覆盖已有配置；`compat` 只在模板 API 与当前 API 相同时物化。UI helper 只是编辑 / 展示投影，不决定最终 runtime metadata。
+`ProviderCatalog`（`providers/catalog.ts`）只把 pi-ai 注册表投影成设置页目录，并通过 `/providers/probe-models` 经标准 `/models` 探测自定义端点。`ProviderModelConfiguration`（`providers/model-configuration.ts`）才是 Provider Model Configuration 的唯一语义所有者：它从保存配置一次产出 canonical route identity、上游 identity、按模型覆盖 → provider 默认解析的有效 API / Base URL、最终 `Model<Api>` 与列表投影；`auto` 在 Core 内按精确模型 ID 选择唯一 / provider 前缀候选，`catalog` 固定显式引用，`generic` 禁用模板。这里必须区分**运行时继承**、**保存时物化**与**协议行为**：名称、`reasoning`、`thinkingLevelMap`、输出上限可跨 API family 在运行时继承；上下文窗口与输入模态由 UI 在匹配 / 选择模板时复制进 `modelConfigs[]`，运行时不会覆盖已有配置；`compat` 只在模板 API 与有效模型 API 相同时物化。没有同协议模板时，自定义 OpenAI-compatible 模型使用保守默认（system role、`max_tokens`，不假定 store / reasoning effort / strict mode 等扩展）。UI helper 只是编辑 / 展示投影，不决定最终 runtime metadata。
 
 每个 declared model 暴露为 provider-scoped route id（逻辑形状如 `provider:my-deepseek:deepseek-v4-pro`，provider/model 两段实际经 `encodeURIComponent`）；`OpenAICompatibleEngine.mapModelId` 与 `AgentProviderRuntime` 在上游边界还原真实模型名。`GET /models.modelSources[]` 返回同一模块的 route / context / reasoning 投影。`pi-native` 缺失 pi catalog model 时 actual resolve fail-closed，但 identity-only 的列出 / 删除 / 预检仍可操作旧配置。legacy 裸模型名、等价非 canonical 百分号编码和旧 helper exports 为保存线程、`/v1` 客户端及 `@ew/core` imports 暂时保留，全部委托深模块；只可在 major 迁移后删除，不能在 caller 重建语义。
 

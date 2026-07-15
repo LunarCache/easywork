@@ -73,7 +73,12 @@ test.describe("settings e2e", () => {
   });
 
   test("自定义模型跨 API 协议时用目录投影编辑 context、模态与推理提示", async ({ page, openApp }) => {
+    let savedProvider: { modelConfigs?: Array<{ api?: string; baseUrl?: string }> } | undefined;
     await page.route("**/providers", async (route) => {
+      if (route.request().method() === "POST") {
+        savedProvider = route.request().postDataJSON() as typeof savedProvider;
+        return route.fulfill({ json: { ok: true } });
+      }
       if (route.request().method() !== "GET") return route.continue();
       await route.fulfill({ json: { providers: [] } });
     });
@@ -111,15 +116,24 @@ test.describe("settings e2e", () => {
     await page.getByRole("button", { name: "添加 Provider" }).click();
     await page.getByTitle("自定义兼容端点").click();
 
+    await page.getByPlaceholder("openrouter").fill("mixed-provider");
+    await page.getByPlaceholder("https://.../v1").fill("https://mixed.example/v1");
+
     await page.locator(".provider-api-select > button").click();
     await page.getByRole("button", { name: "Anthropic Messages" }).click();
 
-    const row = page.locator(".provider-model-row").first();
+    const entry = page.locator(".provider-model-entry").first();
+    const row = entry.locator(".provider-model-row");
     await row.locator('input[placeholder="model-id"]').fill("deepseek-v4-pro");
+    await row.getByTitle("模型 API 协议").selectOption("openai-completions");
+    await entry.getByTitle("模型 Base URL").fill("https://mixed-openai.example/v1");
 
     await expect(row.locator('input[type="number"]')).toHaveValue("1000000");
     await expect(row.locator('input[type="checkbox"]')).toBeChecked();
     await expect(row.getByTitle("继承模板（当前开启）")).toBeVisible();
+    await page.getByRole("button", { name: "添加 Provider" }).click();
+    await expect.poll(() => savedProvider?.modelConfigs?.[0]?.api).toBe("openai-completions");
+    expect(savedProvider?.modelConfigs?.[0]?.baseUrl).toBe("https://mixed-openai.example/v1");
   });
 
   test("渠道页可打开并记住上次分区", async ({ page, openApp }) => {

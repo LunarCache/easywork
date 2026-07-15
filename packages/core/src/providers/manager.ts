@@ -17,6 +17,10 @@ export interface CloudProviderCatalogRef {
 
 export interface CloudProviderModelConfig {
   id: string;
+  /** Optional per-model API family override; falls back to the provider-level api. */
+  api?: string;
+  /** Optional per-model endpoint override for providers that mix wire protocols. */
+  baseUrl?: string;
   /** Per-model context window. */
   contextWindow: number;
   /** Per-model input modalities for custom compatible endpoints. */

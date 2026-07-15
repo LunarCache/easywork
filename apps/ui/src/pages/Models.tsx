@@ -62,6 +62,8 @@ const DEFAULT_PROVIDER_API_FAMILIES: ProviderApiFamily[] = [
 interface ProviderFormModel {
   rowId: string;
   id: string;
+  api?: string;
+  baseUrl?: string;
   context: string;
   inputModalities: ProviderModelModality[];
   reasoning?: boolean;
@@ -205,6 +207,8 @@ function modelConfigsToForm(
     const catalogRef = catalog.length > 0 ? match?.ref : model.catalogRef;
     return newProviderModelRow({
       id: model.id,
+      ...(model.api ? { api: model.api } : {}),
+      ...(model.baseUrl ? { baseUrl: model.baseUrl } : {}),
       context: String(model.contextWindow),
       inputModalities: model.inputModalities.includes("image") ? ["text", "image"] : ["text"],
       compatibilityMode,
@@ -225,6 +229,8 @@ function formModelsToConfig(models: ProviderFormModel[]): ProviderModelConfig[] 
     const inputModalities = model.inputModalities.includes("image") ? ["text", "image"] as ProviderModelModality[] : ["text"] as ProviderModelModality[];
     out.set(id, {
       id,
+      ...(model.api?.trim() ? { api: model.api.trim() } : {}),
+      ...(model.baseUrl?.trim() ? { baseUrl: model.baseUrl.trim() } : {}),
       inputModalities,
       contextWindow: Number.isFinite(ctx) && ctx > 0 ? Math.floor(ctx) : 32768,
       compatibilityMode: model.compatibilityMode,
@@ -931,7 +937,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                   />
                 </label>
                 <div className="provider-field">
-                  <span>API 协议</span>
+                  <span>默认 API 协议</span>
                   <div className="set-select-wrap provider-api-select">
                     <button
                       type="button"
@@ -996,6 +1002,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                   <div className="provider-model-table">
                     <div className={`provider-model-table-head ${prov.kind === "openai-compatible" ? "compatible" : ""}`}>
                       <span>Model ID</span>
+                      {prov.kind === "openai-compatible" && <span>API</span>}
                       <span>Context</span>
                       <span>模态</span>
                       {prov.kind === "openai-compatible" && <span>兼容模板</span>}
@@ -1027,6 +1034,22 @@ export function Models({ onChange }: { onChange: () => void }) {
                           title={model.id}
                           onChange={(e) => updateProviderModelId(model, e.target.value)}
                         />
+                        {prov.kind === "openai-compatible" && (
+                          <select
+                            className="provider-model-api-select"
+                            title="模型 API 协议"
+                            value={model.api ?? ""}
+                            onChange={(event) => updateProviderModel(model.rowId, {
+                              api: event.target.value || undefined,
+                              baseUrl: undefined,
+                            })}
+                          >
+                            <option value="">默认 · {apiLabel(prov.api || "openai-completions", apiProtocolOptions)}</option>
+                            {apiProtocolIds.map((api) => (
+                              <option value={api} key={api}>{apiLabel(api, apiProtocolOptions)}</option>
+                            ))}
+                          </select>
+                        )}
                         <input
                           type="number"
                           min={1}
@@ -1082,6 +1105,17 @@ export function Models({ onChange }: { onChange: () => void }) {
                           <TrashIcon size={13} />
                         </button>
                       </div>
+                      {prov.kind === "openai-compatible" && model.api && (
+                        <label className="provider-model-endpoint-override">
+                          <span>模型 Base URL</span>
+                          <input
+                            title="模型 Base URL"
+                            value={model.baseUrl ?? ""}
+                            placeholder={`默认 · ${prov.baseUrl || "Provider Base URL"}`}
+                            onChange={(event) => updateProviderModel(model.rowId, { baseUrl: event.target.value || undefined })}
+                          />
+                        </label>
+                      )}
                       {prov.kind === "openai-compatible" && templateMenuOpen && (
                         <div className="provider-model-template-menu">
                           <button

@@ -274,7 +274,7 @@ export class SessionHost {
             unknown
           >;
           if (s) body = applySampling(body, s, isLocal);
-          body = isLocal ? injectLocalThinking(body, level) : injectCloudThinking(body, level);
+          body = applyThinkingPayload(body, level, isLocal);
           return body;
         },
       });
@@ -689,16 +689,13 @@ export function injectLocalThinking(body: Record<string, unknown>, level: ThinkL
   };
 }
 
-/**
- * 云端混合推理模型（DeepSeek-V4 等 OpenAI 兼容端）思考注入：
- * - `thinking: { type: "enabled"|"disabled" }`：思考开关（off → 真正关闭，省 reasoning token）。
- * - `reasoning_effort: low|medium|high`：思考强度（provider 内部映射，如 low/medium→high）。
- * 这些字段是该类 provider 的扩展（经请求体顶层透传，等价其 OpenAI SDK 的 extra_body）；
- * 不支持的 provider 会忽略或拒绝——故仅在 streamFn 里对云端注入，且保留 off 时不外发 reasoning 的兜底。
- */
-export function injectCloudThinking(body: Record<string, unknown>, level: ThinkLevel): Record<string, unknown> {
-  if (level === "off") return { ...body, thinking: { type: "disabled" } };
-  return { ...body, thinking: { type: "enabled" }, reasoning_effort: level };
+/** Local llama needs explicit template kwargs; cloud payloads are owned by pi-ai model compat. */
+export function applyThinkingPayload(
+  body: Record<string, unknown>,
+  level: ThinkLevel,
+  isLocal: boolean,
+): Record<string, unknown> {
+  return isLocal ? injectLocalThinking(body, level) : body;
 }
 
 function safeStringify(v: unknown): string {

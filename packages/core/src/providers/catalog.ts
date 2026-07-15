@@ -28,6 +28,8 @@ type PiProvider = ReturnType<typeof defaultGetPiProviders>[number];
 
 export const ProviderModelConfigSchema = z.object({
   id: z.string().min(1),
+  api: z.string().min(1).optional(),
+  baseUrl: z.string().url().optional(),
   contextWindow: z.number().int().positive(),
   inputModalities: z.array(z.enum(["text", "image"])).min(1),
   reasoning: z.boolean().optional(),

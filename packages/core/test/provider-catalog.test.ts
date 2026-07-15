@@ -217,7 +217,14 @@ describe("ProviderCatalog", () => {
       maxTokens: 4096,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     });
-    expect(runtimeModelForProviderConfig(generic, "aliased-model").compat).toBeUndefined();
+    expect(runtimeModelForProviderConfig(generic, "aliased-model").compat).toEqual({
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      maxTokensField: "max_tokens",
+      supportsStrictMode: false,
+      supportsLongCacheRetention: false,
+    });
 
     const catalogAlias = normalizeProviderConfig({
       id: "custom",

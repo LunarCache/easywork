@@ -207,6 +207,41 @@ describe("AgentProviderRuntime", () => {
     fs.rmSync(agentDir, { recursive: true, force: true });
   });
 
+  it("serializes generic custom OpenAI-compatible prompts with a system role", async () => {
+    const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-generic-role-")));
+    const { runtime } = makeRuntime([{
+      id: "cloudprime",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://cloudprime.example/v1",
+      apiKey: "sk-cloudprime",
+      modelConfigs: [{
+        id: "reasoning-model",
+        contextWindow: 128_000,
+        inputModalities: ["text"],
+        reasoning: true,
+        compatibilityMode: "generic",
+      }],
+    }], agentDir);
+    let payload: { messages?: Array<{ role?: string }> } | undefined;
+    const stream = streamSimple(runtime.resolveModel("provider:cloudprime:reasoning-model"), {
+      systemPrompt: "You are EasyWork.",
+      messages: [{ role: "user", content: "hello", timestamp: 0 }],
+    }, {
+      apiKey: "sk-cloudprime",
+      onPayload: (value) => {
+        payload = value as typeof payload;
+        throw new Error("payload captured");
+      },
+    });
+
+    const result = await stream.result();
+    expect(result).toMatchObject({ stopReason: "error", errorMessage: "payload captured" });
+    expect(payload?.messages?.[0]?.role).toBe("system");
+
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  });
+
   it("advances only cloud model revisions when provider registrations are refreshed", () => {
     const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-provider-revision-")));
     const { providers, runtime } = makeRuntime([{

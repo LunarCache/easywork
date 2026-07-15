@@ -138,6 +138,8 @@ export interface ProviderCatalogRef {
 
 export interface ProviderModelConfig {
   id: string;
+  api?: string;
+  baseUrl?: string;
   contextWindow: number;
   inputModalities: ProviderModelModality[];
   reasoning?: boolean;

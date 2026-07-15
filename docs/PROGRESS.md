@@ -8,7 +8,7 @@
 
 - **核心守护进程**（`@ew/core`）：Fastify HTTP + SSE，托管 pi-coding-agent 内核（`SessionHost`，按 threadId 串行化），无头可运行（`easywork serve`）。
 - **本地推理（router 模式）**：统一 `llama`（llama.app）的 `llama serve --models-dir` **单路由进程**，按请求 `model`（= 模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰（文本 / 视觉）；嵌入模型走独立 `llama serve -m --embedding` 进程。经典每模型一进程的 `llama-server`（含 brew llama.cpp）**已完全移除**——只支持 llama.app 统一 `llama`。HF 搜索 / 断点续传下载 / GGUF 头解析。
-- **云端推理**：pi-ai 内置 provider + 自定义多协议兼容端点；模型目录支持自动/手动模板绑定，运行时继承名称 / reasoning / thinking map / 输出上限，UI 选择模板时把上下文与模态复制进逐模型配置，报文 `compat` 保持协议隔离；云端流式/非流式统一经 pi-ai（含 OAuth）。
+- **云端推理**：pi-ai 内置 provider + 自定义多协议兼容端点；provider 提供默认 API / Base URL，模型可独立覆盖以支持聚合商内 OpenAI 与 Anthropic-only 模型并存；模型目录支持自动/手动模板绑定，运行时继承名称 / reasoning / thinking map / 输出上限，UI 选择模板时把上下文与模态复制进逐模型配置，报文 `compat` 保持协议隔离；云端流式/非流式统一经 pi-ai（含 OAuth）。
 - **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi；本地 proxy、云端 pi 与 engine fallback 的全部 SSE 写口均具备断流 error listener 和 ended/destroyed 守卫。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/explore_web）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
 - **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 浏览器；Desktop 另有多实例真终端，独立于 Agent 工具命令）。
@@ -35,6 +35,14 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-14 — 自定义 Provider 逐模型混合协议
+
+- **逐模型协议与端点**：provider 的 API / Base URL 降为默认值，`modelConfigs[]` 可逐项覆盖；设置页直接编辑每个模型的 API 协议和可选 Base URL，同一聚合商内的 OpenAI 与 Anthropic-only 模型无需拆分配置。
+- **保守 OpenAI 兼容基线**：缺少同协议目录模板时不再按完整 OpenAI 能力发送 developer role、store、reasoning effort 等字段，避免仅接受 `system/assistant/user/tool/function` 的兼容端点返回 400。
+- **思考字段归属**：云端思考报文完全交由 pi-ai 按有效模型协议 / compat 生成；`SessionHost` 只给本地 llama 注入 thinking 扩展，避免 MiniMax 等上游因统一注入 `thinking:{type:"disabled"}` 拒绝请求。
+- **Cp 实盘验证**：保留 provider 级 OpenAI 默认协议，GLM 系列逐模型覆盖为 Anthropic Messages 及其根端点；13 个模型全部通过带 Agent 工具定义的 `/agent/run` 完整链路烟测，原 400 / 422 均消失。
+- **全量验收**：lint、typecheck、build 全绿；Vitest **393 passed / 1 skipped**，Playwright **39 passed**；运行中 Desktop daemon `/health` 返回 200。
 
 ## 2026-07-14 — 五个深模块架构收口
 

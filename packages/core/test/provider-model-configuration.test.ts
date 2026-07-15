@@ -122,11 +122,46 @@ describe("Provider Model Configuration", () => {
       modelConfigs: [{ id: template.id, contextWindow: 32_768, inputModalities: ["text"] }],
     });
 
-    expect(configuration.resolve(saved("openai-completions"), template.id)?.runtimeModel.compat).toEqual({
+    expect(configuration.resolve(saved("openai-completions"), template.id)?.runtimeModel.compat).toMatchObject({
       thinkingFormat: "deepseek",
       supportsDeveloperRole: false,
+      supportsStore: false,
+      maxTokensField: "max_tokens",
     });
     expect(configuration.resolve(saved("anthropic-messages"), template.id)?.runtimeModel.compat).toBeUndefined();
+  });
+
+  it("allows each compatible model to override the provider API family", () => {
+    const configuration = new ProviderModelConfiguration({
+      providers: () => [],
+      model: () => undefined,
+    });
+    const saved = configuration.normalize({
+      id: "mixed-protocol",
+      baseUrl: "https://mixed.example/v1",
+      api: "openai-completions",
+      modelConfigs: [
+        {
+          id: "openai-model",
+          api: "openai-completions",
+          contextWindow: 32_768,
+          inputModalities: ["text"],
+        },
+        {
+          id: "anthropic-model",
+          api: "anthropic-messages",
+          baseUrl: "https://mixed.example",
+          contextWindow: 32_768,
+          inputModalities: ["text"],
+        },
+      ],
+    });
+
+    expect(configuration.resolve(saved, "openai-model")?.runtimeModel.api).toBe("openai-completions");
+    expect(configuration.resolve(saved, "anthropic-model")?.runtimeModel).toMatchObject({
+      api: "anthropic-messages",
+      baseUrl: "https://mixed.example",
+    });
   });
 
   it("keeps pi-native protocol identity and cost while applying saved capability overrides", () => {

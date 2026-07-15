@@ -158,14 +158,17 @@ export class ProviderModelConfiguration {
     modelConfig: CloudProviderModelConfig,
     template: Model<Api> | undefined,
   ): Model<Api> {
-    const api = (cfg.api ?? "openai-completions") as Api;
-    const compat = template?.api === api ? materializeCatalogCompat(template) : undefined;
+    const api = (modelConfig.api ?? cfg.api ?? "openai-completions") as Api;
+    const inheritedCompat = template?.api === api ? materializeCatalogCompat(template) : undefined;
+    const compat = api === "openai-completions"
+      ? { ...SAFE_CUSTOM_OPENAI_COMPLETIONS_COMPAT, ...inheritedCompat }
+      : inheritedCompat;
     return {
       id: modelConfig.id,
       name: template?.name ?? modelConfig.id,
       api,
       provider: cfg.id,
-      baseUrl: cfg.baseUrl ?? "",
+      baseUrl: modelConfig.baseUrl ?? cfg.baseUrl ?? "",
       reasoning: modelConfig.reasoning ?? template?.reasoning ?? false,
       ...(template?.thinkingLevelMap ? { thinkingLevelMap: template.thinkingLevelMap } : {}),
       input: normalizeModalities(modelConfig.inputModalities),
@@ -276,6 +279,8 @@ function normalizeModelConfigs(configs: CloudProviderModelConfig[]): CloudProvid
     if (!Number.isFinite(contextWindow) || contextWindow <= 0) continue;
     out.set(id, {
       id,
+      ...(cfg.api?.trim() ? { api: cfg.api.trim() } : {}),
+      ...(cfg.baseUrl?.trim() ? { baseUrl: cfg.baseUrl.trim().replace(/\/$/, "") } : {}),
       contextWindow,
       inputModalities: normalizeModalities(cfg.inputModalities),
       ...(cfg.reasoning !== undefined ? { reasoning: cfg.reasoning } : {}),
@@ -290,6 +295,15 @@ function normalizeModelConfigs(configs: CloudProviderModelConfig[]): CloudProvid
   }
   return [...out.values()];
 }
+
+const SAFE_CUSTOM_OPENAI_COMPLETIONS_COMPAT: OpenAICompletionsCompat = {
+  supportsStore: false,
+  supportsDeveloperRole: false,
+  supportsReasoningEffort: false,
+  maxTokensField: "max_tokens",
+  supportsStrictMode: false,
+  supportsLongCacheRetention: false,
+};
 
 function normalizeModalities(values: readonly string[] | undefined): CloudProviderModelModality[] {
   const out = (values ?? []).filter((modality, index, all): modality is CloudProviderModelModality =>

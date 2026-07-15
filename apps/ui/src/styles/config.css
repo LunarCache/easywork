@@ -378,12 +378,15 @@
 .provider-model-table-head,
 .provider-model-row { display: grid; grid-template-columns: minmax(220px, 1fr) 118px 88px 30px; gap: 8px; align-items: center; min-width: 0; }
 .provider-model-table-head.compatible,
-.provider-model-row.compatible { grid-template-columns: minmax(180px, 1fr) 108px 78px minmax(136px, 0.65fr) 100px 30px; }
+.provider-model-row.compatible { grid-template-columns: minmax(150px, 1fr) 140px 96px 70px minmax(120px, 0.65fr) 92px 30px; }
 .provider-model-table-head { padding: 0 4px 2px; color: var(--text-tertiary); font-size: 11px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
 .provider-model-table .mcp-icon-btn { opacity: 1; color: var(--text-2); }
 .provider-model-table-head .mcp-icon-btn { justify-self: end; }
 .provider-model-entry { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.provider-model-endpoint-override { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 8px; padding: 0 38px 0 4px; color: var(--text-tertiary); font-size: 11px; }
+.provider-model-endpoint-override input { height: 32px; min-width: 0; font-family: var(--font-mono); font-size: 11px; }
 .provider-model-row input { height: 34px; }
+.provider-model-api-select { width: 100%; height: 34px; min-width: 0; padding: 0 25px 0 8px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); color: var(--text-2); font-size: 12px; }
 .provider-model-check { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .provider-model-check input { width: 14px; height: 14px; padding: 0; }
 .provider-model-template-trigger { width: 100%; height: 34px; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface); color: var(--text-2); cursor: pointer; }
@@ -444,7 +447,8 @@ section { margin-bottom: 18px; background: var(--surface); border: 1px solid var
   .provider-model-table-head span:nth-child(2),
   .provider-model-table-head span:nth-child(3),
   .provider-model-table-head.compatible span:nth-child(4),
-  .provider-model-table-head.compatible span:nth-child(5) { display: none; }
+  .provider-model-table-head.compatible span:nth-child(5),
+  .provider-model-table-head.compatible span:nth-child(6) { display: none; }
   .provider-model-row { grid-template-columns: 1fr; }
   .provider-model-row.compatible { grid-template-columns: 1fr; }
   .provider-form-actions { justify-content: stretch; flex-wrap: wrap; }

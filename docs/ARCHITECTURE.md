@@ -64,9 +64,9 @@ apps/
 
 云端模型由 `ProviderModelConfiguration` 统一语义，`ProviderManager`、`ProviderCatalog` 与 `AgentProviderRuntime` 作为状态 / 目录 / runtime adapters：
 
-- `CloudProviderConfig` 记录 provider 身份、API family、端点/鉴权和逐模型配置；内置 provider 复用 pi-ai 原生注册，自定义 provider 由同一契约接入。
+- `CloudProviderConfig` 记录 provider 身份、默认 API family、默认端点/鉴权和逐模型配置；`modelConfigs[]` 可覆盖 API family 与 Base URL，以表达同一聚合服务商内的混合协议。内置 provider 复用 pi-ai 原生注册，自定义 provider 由同一契约接入。
 - `ProviderCatalog` 只从 pi-ai 投影服务商 / 模型目录并负责 `GET /providers/catalog` 与 `POST /providers/probe-models`；它不再组装 runtime model。
-- `ProviderModelConfiguration` 从保存配置一次产出 canonical route identity、上游 identity、最终 pi `Model<Api>` 和安全列表投影。目录模板的运行时继承范围是名称、`reasoning`、`thinkingLevelMap` 与 `maxTokens`（显式配置的 `reasoning` 优先）；上下文窗口和输入模态始终读取已保存的 `modelConfig`。UI 选择或自动匹配模板时把上下文与模态物化进保存配置，但 Core 会重新计算 auto catalog match，UI suggestion 不是运行时真相源。`compat` 是**报文协议行为**，仅当模板 API 与 provider 当前 API 一致时进入 runtime model。
+- `ProviderModelConfiguration` 从保存配置一次产出 canonical route identity、上游 identity、有效 API / Base URL、最终 pi `Model<Api>` 和安全列表投影；有效端点按模型覆盖 → provider 默认值解析。目录模板的运行时继承范围是名称、`reasoning`、`thinkingLevelMap` 与 `maxTokens`（显式配置的 `reasoning` 优先）；上下文窗口和输入模态始终读取已保存的 `modelConfig`。UI 选择或自动匹配模板时把上下文与模态物化进保存配置，但 Core 会重新计算 auto catalog match，UI suggestion 不是运行时真相源。`compat` 是**报文协议行为**，仅当模板 API 与有效模型 API 一致时进入 runtime model；没有同协议模板的自定义 OpenAI-compatible 模型采用保守默认，不假定 developer role、reasoning effort 或 store 等扩展可用。
 - provider-scoped route 形如 `provider:<url-encoded-providerId>:<url-encoded-modelId>`；进入 pi 或上游请求前才还原真实 `modelId`。旧线程 / `/v1` 客户端的 raw model id、非 canonical 但可解码的 route，以及旧 `@ew/core` catalog helper exports 暂时保留兼容：它们全部委托新模块，避免破坏持久化线程和现有导入；后续只可在 major 版本迁移后删除，禁止在调用点重建语义。
 - `pi-native` 必须解析到 pi catalog runtime model，缺失时 actual resolve fail-closed；identity / projection 仍允许旧配置被列出、预检和删除。`GET /models.modelSources` 的 `reasoning/context` 来自同一配置模块投影。
 
