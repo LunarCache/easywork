@@ -19,7 +19,11 @@ export { downloadVariant, enumerateShards } from "./models/download.js";
 export { parseGGUFBuffer, readGGUFHeader, type GGUFMetadata } from "./models/gguf.js";
 
 // 云端 provider
-export { ProviderManager, type CloudProviderConfig } from "./providers/manager.js";
+export {
+  ProviderManager,
+  type CloudProviderConfig,
+  type CloudProviderConnectionConfig,
+} from "./providers/manager.js";
 export {
   ProviderModelConfiguration,
   type ConfiguredProviderModel,

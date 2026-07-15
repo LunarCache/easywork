@@ -88,7 +88,7 @@ flowchart LR
 ### 模型与网关
 
 - 本地模型：HuggingFace 搜索、断点续传下载、GGUF 元数据解析、统一 llama router 运行；国内网络可在「设置 → 通用」持久化启用 `hf-mirror.com`，搜索失败会显示明确错误提示；模型页还可按模型配置默认运行采样参数。
-- 云端 provider：内置 pi-ai 支持的 provider 目录；自定义端点可选择 OpenAI Chat/Responses、Anthropic Messages 等默认 API 协议，支持从 `/models` 获取模型列表，并逐模型配置上下文、模态、推理能力，以及 API 协议 / Base URL 覆盖；同一聚合服务商可同时承载 OpenAI 与 Anthropic-only 模型。
+- 云端 provider：内置 pi-ai 支持的 provider 目录；自定义端点可保存多组 API 协议 / Base URL 连接方式（即使暂未分配模型也不会丢失），支持从 `/models` 获取模型列表，并逐模型选择连接方式、配置上下文、模态与推理能力；同一聚合服务商可同时承载 OpenAI 与 Anthropic-only 模型。
 - 模型目录继承：Core 的 Provider Model Configuration 从保存配置统一解析 route identity、上游 identity 与最终 runtime model；UI 只编辑 / 展示投影。运行时可跨 API 协议继承模板的名称、`reasoning`、`thinkingLevelMap` 和 `maxTokens`；上下文窗口与输入模态只在 UI 选定模板时复制并保存到模型配置，不会在运行时覆盖既有配置。报文级 `compat` 仅在模板 API 与当前 API 一致时应用；同名模型始终以 `provider:<providerId>:<modelId>` 隔离。
 - 思考默认值：`/models.modelSources[].reasoning` 将运行时推理能力同步给 Chat / Workspace；推理模型首次使用默认「中」，显式选择「关」后按模型持久化。
 - 多协议 API：OpenAI `/v1/chat/completions`、`/v1/embeddings`、`/v1/models`，以及 Anthropic `/v1/messages`。
@@ -187,7 +187,7 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 396 passed / 1 skipped
+npm test               # vitest: 397 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
@@ -215,7 +215,7 @@ npm run release:check-artifacts -- windows
 
 ## 测试覆盖
 
-- Vitest：396 passed / 1 skipped。
+- Vitest：397 passed / 1 skipped。
 - 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
 - Playwright UI e2e 共 46 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、`/learn` 对话学习入口、工作台无标签空态、动态标签与独立真终端、贯穿式布局拖拽边界、Desktop 原生网页 surface 生命周期、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。

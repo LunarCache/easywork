@@ -8,7 +8,7 @@
 
 - **核心守护进程**（`@ew/core`）：Fastify HTTP + SSE，托管 pi-coding-agent 内核（`SessionHost`，按 threadId 串行化），无头可运行（`easywork serve`）。
 - **本地推理（router 模式）**：统一 `llama`（llama.app）的 `llama serve --models-dir` **单路由进程**，按请求 `model`（= 模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰（文本 / 视觉）；嵌入模型走独立 `llama serve -m --embedding` 进程。经典每模型一进程的 `llama-server`（含 brew llama.cpp）**已完全移除**——只支持 llama.app 统一 `llama`。HF 搜索 / 断点续传下载 / GGUF 头解析。
-- **云端推理**：pi-ai 内置 provider + 自定义多协议兼容端点；provider 提供默认 API / Base URL，模型可独立覆盖以支持聚合商内 OpenAI 与 Anthropic-only 模型并存；模型目录支持自动/手动模板绑定，运行时继承名称 / reasoning / thinking map / 输出上限，UI 选择模板时把上下文与模态复制进逐模型配置，报文 `compat` 保持协议隔离；云端流式/非流式统一经 pi-ai（含 OAuth）。
+- **云端推理**：pi-ai 内置 provider + 自定义多协议兼容端点；provider 可持久化多组 API / Base URL 连接预设，模型可独立选择并以内联覆盖运行，从而支持聚合商内 OpenAI 与 Anthropic-only 模型并存；模型目录支持自动/手动模板绑定，运行时继承名称 / reasoning / thinking map / 输出上限，UI 选择模板时把上下文与模态复制进逐模型配置，报文 `compat` 保持协议隔离；云端流式/非流式统一经 pi-ai（含 OAuth）。
 - **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi；本地 proxy、云端 pi 与 engine fallback 的全部 SSE 写口均具备断流 error listener 和 ended/destroyed 守卫。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/explore_web）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
 - **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 浏览器）；Desktop 多实例真终端由标题栏独立入口在对话区底部打开，并独立于 Agent 工具命令。
@@ -35,6 +35,12 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-15 — Provider 新增 API 连接方式可独立保存
+
+- **根因**：设置页的新增连接方式只存在于 React 表单；保存时仅把已被模型引用的协议 / Base URL 内联进 `modelConfigs[]`，因此暂未分配模型的新协议提交后直接消失。
+- **契约修复**：Provider 配置新增可选 `connections[]` 预设并贯穿 schema、Manager 列表 / SQLite dump、SDK 与 UI；模型运行时仍只消费 provider 默认值和 `modelConfigs[]` 覆盖，不让编辑预设形成第二套路由语义。
+- **回归锁定**：Playwright 覆盖新增 OpenAI Responses 连接、保存和重新进入编辑后的完整恢复；Core 测试锁定 schema 与 Manager 投影。全量验收：Vitest **397 passed / 1 skipped**、Playwright **46 passed**，`lint` / `typecheck` / `build` 均通过。
 
 ## 2026-07-15 — Desktop 工作台浏览器改用原生 WebView
 

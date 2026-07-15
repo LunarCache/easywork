@@ -159,8 +159,9 @@ test.describe("settings e2e", () => {
   test("编辑自定义模型商时保留模型连接字段的独立继承", async ({ page, openApp }) => {
     let savedProvider: {
       modelConfigs?: Array<{ id: string; api?: string; baseUrl?: string }>;
+      connections?: Array<{ id: string; api?: string; baseUrl?: string }>;
     } | undefined;
-    const provider = {
+    let provider = {
       id: "partial-provider",
       kind: "openai-compatible",
       api: "openai-completions",
@@ -186,6 +187,7 @@ test.describe("settings e2e", () => {
     await page.route("**/providers", async (route) => {
       if (route.request().method() === "POST") {
         savedProvider = route.request().postDataJSON() as typeof savedProvider;
+        provider = { ...provider, ...savedProvider };
         return route.fulfill({ json: { ok: true } });
       }
       if (route.request().method() !== "GET") return route.continue();
@@ -197,15 +199,27 @@ test.describe("settings e2e", () => {
     await page.getByTestId("settings-nav-models").click();
     await page.getByTestId("models-tab-cloud").click();
     await page.locator(".provider-card-compact").filter({ hasText: "partial-provider" }).getByTitle("编辑").click();
+    await page.getByRole("button", { name: "添加连接方式" }).click();
+    const addedConnection = page.getByTestId("provider-connection-override").last();
+    await addedConnection.getByTitle("连接 4 API 协议").selectOption("openai-responses");
+    await addedConnection.getByTitle("连接 4 Base URL").fill("https://responses.example/v1");
     await page.getByRole("button", { name: "保存配置" }).click();
 
     await expect.poll(() => savedProvider?.modelConfigs?.length).toBe(2);
+    expect(savedProvider?.connections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ api: "openai-responses", baseUrl: "https://responses.example/v1" }),
+    ]));
     const apiOnly = savedProvider?.modelConfigs?.find((model) => model.id === "api-only");
     const urlOnly = savedProvider?.modelConfigs?.find((model) => model.id === "url-only");
     expect(apiOnly).toMatchObject({ api: "anthropic-messages" });
     expect(apiOnly).not.toHaveProperty("baseUrl");
     expect(urlOnly).toMatchObject({ baseUrl: "https://special.example/v1" });
     expect(urlOnly).not.toHaveProperty("api");
+
+    await page.locator(".provider-card-compact").filter({ hasText: "partial-provider" }).getByTitle("编辑").click();
+    const restoredConnection = page.getByTestId("provider-connection-override").last();
+    await expect(restoredConnection.getByTitle("连接 4 API 协议")).toHaveValue("openai-responses");
+    await expect(restoredConnection.getByTitle("连接 4 Base URL")).toHaveValue("https://responses.example/v1");
   });
 
   test("渠道页可打开并记住上次分区", async ({ page, openApp }) => {

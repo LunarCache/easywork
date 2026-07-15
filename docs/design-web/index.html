@@ -306,7 +306,7 @@ pi 自带 fs 工具**不做路径沙箱**（`write ../x` 会越界）。EasyWork
 
 ### 5.4 云端 provider
 
-`ProviderManager`（`providers/manager.ts`）保存 pi-ai 内置 provider 与自定义兼容端点，并把引擎 / auth / HTTP callers 接到 `ProviderModelConfiguration`。`CloudProviderConfig = {id, kind, baseUrl?, api?, apiKey?, headers?, modelConfigs[]}`；provider 的 `api/baseUrl` 是默认值，`modelConfigs[]` 可用自己的 `api/baseUrl` 覆盖，并逐模型记录 `contextWindow/inputModalities/reasoning?/compatibilityMode/catalogRef?`。配置序列化进 SQLite `providers` 键，开机恢复。
+`ProviderManager`（`providers/manager.ts`）保存 pi-ai 内置 provider 与自定义兼容端点，并把引擎 / auth / HTTP callers 接到 `ProviderModelConfiguration`。`CloudProviderConfig = {id, kind, baseUrl?, api?, apiKey?, headers?, connections[]?, modelConfigs[]}`；provider 的 `api/baseUrl` 是默认值，`connections[]` 持久化设置页可复用的协议 / 地址预设（允许暂未分配模型），`modelConfigs[]` 继续以内联 `api/baseUrl` 覆盖决定实际运行，并逐模型记录 `contextWindow/inputModalities/reasoning?/compatibilityMode/catalogRef?`。配置序列化进 SQLite `providers` 键，开机恢复。
 
 `ProviderCatalog`（`providers/catalog.ts`）只把 pi-ai 注册表投影成设置页目录，并通过 `/providers/probe-models` 经标准 `/models` 探测自定义端点。`ProviderModelConfiguration`（`providers/model-configuration.ts`）才是 Provider Model Configuration 的唯一语义所有者：它从保存配置一次产出 canonical route identity、上游 identity、按模型覆盖 → provider 默认解析的有效 API / Base URL、最终 `Model<Api>` 与列表投影；`auto` 在 Core 内按精确模型 ID 选择唯一 / provider 前缀候选，`catalog` 固定显式引用，`generic` 禁用模板。这里必须区分**运行时继承**、**保存时物化**与**协议行为**：名称、`reasoning`、`thinkingLevelMap`、输出上限可跨 API family 在运行时继承；上下文窗口与输入模态由 UI 在匹配 / 选择模板时复制进 `modelConfigs[]`，运行时不会覆盖已有配置；`compat` 只在模板 API 与有效模型 API 相同时物化。没有同协议模板时，自定义 OpenAI-compatible 模型使用保守默认（system role、`max_tokens`，不假定 store / reasoning effort / strict mode 等扩展）。UI helper 只是编辑 / 展示投影，不决定最终 runtime metadata。
 

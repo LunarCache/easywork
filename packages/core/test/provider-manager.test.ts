@@ -22,11 +22,15 @@ describe("ProviderManager", () => {
       kind: "openai-compatible",
       api: "openai-completions",
       baseUrl: "https://custom.example/v1",
+      connections: [{ id: "responses", api: "openai-responses", baseUrl: "https://responses.example/v1" }],
       modelConfigs: [{ id: "deepseek-v4", contextWindow: 32768, inputModalities: ["text"] }],
     });
 
     const routeId = "provider:custom-deepseek:deepseek-v4";
     expect(providers.modelIds()).toEqual([routeId]);
+    expect(providers.list()[0]?.connections).toEqual([
+      { id: "responses", api: "openai-responses", baseUrl: "https://responses.example/v1" },
+    ]);
     await registry.resolve(routeId).chat({ model: routeId, messages: [{ role: "user", content: "hi" }] });
     expect(upstreamModel).toBe("deepseek-v4");
   });

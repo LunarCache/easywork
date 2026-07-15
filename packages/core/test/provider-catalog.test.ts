@@ -1,12 +1,38 @@
 import { describe, expect, it } from "vitest";
 import {
   ProviderCatalog,
+  ProviderConfigSchema,
   normalizeProviderConfig,
   runtimeModelForProviderConfig,
   runtimeModelsForProviderConfig,
 } from "../src/providers/catalog.js";
 
 describe("ProviderCatalog", () => {
+  it("accepts saved connection presets independently from model overrides", () => {
+    const parsed = ProviderConfigSchema.parse({
+      id: "mixed-provider",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://default.example/v1",
+      connections: [{
+        id: "responses",
+        api: "openai-responses",
+        baseUrl: "https://responses.example/v1",
+      }],
+      modelConfigs: [{
+        id: "model-a",
+        contextWindow: 32_768,
+        inputModalities: ["text"],
+      }],
+    });
+
+    expect(parsed.connections).toEqual([{
+      id: "responses",
+      api: "openai-responses",
+      baseUrl: "https://responses.example/v1",
+    }]);
+  });
+
   it("builds a sorted built-in provider catalog from pi model metadata", () => {
     const catalog = new ProviderCatalog({
       getPiProviders: () => ["custom-provider", "anthropic", "openai"],

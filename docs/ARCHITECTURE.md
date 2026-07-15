@@ -36,7 +36,7 @@
 | Terminal Panel Session（UI） | Desktop PTY 恢复 / 创建 / 激活 / 关闭回退与前台任务确认 | PTY adapter；conversation-bottom TerminalPanel renderer |
 | Source Conversation（core） | run claim、thread / Project 删除屏障、来源事实 / Candidate / repo / pi session / scratch 清理 | ConversationRepo、Memory、Skill lifecycle、SessionHost、filesystem |
 | Skill Candidate（core） | 审核资格、验证、来源、批准、遥测、pin / archive / snapshot / restore / rollback | SQLite/filesystem 与 reviewer internal adapters；routes/tools/coordinator callers |
-| Provider Model Configuration（core） | saved config normalization、route / upstream identity、能力继承、最终 runtime model、协议 compat | pi catalog adapter；ProviderManager / AgentProviderRuntime / HTTP projections |
+| Provider Model Configuration（core） | saved config normalization、连接预设持久化、route / upstream identity、能力继承、最终 runtime model、协议 compat | pi catalog adapter；ProviderManager / AgentProviderRuntime / HTTP projections |
 
 这些 seam 通过接口级行为测试验证；旧页面事件循环、SideDock 生命周期分支、route 级删除顺序和 partial candidate-store casts 已被替换，不再保留第二套语义实现。
 

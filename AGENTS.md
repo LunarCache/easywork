@@ -22,7 +22,7 @@
 - `packages/core/src/agent/ew-extensions.ts` — 记忆注入(`before_agent_start`)/抽取钩子；`toPiTool`(我们的 `Tool` → pi customTool)；`permissionExtensionFactory` + `escapesCwd`（工作区路径限定）。
 - `packages/core/src/conversations/source-conversation-lifecycle.ts` — **Source Conversation** 删除 / Project 删除深模块：统一 run claim、删除屏障、来源事实 / Skill Candidate / 消息 / FTS / pi session 清理与非致命 scratch 工件回收；不删除用户工作区目录。
 - `packages/core/src/skill-learning/candidate-service.ts` — `SkillCandidateLifecycle`：统一 Candidate 审核资格、验证、来源、批准、Learned Skill 遥测 / 固定 / 快照 / 归档 / 恢复 / 回滚；store / filesystem / reviewer 是内部 adapter。
-- `packages/core/src/providers/model-configuration.ts` — **Provider Model Configuration** 的唯一语义所有者：从保存配置解析 scoped route、上游 model id、最终 runtime model 与安全投影；`ProviderCatalog` 只负责目录 / probe，Manager / Agent runtime / HTTP 只消费结果。
+- `packages/core/src/providers/model-configuration.ts` — **Provider Model Configuration** 的唯一语义所有者：从保存配置解析 scoped route、上游 model id、最终 runtime model 与安全投影；Provider 可另存仅供编辑复用的 `connections[]` 预设，实际运行仍只消费 provider 默认值与 `modelConfigs[]` 内联覆盖；`ProviderCatalog` 只负责目录 / probe。
 - `packages/core/src/server/app.ts` — Fastify 应用装配入口（`/agent/run`、`/v1`、`/models`、`/workspace/*`、`/threads/*`、`/providers`、`/local/runtime` …）；跨路由生命周期对象在这里创建并在 `stop()` 中统一收尾。
 - `packages/core/src/models/local-model-settings.ts` — 本地模型运行设置存储；`models.local.settings` 按模型保存默认采样参数，供聊天 / 工作区 / 渠道在未显式传参时共用。
 - `packages/core/src/channels/operations.ts` — Channel Operations 应用层模块：包住 `ChannelGateway` + `ConnectorHost`，集中连接器生命周期、Feishu/WeChat 扫码 setup session、inbox read model 与 SSE invalidation；HTTP routes 只做请求/响应适配。
@@ -66,7 +66,7 @@
 ## 约定
 
 - **统一 npm**（环境无 pnpm）。
-- **测试 396 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 46 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
+- **测试 397 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 46 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
 - **已移除 node-llama-cpp + 经典 `llama-server`**：本地推理走外部统一 `llama`（llama.app）的 router 模式（`resolveLlamaBin` 只解析 `llama`；嵌入子进程也跑 `llama serve`）。**勿重新引入** node-llama-cpp，也**勿回退每模型一进程的经典 `llama-server`**（含 brew llama.cpp，已完全移除）。
 - **打包**：daemon → Node SEA **单文件二进制**（`scripts/build-daemon-sea.mjs`，运行免 Node；必须用参数化子进程调用，兼容 Windows 路径）；llama 运行时缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime` + `install.sh` / `install.ps1`）；Tauri WebView 启用显式 CSP；`v*` tag 先经 `release:check-version` 校验 npm/Tauri/Cargo 版本一致，再由 GitHub Actions 出 macOS dmg 与 Windows x64 NSIS/MSI。两端发布前必须跑 `smoke:daemon-sea`，Windows 还须跑 `release:check-artifacts`。
 - **改 Tauri Rust（`apps/desktop/src-tauri`）**：本环境有 `cargo`，可 `cargo check` 验证。
@@ -76,7 +76,7 @@
 ```bash
 npm install            # 装依赖
 npm run build          # turbo 构建全部包（含 ui/daemon dist）
-npm test               # vitest（396 通过；另 1 个真机 e2e 默认 skip）
+npm test               # vitest（397 通过；另 1 个真机 e2e 默认 skip）
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
 npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 46 条）

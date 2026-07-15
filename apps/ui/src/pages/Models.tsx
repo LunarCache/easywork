@@ -217,9 +217,13 @@ function modelConfigsToForm(
   models: ProviderModelConfig[],
   catalog: ProviderCatalogItem[] = [],
   inheritCatalogMetadata = false,
+  savedConnections: ProviderConnectionDraft[] = [],
 ): { models: ProviderFormModel[]; connections: ProviderConnectionDraft[] } {
-  const connections: ProviderConnectionDraft[] = [];
+  const connections: ProviderConnectionDraft[] = savedConnections.map((connection) => ({ ...connection }));
   const connectionIds = new Map<string, string>();
+  for (const connection of connections) {
+    connectionIds.set(`${connection.api ?? "<inherit>"}\n${connection.baseUrl ?? "<inherit>"}`, connection.id);
+  }
   const connectionFor = (model: ProviderModelConfig): string => {
     if (!model.api && !model.baseUrl) return DEFAULT_PROVIDER_CONNECTION_ID;
     const key = `${model.api ?? "<inherit>"}\n${model.baseUrl ?? "<inherit>"}`;
@@ -729,6 +733,11 @@ export function Models({ onChange }: { onChange: () => void }) {
     if (incompleteConnection) return setProvNote("请补全模型正在使用的连接方式");
     const modelConfigs = formModelsToConfig(providerModels, providerConnections);
     if (modelConfigs.length === 0) return setProvNote("请至少添加一个模型");
+    const connections = providerConnections.map((connection) => ({
+      id: connection.id,
+      ...(connection.api?.trim() ? { api: connection.api.trim() } : {}),
+      ...(connection.baseUrl?.trim() ? { baseUrl: connection.baseUrl.trim() } : {}),
+    }));
     try {
       await getClient().addProvider({
         id: prov.id.trim(),
@@ -736,6 +745,7 @@ export function Models({ onChange }: { onChange: () => void }) {
         ...(prov.api.trim() ? { api: prov.api.trim() } : {}),
         ...(prov.baseUrl.trim() ? { baseUrl: prov.baseUrl.trim() } : {}),
         ...(prov.apiKey ? { apiKey: prov.apiKey } : {}),
+        ...(prov.kind === "openai-compatible" && connections.length > 0 ? { connections } : {}),
         modelConfigs,
       });
       setProv({ kind: "pi-native", id: "", api: "", baseUrl: "", apiKey: "", models: "", context: "" });
@@ -813,6 +823,7 @@ export function Models({ onChange }: { onChange: () => void }) {
       p.modelConfigs,
       kind === "openai-compatible" ? providerCatalog : [],
       false,
+      p.connections ?? [],
     );
     setProviderModels(formState.models);
     setProviderConnections(formState.connections);

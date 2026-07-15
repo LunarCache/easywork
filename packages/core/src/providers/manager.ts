@@ -15,6 +15,12 @@ export interface CloudProviderCatalogRef {
   modelId: string;
 }
 
+export interface CloudProviderConnectionConfig {
+  id: string;
+  api?: string;
+  baseUrl?: string;
+}
+
 export interface CloudProviderModelConfig {
   id: string;
   /** Optional per-model API family override; falls back to the provider-level api. */
@@ -43,6 +49,8 @@ export interface CloudProviderConfig {
   api?: string;
   apiKey?: string;
   headers?: Record<string, string>;
+  /** Saved connection presets used by the model configuration UI; runtime models keep inline overrides. */
+  connections?: CloudProviderConnectionConfig[];
   /** Per-model metadata. Model ids used for routing are derived from this list. */
   modelConfigs: CloudProviderModelConfig[];
 }
@@ -125,6 +133,7 @@ export class ProviderManager {
     kind: CloudProviderKind;
     baseUrl?: string;
     api?: string;
+    connections?: CloudProviderConnectionConfig[];
     models: string[];
     modelConfigs: CloudProviderModelConfig[];
   }[] {
@@ -133,6 +142,7 @@ export class ProviderManager {
       kind: c.kind ?? "openai-compatible",
       ...(c.baseUrl ? { baseUrl: c.baseUrl } : {}),
       ...(c.api ? { api: c.api } : {}),
+      ...(c.connections?.length ? { connections: c.connections } : {}),
       models: c.modelConfigs.map((model) => model.id),
       modelConfigs: c.modelConfigs,
     }));

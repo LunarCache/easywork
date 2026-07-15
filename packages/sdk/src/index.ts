@@ -147,11 +147,18 @@ export interface ProviderModelConfig {
   catalogRef?: ProviderCatalogRef;
 }
 
+export interface ProviderConnectionConfig {
+  id: string;
+  api?: string;
+  baseUrl?: string;
+}
+
 export interface ProviderInfo {
   id: string;
   kind?: "openai-compatible" | "pi-native";
   baseUrl?: string;
   api?: string;
+  connections?: ProviderConnectionConfig[];
   /** Read-only projection derived from modelConfigs. */
   models: string[];
   modelConfigs: ProviderModelConfig[];
@@ -259,6 +266,7 @@ export interface AddProviderConfig {
   api?: string;
   apiKey?: string;
   headers?: Record<string, string>;
+  connections?: ProviderConnectionConfig[];
   modelConfigs: ProviderModelConfig[];
 }
 

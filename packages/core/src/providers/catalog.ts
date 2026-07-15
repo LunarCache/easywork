@@ -47,6 +47,11 @@ export const ProviderConfigSchema = z.object({
   api: z.string().min(1).optional(),
   apiKey: z.string().optional(),
   headers: z.record(z.string(), z.string()).optional(),
+  connections: z.array(z.object({
+    id: z.string().min(1),
+    api: z.string().min(1).optional(),
+    baseUrl: z.string().url().optional(),
+  })).optional(),
   modelConfigs: z.array(ProviderModelConfigSchema).min(1),
 }).superRefine((cfg, ctx) => {
   if (cfg.kind === "openai-compatible" && !cfg.baseUrl) {
