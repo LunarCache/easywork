@@ -3,7 +3,6 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalRuntime, TerminalSessionInfo } from "../lib/terminal-runtime.js";
-import { terminalTheme, watchTerminalTheme } from "../lib/terminal-theme.js";
 
 function decodeBase64(value: string): Uint8Array {
   const binary = atob(value);
@@ -35,7 +34,12 @@ export function TerminalView({
       fontSize: 12,
       lineHeight: 1.25,
       scrollback: 10_000,
-      theme: terminalTheme(host),
+      theme: {
+        background: "#0a0c10",
+        foreground: "#e8edf4",
+        cursor: "#e8edf4",
+        selectionBackground: "#334155",
+      },
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
@@ -69,14 +73,12 @@ export function TerminalView({
     };
     const observer = new ResizeObserver(resize);
     observer.observe(host);
-    const stopWatchingTheme = watchTerminalTheme(terminal, host);
     resize();
 
     return () => {
       disposed = true;
       detach?.();
       observer.disconnect();
-      stopWatchingTheme();
       input.dispose();
       terminal.dispose();
     };

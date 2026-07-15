@@ -106,7 +106,7 @@
   /* ---- 设计规范名 (Design Spec) — 新结构件直接用这些 ---- */
   --bg-elev: #16181E;       /* 卡片/pill/composer */
   --bg-hover: #1E212A;      /* hover/选中 */
-  --bg-inset: #0A0B0E;      /* 代码井 */
+  --bg-inset: #0A0B0E;      /* 终端/代码井 */
   --border-soft: #1A1D24;   /* 分隔/面板边 */
   --tx-0: #E7E9ED;
   --tx-1: #9AA0AB;
@@ -148,7 +148,7 @@
 
 /* ================================================================
    浅色主题（[data-theme="light"]）—— 覆盖 @theme --color-* + Design Spec 名 token
-   （冷灰浅色，与深色同强调色体系；代码井保持深色以维持对比）。
+   （冷灰浅色，与深色同强调色体系；终端/代码井保持深色以维持对比）。
    ================================================================ */
 [data-theme="light"] {
   --color-bg-primary: #FBFBFC;
@@ -189,7 +189,7 @@
   --color-diff-del-bg: #FDEEEC;
   --color-diff-del-text: #CF222E;
   --color-danger-soft: #FDEEEC;
-  /* 代码井保持深色。 */
+  /* 终端 / 代码井保持深色（浅色下读 ANSI 输出更稳）。 */
   --color-exec-bg: #0A0B0E;
   --color-exec-text: #C9CDD4;
 

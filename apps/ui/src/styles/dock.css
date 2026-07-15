@@ -108,9 +108,9 @@
 .wp-term-cmd { color: #7b8694; margin-bottom: 8px; }
 
 /* 真终端：xterm 直接填充工作台正文，不再叠加伪命令输入栏。 */
-.terminal-view { flex: 1; min-width: 0; min-height: 0; padding: 8px 0 6px 8px; overflow: hidden; background: var(--bg); color: var(--text); }
+.terminal-view { flex: 1; min-width: 0; min-height: 0; padding: 8px 0 6px 8px; overflow: hidden; background: #0a0c10; }
 .terminal-view .xterm { width: 100%; height: 100%; }
-.terminal-view .xterm-viewport { background: var(--bg); scrollbar-width: thin; scrollbar-color: #303846 transparent; }
+.terminal-view .xterm-viewport { scrollbar-width: thin; scrollbar-color: #303846 transparent; }
 
 /* 浏览器 tab：可编辑地址栏 + iframe（来源链接仍可自动导航）。 */
 .preview-tab { flex: 1; min-height: 0; display: flex; flex-direction: column; }

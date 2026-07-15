@@ -108,14 +108,6 @@ test.describe("navigation e2e", () => {
 
     await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(2);
     await expect(page.locator(".side-dock .xterm")).toBeVisible();
-    const dockBackground = await page.locator(".side-dock").evaluate((element) => getComputedStyle(element).backgroundColor);
-    await expect(page.locator(".terminal-view")).toHaveCSS("background-color", dockBackground);
-    await expect(page.locator(".xterm-viewport")).toHaveCSS("background-color", dockBackground);
-    await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
-    const lightDockBackground = await page.locator(".side-dock").evaluate((element) => getComputedStyle(element).backgroundColor);
-    await expect(page.locator(".terminal-view")).toHaveCSS("background-color", lightDockBackground);
-    await expect(page.locator(".xterm-viewport")).toHaveCSS("background-color", lightDockBackground);
-    await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
     await expect(page.locator(".side-dock .xterm-screen")).toContainText("ready:term-2");
     await page.locator(".side-dock .xterm-helper-textarea").focus();
     await page.keyboard.type("echo hello");
