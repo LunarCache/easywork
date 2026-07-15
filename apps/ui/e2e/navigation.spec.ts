@@ -421,6 +421,11 @@ test.describe("navigation e2e", () => {
     await openApp();
     await page.getByRole("button", { name: "收件箱", exact: true }).click();
 
+    const listHeader = page.locator(".inbox-list-head");
+    await expect(listHeader.getByRole("heading", { name: "收件箱" })).toHaveCount(0);
+    await expect(listHeader.locator(".inbox-eyebrow")).toHaveText("外部渠道");
+    await expect(page.getByTestId("inbox-refresh").locator(".lucide-rotate-cw")).toBeVisible();
+
     const inbox = page.getByTestId("inbox-page");
     const list = page.locator(".inbox-list");
     const conversation = page.locator(".inbox-conversation");

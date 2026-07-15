@@ -13,13 +13,14 @@ import {
   GearIcon,
   InboxIcon,
   PanelRightIcon,
-  RefreshIcon,
+  ReloadIcon,
   SearchIcon,
   ShieldIcon,
   StopIcon,
   UserIcon,
   XIcon,
 } from "../icons.js";
+import { BrandIcon, brandKeyForChannel } from "../components/BrandIcon.js";
 
 type InboxFilter = "all" | "running" | "stopped";
 
@@ -28,17 +29,17 @@ const INBOX_LIST_MIN = 220;
 const INBOX_LIST_MAX = 380;
 const INBOX_LIST_DEFAULT = 280;
 
-const CHANNEL_META: Record<string, { label: string; short: string }> = {
-  telegram: { label: "Telegram", short: "TG" },
-  feishu: { label: "飞书", short: "飞" },
-  wechat: { label: "微信", short: "微" },
-  wecom: { label: "企业微信", short: "企" },
-  discord: { label: "Discord", short: "DC" },
-  inapp: { label: "应用内", short: "EW" },
+const CHANNEL_META: Record<string, { label: string }> = {
+  telegram: { label: "Telegram" },
+  feishu: { label: "飞书" },
+  wechat: { label: "微信" },
+  wecom: { label: "企业微信" },
+  discord: { label: "Discord" },
+  inapp: { label: "应用内" },
 };
 
-function channelMeta(kind: string): { label: string; short: string } {
-  return CHANNEL_META[kind] ?? { label: kind, short: kind.slice(0, 2).toUpperCase() };
+function channelMeta(kind: string): { label: string } {
+  return CHANNEL_META[kind] ?? { label: kind };
 }
 
 function rawThreadName(thread: InboxThread): string {
@@ -347,12 +348,9 @@ export function Inbox({
     <div className="inbox-page" data-testid="inbox-page" style={pageStyle}>
       <aside className="inbox-list">
         <div className="inbox-list-head">
-          <div>
-            <div className="inbox-eyebrow">外部渠道</div>
-            <h2>收件箱</h2>
-          </div>
-          <button className="inbox-icon-btn" title="刷新" onClick={() => void loadInbox()}>
-            <RefreshIcon size={16} />
+          <div className="inbox-eyebrow">外部渠道</div>
+          <button className="inbox-icon-btn" data-testid="inbox-refresh" title="刷新" onClick={() => void loadInbox()}>
+            <ReloadIcon size={15} />
           </button>
         </div>
 
@@ -385,7 +383,6 @@ export function Inbox({
             </div>
           ) : (
             filteredThreads.map((thread) => {
-              const meta = channelMeta(thread.channel.kind);
               const active = selected?.id === thread.id;
               const running = isThreadRunning(thread, statuses);
               return (
@@ -395,7 +392,7 @@ export function Inbox({
                   onClick={() => setSelectedId(thread.id)}
                   title={`${displayTitle(thread)} · ${thread.channel.channelId}`}
                 >
-                  <span className={`inbox-avatar ${thread.channel.kind}`}>{meta.short}</span>
+                  <BrandIcon brand={brandKeyForChannel(thread.channel.kind)} size="md" />
                   <span className="inbox-thread-main">
                     <span className="inbox-thread-row">
                       <strong>{displayTitle(thread)}</strong>
@@ -443,7 +440,7 @@ export function Inbox({
         {selected && selectedMeta ? (
           <>
             <header className="inbox-conv-head">
-              <div className={`inbox-avatar large ${selected.channel.kind}`}>{selectedMeta.short}</div>
+              <BrandIcon brand={brandKeyForChannel(selected.channel.kind)} size="lg" />
               <div className="inbox-conv-title">
                 <div className="inbox-conv-name">{displayTitle(selected)}</div>
                 <div className="inbox-conv-meta">
@@ -526,7 +523,7 @@ export function Inbox({
             {selected && selectedMeta ? (
               <>
                 <div className="inbox-detail-head">
-                  <div className={`inbox-avatar ${selected.channel.kind}`}>{selectedMeta.short}</div>
+                  <BrandIcon brand={brandKeyForChannel(selected.channel.kind)} size="md" />
                   <div>
                     <h3>{displayTitle(selected)}</h3>
                     <p>{selectedSummary}</p>

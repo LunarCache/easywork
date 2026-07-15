@@ -8,9 +8,8 @@
 .inbox-resizer:hover span, .inbox-resizer:focus-visible span { background: var(--acc); }
 .inbox-detail { position: absolute; top: 0; right: 0; bottom: 0; z-index: 31; width: clamp(280px, 32vw, 360px); min-width: 0; display: flex; flex-direction: column; background: var(--bg); border-left: 1px solid var(--border-soft); box-shadow: var(--shadow-2); padding: 18px 16px; gap: 16px; overflow-y: auto; animation: inboxDrawerIn 0.16s var(--ease); }
 .inbox-detail-backdrop { position: absolute; inset: 0; z-index: 30; background: color-mix(in srgb, var(--bg) 18%, transparent); }
-.inbox-list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 16px 10px; }
-.inbox-eyebrow { font: 650 10.5px var(--font-mono); color: var(--tx-2); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 3px; }
-.inbox-list-head h2 { margin: 0; color: var(--tx-0); font-size: 19px; line-height: 1.2; }
+.inbox-list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 8px 16px 6px; }
+.inbox-eyebrow { font: 650 10.5px var(--font-mono); color: var(--tx-2); text-transform: uppercase; letter-spacing: 0.07em; }
 .inbox-icon-btn { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--r); color: var(--tx-1); }
 .inbox-icon-btn:hover { background: var(--bg-hover); color: var(--tx-0); }
 .inbox-search { height: 34px; margin: 0 16px 11px; padding: 0 10px; display: flex; align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--border) 82%, transparent); border-radius: var(--r); background: color-mix(in srgb, var(--bg-elev) 78%, transparent); color: var(--tx-2); }
@@ -26,13 +25,6 @@
 .inbox-thread { position: relative; width: 100%; min-height: 86px; display: flex; align-items: flex-start; gap: 10px; padding: 10px 26px 10px 9px; border-radius: var(--r); text-align: left; color: var(--tx-1); }
 .inbox-thread:hover { background: color-mix(in srgb, var(--bg-hover) 68%, transparent); color: var(--tx-0); }
 .inbox-thread.on { background: color-mix(in srgb, var(--acc) 10%, transparent); color: var(--tx-0); box-shadow: inset 2px 0 0 var(--acc); }
-.inbox-avatar { flex: none; width: 34px; height: 34px; border-radius: var(--r); display: grid; place-items: center; background: var(--bg-elev); border: 1px solid var(--border); color: var(--tx-1); font: 700 11px var(--font-mono); }
-.inbox-avatar.large { width: 42px; height: 42px; font-size: 12px; }
-.inbox-avatar.wechat { background: rgba(63, 185, 80, 0.13); border-color: rgba(63, 185, 80, 0.34); color: var(--grn); }
-.inbox-avatar.feishu { background: rgba(59, 130, 246, 0.15); border-color: var(--acc-bd); color: var(--acc); }
-.inbox-avatar.telegram { background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.32); color: #34D399; }
-.inbox-avatar.wecom { background: rgba(216, 165, 38, 0.13); border-color: rgba(216, 165, 38, 0.34); color: var(--color-warning); }
-.inbox-avatar.discord { background: rgba(139, 92, 246, 0.13); border-color: rgba(139, 92, 246, 0.34); color: #A78BFA; }
 .inbox-thread-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .inbox-thread-row, .inbox-thread-sub, .inbox-conv-meta { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .inbox-thread-row strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tx-0); font-size: 13.5px; font-weight: 650; }

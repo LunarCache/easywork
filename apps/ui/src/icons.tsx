@@ -49,6 +49,7 @@ export {
   Clock as ClockIcon,
   ShieldCheck as ShieldIcon,
   RefreshCw as RefreshIcon,
+  RotateCw as ReloadIcon,
   GitBranch as GitBranchIcon,
   GitFork as GitGraphIcon,
   Play as PlayIcon,
