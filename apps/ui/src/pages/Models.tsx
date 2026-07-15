@@ -24,6 +24,7 @@ import {
   DownloadIcon,
   EditIcon,
   GlobeIcon,
+  SlidersIcon,
   SearchIcon,
   TrashIcon,
   PlusIcon,
@@ -62,14 +63,21 @@ const DEFAULT_PROVIDER_API_FAMILIES: ProviderApiFamily[] = [
 interface ProviderFormModel {
   rowId: string;
   id: string;
-  api?: string;
-  baseUrl?: string;
+  connectionId: string;
   context: string;
   inputModalities: ProviderModelModality[];
   reasoning?: boolean;
   compatibilityMode: ProviderCompatibilityMode;
   catalogRef?: ProviderCatalogRef;
 }
+
+interface ProviderConnectionDraft {
+  id: string;
+  api: string;
+  baseUrl: string;
+}
+
+const DEFAULT_PROVIDER_CONNECTION_ID = "default";
 
 interface CatalogModelMatch {
   provider: ProviderCatalogItem;
@@ -109,6 +117,7 @@ function resetScrollContainers(node: HTMLElement | null) {
 
 function newProviderModelRow(input: Omit<ProviderFormModel, "rowId"> = {
   id: "",
+  connectionId: DEFAULT_PROVIDER_CONNECTION_ID,
   context: "32768",
   inputModalities: ["text"],
   compatibilityMode: "auto",
@@ -119,6 +128,7 @@ function newProviderModelRow(input: Omit<ProviderFormModel, "rowId"> = {
 function catalogModelsToForm(models: ProviderCatalogModel[]): ProviderFormModel[] {
   return models.map((m) => newProviderModelRow({
     id: m.id,
+    connectionId: DEFAULT_PROVIDER_CONNECTION_ID,
     context: String(m.contextWindow),
     inputModalities: m.inputModalities.includes("image") ? ["text", "image"] : ["text"],
     compatibilityMode: "auto",
@@ -196,7 +206,23 @@ function modelConfigsToForm(
   models: ProviderModelConfig[],
   catalog: ProviderCatalogItem[] = [],
   inheritCatalogMetadata = false,
-): ProviderFormModel[] {
+  defaultApi = "openai-completions",
+  defaultBaseUrl = "",
+): { models: ProviderFormModel[]; connections: ProviderConnectionDraft[] } {
+  const connections: ProviderConnectionDraft[] = [];
+  const connectionIds = new Map<string, string>();
+  const connectionFor = (model: ProviderModelConfig): string => {
+    if (!model.api && !model.baseUrl) return DEFAULT_PROVIDER_CONNECTION_ID;
+    const api = model.api ?? defaultApi;
+    const baseUrl = model.baseUrl ?? defaultBaseUrl;
+    const key = `${api}\n${baseUrl}`;
+    const existing = connectionIds.get(key);
+    if (existing) return existing;
+    const id = crypto.randomUUID();
+    connectionIds.set(key, id);
+    connections.push({ id, api, baseUrl });
+    return id;
+  };
   const rows = models.map((model) => {
     const compatibilityMode = model.compatibilityMode ?? "auto";
     const pinnedMatch = catalogMatchForRef(catalog, model.catalogRef);
@@ -207,8 +233,7 @@ function modelConfigsToForm(
     const catalogRef = catalog.length > 0 ? match?.ref : model.catalogRef;
     return newProviderModelRow({
       id: model.id,
-      ...(model.api ? { api: model.api } : {}),
-      ...(model.baseUrl ? { baseUrl: model.baseUrl } : {}),
+      connectionId: connectionFor(model),
       context: String(model.contextWindow),
       inputModalities: model.inputModalities.includes("image") ? ["text", "image"] : ["text"],
       compatibilityMode,
@@ -217,20 +242,28 @@ function modelConfigsToForm(
       ...(inheritCatalogMetadata ? catalogProjectionPatch(match) : {}),
     });
   });
-  return rows.length > 0 ? rows : [newProviderModelRow()];
+  return {
+    models: rows.length > 0 ? rows : [newProviderModelRow()],
+    connections,
+  };
 }
 
-function formModelsToConfig(models: ProviderFormModel[]): ProviderModelConfig[] {
+function formModelsToConfig(
+  models: ProviderFormModel[],
+  connections: ProviderConnectionDraft[],
+): ProviderModelConfig[] {
+  const connectionById = new Map(connections.map((connection) => [connection.id, connection]));
   const out = new Map<string, ProviderModelConfig>();
   for (const model of models) {
     const id = model.id.trim();
     if (!id) continue;
     const ctx = Number(model.context.trim());
     const inputModalities = model.inputModalities.includes("image") ? ["text", "image"] as ProviderModelModality[] : ["text"] as ProviderModelModality[];
+    const connection = connectionById.get(model.connectionId);
     out.set(id, {
       id,
-      ...(model.api?.trim() ? { api: model.api.trim() } : {}),
-      ...(model.baseUrl?.trim() ? { baseUrl: model.baseUrl.trim() } : {}),
+      ...(connection?.api.trim() ? { api: connection.api.trim() } : {}),
+      ...(connection?.baseUrl.trim() ? { baseUrl: connection.baseUrl.trim() } : {}),
       inputModalities,
       contextWindow: Number.isFinite(ctx) && ctx > 0 ? Math.floor(ctx) : 32768,
       compatibilityMode: model.compatibilityMode,
@@ -241,8 +274,32 @@ function formModelsToConfig(models: ProviderFormModel[]): ProviderModelConfig[] 
   return [...out.values()];
 }
 
+function connectionEndpointPreview(api: string, baseUrl: string): string {
+  const base = baseUrl.trim().replace(/\/$/, "");
+  if (!base) return "填写 Base URL 后显示最终请求地址";
+  if (api === "anthropic-messages") {
+    if (base.endsWith("/v1/messages")) return base;
+    return base.endsWith("/v1") ? `${base}/messages` : `${base}/v1/messages`;
+  }
+  if (api === "openai-completions") return `${base}/chat/completions`;
+  if (api === "openai-responses" || api === "azure-openai-responses") return `${base}/responses`;
+  return `${base} · ${apiLabel(api, DEFAULT_PROVIDER_API_FAMILIES)}`;
+}
+
 function apiLabel(api: string, options: ProviderApiFamily[]): string {
   return options.find((item) => item.id === api)?.label ?? api;
+}
+
+function compactApiLabel(api: string): string {
+  if (api === "openai-completions") return "OpenAI Chat";
+  if (api === "openai-responses") return "OpenAI Responses";
+  if (api === "anthropic-messages") return "Anthropic";
+  if (api === "google-generative-ai") return "Google AI";
+  if (api === "mistral-conversations") return "Mistral";
+  if (api === "azure-openai-responses") return "Azure OpenAI";
+  if (api === "bedrock-converse-stream") return "Bedrock";
+  if (api === "google-vertex") return "Vertex";
+  return api;
 }
 
 function formatApiFamilies(options: ProviderApiFamily[], fallback: string[] = []): string {
@@ -379,6 +436,9 @@ export function Models({ onChange }: { onChange: () => void }) {
   const [templateMenuRowId, setTemplateMenuRowId] = useState<string | null>(null);
   const [templateSearch, setTemplateSearch] = useState("");
   const [providerModels, setProviderModels] = useState<ProviderFormModel[]>([]);
+  const [providerConnections, setProviderConnections] = useState<ProviderConnectionDraft[]>([]);
+  const [advancedModelRowId, setAdvancedModelRowId] = useState<string | null>(null);
+  const [selectedProviderModelRows, setSelectedProviderModelRows] = useState<string[]>([]);
   const [modelProbeBusy, setModelProbeBusy] = useState(false);
   const [provNote, setProvNote] = useState("");
 
@@ -387,6 +447,8 @@ export function Models({ onChange }: { onChange: () => void }) {
       setApiMenuOpen(false);
       setTemplateMenuRowId(null);
       setTemplateSearch("");
+      setAdvancedModelRowId(null);
+      setSelectedProviderModelRows([]);
     }
   }, [providerConfigOpen]);
 
@@ -648,7 +710,11 @@ export function Models({ onChange }: { onChange: () => void }) {
   const addProvider = async () => {
     if (!prov.id.trim()) return setProvNote("请填写 Provider ID");
     if (prov.kind === "openai-compatible" && !prov.baseUrl.trim()) return setProvNote("OpenAI-compatible provider 需要 baseUrl");
-    const modelConfigs = formModelsToConfig(providerModels);
+    const usedConnectionIds = new Set(providerModels.map((model) => model.connectionId));
+    const incompleteConnection = providerConnections.find((connection) =>
+      usedConnectionIds.has(connection.id) && (!connection.api.trim() || !connection.baseUrl.trim()));
+    if (incompleteConnection) return setProvNote("请补全模型正在使用的连接方式");
+    const modelConfigs = formModelsToConfig(providerModels, providerConnections);
     if (modelConfigs.length === 0) return setProvNote("请至少添加一个模型");
     try {
       await getClient().addProvider({
@@ -661,6 +727,7 @@ export function Models({ onChange }: { onChange: () => void }) {
       });
       setProv({ kind: "pi-native", id: "", api: "", baseUrl: "", apiKey: "", models: "", context: "" });
       setProviderModels([newProviderModelRow()]);
+      setProviderConnections([]);
       setProviderConfigOpen(false);
       setEditingProviderId(null);
       setView("list");
@@ -693,6 +760,7 @@ export function Models({ onChange }: { onChange: () => void }) {
       context: "",
     });
     setProviderModels([newProviderModelRow()]);
+    setProviderConnections([]);
     setProviderConfigOpen(true);
     setProvNote("");
   };
@@ -712,6 +780,7 @@ export function Models({ onChange }: { onChange: () => void }) {
       context: "",
     });
     setProviderModels(catalogModelsToForm(p.models));
+    setProviderConnections([]);
     setProviderConfigOpen(true);
     setProvNote("");
   };
@@ -727,16 +796,31 @@ export function Models({ onChange }: { onChange: () => void }) {
       models: p.models.join(", "),
       context: "",
     });
-    setProviderModels(modelConfigsToForm(
+    const formState = modelConfigsToForm(
       p.modelConfigs,
       kind === "openai-compatible" ? providerCatalog : [],
-    ));
+      false,
+      p.api ?? "openai-completions",
+      p.baseUrl ?? "",
+    );
+    setProviderModels(formState.models);
+    setProviderConnections(formState.connections);
     setProviderConfigOpen(true);
     setProvNote("");
     setView("add-provider");
   };
 
   const providerModelIds = providerModels.map((m) => m.id).filter(Boolean);
+  const providerConnectionOptions: ProviderConnectionDraft[] = [
+    { id: DEFAULT_PROVIDER_CONNECTION_ID, api: prov.api || "openai-completions", baseUrl: prov.baseUrl },
+    ...providerConnections,
+  ];
+  const providerConnectionLabel = (connection: ProviderConnectionDraft, index: number): string =>
+    connection.id === DEFAULT_PROVIDER_CONNECTION_ID
+      ? "默认"
+      : `连接 ${index + 1} · ${compactApiLabel(connection.api)}`;
+  const allProviderModelsSelected = providerModels.length > 0
+    && providerModels.every((model) => selectedProviderModelRows.includes(model.rowId));
   const addProviderModelRow = () => {
     setProviderModels((cur) => [...cur, newProviderModelRow()]);
   };
@@ -745,6 +829,8 @@ export function Models({ onChange }: { onChange: () => void }) {
       const next = cur.filter((m) => m.rowId !== rowId);
       return next.length > 0 ? next : [newProviderModelRow()];
     });
+    setSelectedProviderModelRows((current) => current.filter((id) => id !== rowId));
+    if (advancedModelRowId === rowId) setAdvancedModelRowId(null);
   };
   const updateProviderModel = (rowId: string, patch: Partial<Omit<ProviderFormModel, "rowId">>) => {
     setProviderModels((cur) => cur.map((m) => (m.rowId === rowId ? { ...m, ...patch } : m)));
@@ -757,6 +843,28 @@ export function Models({ onChange }: { onChange: () => void }) {
       id,
       ...(model.compatibilityMode === "auto" ? catalogProjectionPatch(match) : {}),
     });
+  };
+  const addProviderConnection = () => {
+    const fallbackApi = apiProtocolIds.find((api) => api !== prov.api) ?? "anthropic-messages";
+    setProviderConnections((current) => [...current, {
+      id: crypto.randomUUID(),
+      api: fallbackApi,
+      baseUrl: "",
+    }]);
+  };
+  const updateProviderConnection = (id: string, patch: Partial<Omit<ProviderConnectionDraft, "id">>) => {
+    setProviderConnections((current) => current.map((connection) =>
+      connection.id === id ? { ...connection, ...patch } : connection));
+  };
+  const removeProviderConnection = (id: string) => {
+    setProviderConnections((current) => current.filter((connection) => connection.id !== id));
+    setProviderModels((current) => current.map((model) =>
+      model.connectionId === id ? { ...model, connectionId: DEFAULT_PROVIDER_CONNECTION_ID } : model));
+  };
+  const assignSelectedModelsToConnection = (connectionId: string) => {
+    const selected = new Set(selectedProviderModelRows);
+    setProviderModels((current) => current.map((model) =>
+      selected.has(model.rowId) ? { ...model, connectionId } : model));
   };
   const selectProviderApi = (api: string) => {
     setProv({ ...prov, api });
@@ -797,7 +905,15 @@ export function Models({ onChange }: { onChange: () => void }) {
       if (result.modelConfigs.length === 0) {
         setProvNote("未获取到模型列表，请手动填入模型 ID。");
       } else {
-        setProviderModels(modelConfigsToForm(result.modelConfigs, providerCatalog, true));
+        const formState = modelConfigsToForm(
+          result.modelConfigs,
+          providerCatalog,
+          true,
+          prov.api || "openai-completions",
+          prov.baseUrl,
+        );
+        setProviderModels(formState.models);
+        setProviderConnections(formState.connections);
         setProvNote(`已获取 ${result.modelConfigs.length} 个模型。`);
       }
     } catch (e) {
@@ -936,56 +1052,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                     }}
                   />
                 </label>
-                <div className="provider-field">
-                  <span>默认 API 协议</span>
-                  <div className="set-select-wrap provider-api-select">
-                    <button
-                      type="button"
-                      className={`set-select-btn ${apiMenuOpen ? "open" : ""}`}
-                      onClick={() => setApiMenuOpen((open) => !open)}
-                    >
-                      <span>{prov.api ? apiLabel(prov.api, apiProtocolOptions) : "选择 API 协议"}</span>
-                      <ChevronDownIcon size={13} className="set-select-chev" />
-                    </button>
-                    {apiMenuOpen && (
-                      <>
-                        <div className="menu-backdrop" onClick={() => setApiMenuOpen(false)} />
-                        <div className="set-select-menu">
-                          {apiProtocolIds.map((api) => (
-                            <button
-                              key={api}
-                              type="button"
-                              className={`set-select-opt ${api === prov.api ? "on" : ""}`}
-                              onClick={() => {
-                                selectProviderApi(api);
-                                setApiMenuOpen(false);
-                              }}
-                            >
-                              <span>{apiLabel(api, apiProtocolOptions)}</span>
-                              {api === prov.api && <CheckIcon size={14} className="set-select-check" />}
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <label className="provider-field wide">
-                  <span>{prov.kind === "pi-native" ? "Base URL Override" : "Base URL"}</span>
-                  <div className="provider-inline-control">
-                    <input
-                      placeholder={prov.kind === "pi-native" ? "留空使用内置端点" : "https://.../v1"}
-                      value={prov.baseUrl}
-                      onChange={(e) => setProv({ ...prov, baseUrl: e.target.value })}
-                    />
-                    {prov.kind === "openai-compatible" && (
-                      <button className="set-btn secondary" type="button" disabled={modelProbeBusy} onClick={() => void fetchProviderModels()}>
-                        {modelProbeBusy ? "获取中…" : "获取模型列表"}
-                      </button>
-                    )}
-                  </div>
-                </label>
-                <label className="provider-field wide">
+                <label className="provider-field">
                   <span>API Key</span>
                   <input
                     placeholder={editingProviderId ? "留空保持现有 Key" : "sk-..."}
@@ -994,19 +1061,175 @@ export function Models({ onChange }: { onChange: () => void }) {
                     onChange={(e) => setProv({ ...prov, apiKey: e.target.value })}
                   />
                 </label>
+                {prov.kind === "openai-compatible" ? (
+                  <div className="provider-field wide provider-connections-field">
+                    <div className="provider-field-head">
+                      <div>
+                        <span>连接方式</span>
+                        <small>模型只需选择连接方式，不重复填写协议和地址。</small>
+                      </div>
+                      <button type="button" className="set-btn ghost soft small" onClick={addProviderConnection}>
+                        <PlusIcon size={13} /> 添加连接方式
+                      </button>
+                    </div>
+                    <div className="provider-connections">
+                      <div className="provider-connection-card default" data-testid="provider-connection-default">
+                        <div className="provider-connection-kind">
+                          <span className="set-pill">默认</span>
+                          <small>新模型自动使用</small>
+                        </div>
+                        <label>
+                          <span>API 协议</span>
+                          <select
+                            title="默认连接 API 协议"
+                            value={prov.api}
+                            onChange={(event) => selectProviderApi(event.target.value)}
+                          >
+                            {apiProtocolIds.map((api) => (
+                              <option value={api} key={api}>{apiLabel(api, apiProtocolOptions)}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="provider-connection-url">
+                          <span>Base URL</span>
+                          <input
+                            placeholder="https://.../v1"
+                            value={prov.baseUrl}
+                            onChange={(event) => setProv({ ...prov, baseUrl: event.target.value })}
+                          />
+                        </label>
+                        <button className="set-btn secondary small" type="button" disabled={modelProbeBusy} onClick={() => void fetchProviderModels()}>
+                          {modelProbeBusy ? "获取中…" : "获取模型"}
+                        </button>
+                        <code className="provider-connection-preview">请求 → {connectionEndpointPreview(prov.api, prov.baseUrl)}</code>
+                      </div>
+                      {providerConnections.map((connection, index) => (
+                        <div className="provider-connection-card" key={connection.id} data-testid="provider-connection-override">
+                          <div className="provider-connection-kind">
+                            <span className="set-pill ghost">连接 {index + 2}</span>
+                            <small>用于协议例外</small>
+                          </div>
+                          <label>
+                            <span>API 协议</span>
+                            <select
+                              title={`连接 ${index + 2} API 协议`}
+                              value={connection.api}
+                              onChange={(event) => updateProviderConnection(connection.id, { api: event.target.value })}
+                            >
+                              {apiProtocolIds.map((api) => (
+                                <option value={api} key={api}>{apiLabel(api, apiProtocolOptions)}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="provider-connection-url">
+                            <span>Base URL</span>
+                            <input
+                              title={`连接 ${index + 2} Base URL`}
+                              placeholder="https://..."
+                              value={connection.baseUrl}
+                              onChange={(event) => updateProviderConnection(connection.id, { baseUrl: event.target.value })}
+                            />
+                          </label>
+                          <button type="button" className="mcp-icon-btn danger" title="删除连接方式" onClick={() => removeProviderConnection(connection.id)}>
+                            <TrashIcon size={13} />
+                          </button>
+                          <code className="provider-connection-preview">请求 → {connectionEndpointPreview(connection.api, connection.baseUrl)}</code>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="provider-field">
+                      <span>API 协议</span>
+                      <div className="set-select-wrap provider-api-select">
+                        <button
+                          type="button"
+                          className={`set-select-btn ${apiMenuOpen ? "open" : ""}`}
+                          onClick={() => setApiMenuOpen((open) => !open)}
+                        >
+                          <span>{prov.api ? apiLabel(prov.api, apiProtocolOptions) : "选择 API 协议"}</span>
+                          <ChevronDownIcon size={13} className="set-select-chev" />
+                        </button>
+                        {apiMenuOpen && (
+                          <>
+                            <div className="menu-backdrop" onClick={() => setApiMenuOpen(false)} />
+                            <div className="set-select-menu">
+                              {apiProtocolIds.map((api) => (
+                                <button
+                                  key={api}
+                                  type="button"
+                                  className={`set-select-opt ${api === prov.api ? "on" : ""}`}
+                                  onClick={() => {
+                                    selectProviderApi(api);
+                                    setApiMenuOpen(false);
+                                  }}
+                                >
+                                  <span>{apiLabel(api, apiProtocolOptions)}</span>
+                                  {api === prov.api && <CheckIcon size={14} className="set-select-check" />}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <label className="provider-field wide">
+                      <span>Base URL Override</span>
+                      <input
+                        placeholder="留空使用内置端点"
+                        value={prov.baseUrl}
+                        onChange={(event) => setProv({ ...prov, baseUrl: event.target.value })}
+                      />
+                    </label>
+                  </>
+                )}
                 <div className="provider-field wide">
                   <div className="provider-field-head">
                     <span>模型配置</span>
                     <span className="set-pill ghost">{providerModelIds.length} models</span>
                   </div>
                   <div className="provider-model-table">
+                    {prov.kind === "openai-compatible" && selectedProviderModelRows.length > 0 && (
+                      <div className="provider-model-bulkbar">
+                        <span>已选择 {selectedProviderModelRows.length} 个模型</span>
+                        <label>
+                          批量接入
+                          <select
+                            aria-label="批量设置连接方式"
+                            value=""
+                            onChange={(event) => {
+                              assignSelectedModelsToConnection(event.target.value);
+                              event.target.value = "";
+                            }}
+                          >
+                            <option value="" disabled>选择连接方式</option>
+                            {providerConnectionOptions.map((connection, index) => (
+                              <option value={connection.id} key={connection.id}>
+                                {providerConnectionLabel(connection, index)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button type="button" className="set-btn ghost soft small" onClick={() => setSelectedProviderModelRows([])}>取消选择</button>
+                      </div>
+                    )}
                     <div className={`provider-model-table-head ${prov.kind === "openai-compatible" ? "compatible" : ""}`}>
+                      {prov.kind === "openai-compatible" && (
+                        <input
+                          type="checkbox"
+                          aria-label="选择全部模型"
+                          checked={allProviderModelsSelected}
+                          onChange={(event) => setSelectedProviderModelRows(event.target.checked
+                            ? providerModels.map((model) => model.rowId)
+                            : [])}
+                        />
+                      )}
                       <span>Model ID</span>
-                      {prov.kind === "openai-compatible" && <span>API</span>}
+                      {prov.kind === "openai-compatible" && <span>连接方式</span>}
                       <span>Context</span>
-                      <span>模态</span>
-                      {prov.kind === "openai-compatible" && <span>兼容模板</span>}
-                      {prov.kind === "openai-compatible" && <span>推理</span>}
+                      <span>{prov.kind === "openai-compatible" ? "能力" : "模态"}</span>
+                      {prov.kind === "openai-compatible" && <span>设置</span>}
                       <button type="button" className="mcp-icon-btn" title="添加模型行" onClick={addProviderModelRow}>
                         <PlusIcon size={14} />
                       </button>
@@ -1015,18 +1238,30 @@ export function Models({ onChange }: { onChange: () => void }) {
                       const exactMatches = catalogMatches(providerCatalog, model.id);
                       const selectedMatch = catalogMatchForRef(providerCatalog, model.catalogRef);
                       const templateMenuOpen = templateMenuRowId === model.rowId;
+                      const advancedOpen = advancedModelRowId === model.rowId;
                       const templateOptions = templateMenuOpen
                         ? searchCatalogMatches(providerCatalog, templateSearch)
                         : [];
                       const inheritedReasoning = selectedMatch?.model.reasoning ?? false;
+                      const effectiveReasoning = model.reasoning ?? inheritedReasoning;
                       const templateLabel = model.compatibilityMode === "generic"
                         ? "通用兼容"
                         : model.compatibilityMode === "auto"
-                          ? selectedMatch ? `${selectedMatch.provider.label} · 自动` : "自动匹配"
+                          ? "自动匹配"
                           : selectedMatch?.provider.label ?? model.catalogRef?.providerId ?? "选择模板";
                       return (
                       <div className="provider-model-entry" key={model.rowId}>
                       <div className={`provider-model-row ${prov.kind === "openai-compatible" ? "compatible" : ""}`}>
+                        {prov.kind === "openai-compatible" && (
+                          <input
+                            type="checkbox"
+                            aria-label={`选择模型 ${model.id || "未命名"}`}
+                            checked={selectedProviderModelRows.includes(model.rowId)}
+                            onChange={(event) => setSelectedProviderModelRows((current) => event.target.checked
+                              ? [...current, model.rowId]
+                              : current.filter((id) => id !== model.rowId))}
+                          />
+                        )}
                         <input
                           className="mono"
                           value={model.id}
@@ -1037,16 +1272,14 @@ export function Models({ onChange }: { onChange: () => void }) {
                         {prov.kind === "openai-compatible" && (
                           <select
                             className="provider-model-api-select"
-                            title="模型 API 协议"
-                            value={model.api ?? ""}
-                            onChange={(event) => updateProviderModel(model.rowId, {
-                              api: event.target.value || undefined,
-                              baseUrl: undefined,
-                            })}
+                            title="模型连接方式"
+                            value={model.connectionId}
+                            onChange={(event) => updateProviderModel(model.rowId, { connectionId: event.target.value })}
                           >
-                            <option value="">默认 · {apiLabel(prov.api || "openai-completions", apiProtocolOptions)}</option>
-                            {apiProtocolIds.map((api) => (
-                              <option value={api} key={api}>{apiLabel(api, apiProtocolOptions)}</option>
+                            {providerConnectionOptions.map((connection, index) => (
+                              <option value={connection.id} key={connection.id}>
+                                {providerConnectionLabel(connection, index)}
+                              </option>
                             ))}
                           </select>
                         )}
@@ -1057,64 +1290,98 @@ export function Models({ onChange }: { onChange: () => void }) {
                           placeholder="32768"
                           onChange={(e) => updateProviderModel(model.rowId, { context: e.target.value })}
                         />
-                        <label className="provider-model-check">
-                          <input
-                            type="checkbox"
-                            checked={model.inputModalities.includes("image")}
-                            onChange={(e) => updateProviderModel(model.rowId, { inputModalities: e.target.checked ? ["text", "image"] : ["text"] })}
-                          />
-                          视觉
-                        </label>
+                        {prov.kind === "openai-compatible" && (
+                          <div className="provider-model-capabilities">
+                            {model.inputModalities.includes("image") && <span>视觉</span>}
+                            {effectiveReasoning && <span>推理</span>}
+                            {!model.inputModalities.includes("image") && !effectiveReasoning && <small>文本</small>}
+                          </div>
+                        )}
+                        {prov.kind !== "openai-compatible" && (
+                          <label className="provider-model-check">
+                            <input
+                              type="checkbox"
+                              checked={model.inputModalities.includes("image")}
+                              onChange={(event) => updateProviderModel(model.rowId, { inputModalities: event.target.checked ? ["text", "image"] : ["text"] })}
+                            />
+                            视觉
+                          </label>
+                        )}
                         {prov.kind === "openai-compatible" && (
                           <button
                             type="button"
-                            className={`provider-model-template-trigger ${templateMenuOpen ? "open" : ""}`}
-                            title="选择模型兼容模板"
+                            className={`provider-model-advanced-trigger ${advancedOpen ? "open" : ""}`}
+                            title="模型高级设置"
                             onClick={() => {
-                              setTemplateMenuRowId(templateMenuOpen ? null : model.rowId);
-                              setTemplateSearch(model.catalogRef?.modelId ?? model.id);
+                              setAdvancedModelRowId(advancedOpen ? null : model.rowId);
+                              setTemplateMenuRowId(null);
                             }}
                           >
-                            <span>{templateLabel}</span>
-                            <ChevronDownIcon size={12} />
+                            <SlidersIcon size={13} /> 高级
                           </button>
-                        )}
-                        {prov.kind === "openai-compatible" && (
-                          <div className="provider-reasoning-seg" role="group" aria-label="推理能力">
-                            <button
-                              type="button"
-                              className={model.reasoning === undefined ? "on" : ""}
-                              title={`继承模板（当前${inheritedReasoning ? "开启" : "关闭"}）`}
-                              onClick={() => updateProviderModel(model.rowId, { reasoning: undefined })}
-                            >随</button>
-                            <button
-                              type="button"
-                              className={model.reasoning === true ? "on" : ""}
-                              title="强制开启推理"
-                              onClick={() => updateProviderModel(model.rowId, { reasoning: true })}
-                            >开</button>
-                            <button
-                              type="button"
-                              className={model.reasoning === false ? "on" : ""}
-                              title="强制关闭推理"
-                              onClick={() => updateProviderModel(model.rowId, { reasoning: false })}
-                            >关</button>
-                          </div>
                         )}
                         <button type="button" className="mcp-icon-btn danger" title="移除" onClick={() => removeProviderModel(model.rowId)}>
                           <TrashIcon size={13} />
                         </button>
                       </div>
-                      {prov.kind === "openai-compatible" && model.api && (
-                        <label className="provider-model-endpoint-override">
-                          <span>模型 Base URL</span>
-                          <input
-                            title="模型 Base URL"
-                            value={model.baseUrl ?? ""}
-                            placeholder={`默认 · ${prov.baseUrl || "Provider Base URL"}`}
-                            onChange={(event) => updateProviderModel(model.rowId, { baseUrl: event.target.value || undefined })}
-                          />
-                        </label>
+                      {prov.kind === "openai-compatible" && advancedOpen && (
+                        <div className="provider-model-advanced">
+                          <div className="provider-model-advanced-head">
+                            <div>
+                              <strong>{model.id || "未命名模型"}</strong>
+                              <span>能力覆盖和兼容模板只在需要时调整。</span>
+                            </div>
+                            <button type="button" className="set-btn ghost soft small" onClick={() => setAdvancedModelRowId(null)}>完成</button>
+                          </div>
+                          <div className="provider-model-advanced-grid">
+                            <label className="provider-model-check advanced">
+                              <input
+                                type="checkbox"
+                                checked={model.inputModalities.includes("image")}
+                                onChange={(event) => updateProviderModel(model.rowId, { inputModalities: event.target.checked ? ["text", "image"] : ["text"] })}
+                              />
+                              支持视觉输入
+                            </label>
+                            <div className="provider-model-advanced-control">
+                              <span>推理能力</span>
+                              <div className="provider-reasoning-seg" role="group" aria-label="推理能力">
+                                <button
+                                  type="button"
+                                  className={model.reasoning === undefined ? "on" : ""}
+                                  title={`继承模板（当前${inheritedReasoning ? "开启" : "关闭"}）`}
+                                  onClick={() => updateProviderModel(model.rowId, { reasoning: undefined })}
+                                >继承</button>
+                                <button
+                                  type="button"
+                                  className={model.reasoning === true ? "on" : ""}
+                                  title="强制开启推理"
+                                  onClick={() => updateProviderModel(model.rowId, { reasoning: true })}
+                                >开启</button>
+                                <button
+                                  type="button"
+                                  className={model.reasoning === false ? "on" : ""}
+                                  title="强制关闭推理"
+                                  onClick={() => updateProviderModel(model.rowId, { reasoning: false })}
+                                >关闭</button>
+                              </div>
+                            </div>
+                            <div className="provider-model-advanced-control template">
+                              <span>兼容模板</span>
+                              <button
+                                type="button"
+                                className={`provider-model-template-trigger ${templateMenuOpen ? "open" : ""}`}
+                                title={selectedMatch ? `当前目录来源：${selectedMatch.provider.label}` : "选择模型兼容模板"}
+                                onClick={() => {
+                                  setTemplateMenuRowId(templateMenuOpen ? null : model.rowId);
+                                  setTemplateSearch(model.catalogRef?.modelId ?? model.id);
+                                }}
+                              >
+                                <span>{templateLabel}</span>
+                                <ChevronDownIcon size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       )}
                       {prov.kind === "openai-compatible" && templateMenuOpen && (
                         <div className="provider-model-template-menu">
@@ -1202,6 +1469,9 @@ export function Models({ onChange }: { onChange: () => void }) {
                       ? { ...prov, baseUrl: "", apiKey: "", models: "", context: "" }
                       : { kind: "pi-native", id: "", api: "", baseUrl: "", apiKey: "", models: "", context: "" });
                     setProviderModels([newProviderModelRow()]);
+                    setProviderConnections([]);
+                    setSelectedProviderModelRows([]);
+                    setAdvancedModelRowId(null);
                   }}
                 >
                   清空
