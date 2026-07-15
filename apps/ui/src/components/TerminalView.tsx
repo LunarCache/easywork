@@ -3,23 +3,13 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalRuntime, TerminalSessionInfo } from "../lib/terminal-runtime.js";
+import { terminalTheme, watchTerminalTheme } from "../lib/terminal-theme.js";
 
 function decodeBase64(value: string): Uint8Array {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return bytes;
-}
-
-function terminalTheme(host: HTMLElement) {
-  const hostStyle = getComputedStyle(host);
-  const rootStyle = getComputedStyle(document.documentElement);
-  return {
-    background: hostStyle.backgroundColor,
-    foreground: hostStyle.color,
-    cursor: hostStyle.color,
-    selectionBackground: rootStyle.getPropertyValue("--color-bg-tertiary").trim(),
-  };
 }
 
 export function TerminalView({
@@ -79,17 +69,14 @@ export function TerminalView({
     };
     const observer = new ResizeObserver(resize);
     observer.observe(host);
-    const themeObserver = new MutationObserver(() => {
-      terminal.options.theme = terminalTheme(host);
-    });
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    const stopWatchingTheme = watchTerminalTheme(terminal, host);
     resize();
 
     return () => {
       disposed = true;
       detach?.();
       observer.disconnect();
-      themeObserver.disconnect();
+      stopWatchingTheme();
       input.dispose();
       terminal.dispose();
     };
