@@ -104,7 +104,7 @@ flowchart LR
 - Channel Gateway 把不同平台统一成 adapter；core 侧 Channel Operations 统一管理连接器生命周期、扫码连接会话、收件箱读模型和 SSE 失效事件。
 - Telegram long-poll、Feishu/Lark WebSocket 与 webhook、WeChat iLink QR + long-poll 已落地。
 - 渠道 secret 不再写入 SQLite：macOS 使用 Keychain、Linux 使用 Secret Service、Windows 使用当前用户 DPAPI；旧版明文配置会在启动时自动迁移，管理 API 只返回已配置字段名而不回显密钥。
-- 收件箱按外部联系人聚合消息，使用 SSE invalidation 实时刷新。
+- 收件箱按外部联系人聚合消息，使用 SSE invalidation 实时刷新；顶层标题保持唯一，列表只保留“外部渠道”分区标识与紧凑刷新动作，微信 / Telegram / Discord 等渠道复用统一品牌图标。
 
 ---
 
