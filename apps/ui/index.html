@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#FBFBFC" />
+    <meta name="theme-color" content="#F5F8F9" />
     <title>EasyWork — 本地 AI 工作台</title>
     <script>
       // 防 FOUC：React 挂载前先按持久化偏好给 <html> 打上 data-theme/accent/density。
       (function () {
         try {
           var p = JSON.parse(localStorage.getItem("ew.theme") || "{}");
-          var appearance = p.appearance || "system";
+          var appearance = p.appearance || "light";
           var prefersDark = matchMedia("(prefers-color-scheme: dark)").matches;
           var dark = appearance === "dark" || (appearance === "system" && prefersDark);
           var r = document.documentElement;

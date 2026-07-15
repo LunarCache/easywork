@@ -201,7 +201,7 @@
 .brand-local { background: color-mix(in srgb, var(--accent) 11%, var(--color-bg-card)); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 26%, var(--border)); }
 .brand-wechat { background: rgba(63, 185, 80, 0.13); border-color: rgba(63, 185, 80, 0.34); color: var(--grn); }
 .brand-wecom { background: rgba(216, 165, 38, 0.13); border-color: rgba(216, 165, 38, 0.34); color: var(--color-warning); }
-.brand-feishu { background: rgba(59, 130, 246, 0.15); border-color: var(--acc-bd); color: var(--acc); }
+.brand-feishu { background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.42); color: #3B82F6; }
 .brand-telegram { background: rgba(14, 165, 233, 0.14); border-color: rgba(14, 165, 233, 0.34); color: #0284C7; }
 .brand-discord { background: rgba(88, 101, 242, 0.13); border-color: rgba(88, 101, 242, 0.32); color: #5865F2; }
 

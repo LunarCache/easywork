@@ -79,20 +79,20 @@ export function EasyWorkLogo({ size = 30 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
         <linearGradient id="ewl-bg" x1="0.1" y1="0" x2="0.9" y2="1">
-          <stop offset="0" stopColor="#ffffff" />
-          <stop offset="1" stopColor="#EDEEF4" />
+          <stop offset="0" stopColor="var(--logo-bg-start)" />
+          <stop offset="1" stopColor="var(--logo-bg-end)" />
         </linearGradient>
         <radialGradient id="ewl-glow" cx="0.5" cy="0.46" r="0.55">
-          <stop offset="0" stopColor="#5256E0" stopOpacity="0.14" />
-          <stop offset="1" stopColor="#5256E0" stopOpacity="0" />
+          <stop offset="0" stopColor="var(--logo-glow)" stopOpacity="0.14" />
+          <stop offset="1" stopColor="var(--logo-glow)" stopOpacity="0" />
         </radialGradient>
         <linearGradient id="ewl-mark" x1="0" y1="0" x2="0.4" y2="1">
-          <stop offset="0" stopColor="#5B5FEA" />
-          <stop offset="1" stopColor="#4145CE" />
+          <stop offset="0" stopColor="var(--logo-mark-start)" />
+          <stop offset="1" stopColor="var(--logo-mark-end)" />
         </linearGradient>
       </defs>
       <rect x="112" y="112" width="800" height="800" rx="188" fill="url(#ewl-bg)" />
-      <rect x="113.5" y="113.5" width="797" height="797" rx="186.5" fill="none" stroke="#D6DAE6" strokeWidth="3" />
+      <rect x="113.5" y="113.5" width="797" height="797" rx="186.5" fill="none" stroke="var(--logo-border)" strokeWidth="3" />
       <circle cx="500" cy="512" r="300" fill="url(#ewl-glow)" />
       <g fill="url(#ewl-mark)">
         <rect x="330" y="300" width="98" height="424" rx="49" />
@@ -102,11 +102,11 @@ export function EasyWorkLogo({ size = 30 }: { size?: number }) {
       </g>
       <path
         d="M704 300 C715 348 731 364 779 375 C731 386 715 402 704 450 C693 402 677 386 629 375 C677 364 693 348 704 300 Z"
-        fill="#5256E0"
+        fill="var(--logo-glow)"
       />
       <path
         d="M662 470 C668 494 678 504 702 510 C678 516 668 526 662 550 C656 526 646 516 622 510 C646 504 656 494 662 470 Z"
-        fill="#5256E0"
+        fill="var(--logo-glow)"
         opacity="0.8"
       />
     </svg>

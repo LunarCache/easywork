@@ -1,6 +1,20 @@
 import { test, expect } from "./fixtures.js";
 
 test.describe("settings e2e", () => {
+  test("默认使用浅色主题并保留深色主题偏好", async ({ page, openApp }) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await openApp();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+    await page.getByTestId("sidebar-settings").click();
+    await page.getByRole("button", { name: "浅色", exact: true }).click();
+    await page.getByRole("button", { name: "深色", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  });
+
   test("通用页可启用 HF 镜像并持久化", async ({ page, openApp }) => {
     await openApp();
     await page.getByTestId("sidebar-settings").click();

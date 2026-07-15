@@ -48,7 +48,7 @@ export function saveDisabledSkills(names: string[]): void {
 
 /** 明暗：浅色 / 深色 / 跟随系统。 */
 export type Appearance = "light" | "dark" | "system";
-/** 强调色固定为 blue（已移除主题色切换，仅保留黑白明暗）。 */
+/** 强调色字段仅为旧偏好兼容；实际颜色由明暗主题 token 决定。 */
 export type Accent = "blue";
 export interface ThemePrefs {
   appearance: Appearance;
@@ -56,7 +56,7 @@ export interface ThemePrefs {
 }
 
 const THEME_KEY = "ew.theme";
-const THEME_DEFAULT: ThemePrefs = { appearance: "dark", accent: "blue" };
+const THEME_DEFAULT: ThemePrefs = { appearance: "light", accent: "blue" };
 const APPEARANCES: readonly Appearance[] = ["light", "dark", "system"];
 
 export function loadThemePrefs(): ThemePrefs {

@@ -1,7 +1,7 @@
 /* EasyWork UI — Tailwind v4 + "Agent Tasks" 设计语言（明暗双主题 · IBM Plex Sans/JetBrains Mono）。
-   策略：分层导入 Tailwind + @theme token（深色默认，逐字取自 Design Spec.dc.html）；强调色固定
-   蓝色 --acc/--acc-weak/--acc-bd（唯一彩色）；旧语义别名（--bg/--surface/--text/--accent…）
-   重映射到新 token，存量组件规则平滑过渡。明暗由 <html> data-theme 切换。 */
+   策略：分层导入 Tailwind + @theme token；深色保留原黑灰 + 蓝色，浅色使用冷灰 + 青绿。
+   旧语义别名（--bg/--surface/--text/--accent…）重映射到新 token，存量组件规则平滑过渡。
+   明暗由 <html> data-theme 切换。 */
 
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
@@ -12,10 +12,10 @@
 @import "./styles/inbox.css";
 
 /* ================================================================
-   设计 token（默认 Black 主题 · 浅色）—— 采用 TOKENICODE 值
+   设计 token（深色基础值）—— 采用 TOKENICODE 值
    ================================================================ */
 @theme {
-  /* ---- Agent Tasks · DARK-ONLY（Design Spec 逐字 token；accent 走 var(--acc)） ---- */
+  /* ---- 深色主题基础 token（accent 走 var(--acc)） ---- */
   --color-bg-primary: #0D0E12;       /* --bg 应用底 */
   --color-bg-secondary: #0D0E12;     /* 面板/侧栏与底同色，靠 border 分隔 */
   --color-bg-tertiary: #1E212A;      /* --bg-hover hover/选中 */
@@ -92,11 +92,17 @@
 @variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* ================================================================
-   强调色（固定蓝）—— 唯一彩色；定义 --acc/--acc-weak/--acc-bd
+   深色基础强调色（蓝）；浅色主题覆盖为青绿
    （逐字取自 Agent Tasks.dc.html / Design Spec.dc.html）
    ================================================================ */
 :root {
   --acc: #3B82F6; --acc-weak: rgba(59, 130, 246, .15); --acc-bd: rgba(59, 130, 246, .42);
+  --logo-bg-start: #FFFFFF;
+  --logo-bg-end: #EDEEF4;
+  --logo-border: #D6DAE6;
+  --logo-glow: #5256E0;
+  --logo-mark-start: #5B5FEA;
+  --logo-mark-end: #4145CE;
 }
 
 /* ================================================================
@@ -148,68 +154,79 @@
 }
 
 /* ================================================================
-   浅色主题（[data-theme="light"]）—— 覆盖 @theme --color-* + Design Spec 名 token
-   （冷灰浅色，与深色同强调色体系；Agent 执行输出 / 代码井保持深色以维持对比）。
+   浅色主题（[data-theme="light"]）—— 冷灰画布 + 青绿强调色。
+   深色主题继续使用 :root / @theme 的原黑灰 + 蓝色 token。
    ================================================================ */
 [data-theme="light"] {
-  --color-bg-primary: #FBFBFC;
-  --color-bg-secondary: #F4F5F7;
-  --color-bg-tertiary: #EBEDF1;
-  --color-bg-chat: #FBFBFC;
-  --color-bg-sidebar: #FBFBFC;
-  --color-bg-input: #FFFFFF;
+  color-scheme: light;
+  --acc: #0E9F8A;
+  --acc-weak: #E2F4F0;
+  --acc-bd: #8ACFC3;
+
+  --logo-bg-start: #FFFFFF;
+  --logo-bg-end: #EEF4F3;
+  --logo-border: #D7E0E3;
+  --logo-glow: #0E9F8A;
+  --logo-mark-start: #16AD97;
+  --logo-mark-end: #087F70;
+
+  --color-bg-primary: #F5F8F9;
+  --color-bg-secondary: #EEF2F3;
+  --color-bg-tertiary: #E7EEEF;
+  --color-bg-chat: #F5F8F9;
+  --color-bg-sidebar: #EEF2F3;
+  --color-bg-input: #F8FAFA;
   --color-bg-card: #FFFFFF;
   --color-bg-tool: #FFFFFF;
   --color-bg-thinking: #FFFFFF;
-  --color-bg-assistant-msg: #FBFBFC;
-  --color-bg-inset: #F1F2F5;
+  --color-bg-assistant-msg: #F5F8F9;
+  --color-bg-inset: #EEF2F3;
   --color-bg-user-msg: #FFFFFF;
-  --color-text-user-msg: #15171C;
+  --color-text-user-msg: #172126;
 
-  --color-text-primary: #15171C;
-  --color-text-secondary: #565D68;
-  --color-text-tertiary: #8A919C;
+  --color-text-primary: #172126;
+  --color-text-secondary: #5F6D73;
+  --color-text-tertiary: #8B979D;
   --color-text-inverse: #FFFFFF;
-  --color-text-muted: #8A919C;
+  --color-text-muted: #8B979D;
 
-  --color-border: #E5E7EC;
-  --color-border-subtle: #ECEEF1;
-  --color-border-strong: #D6DAE0;
+  --color-border: #D7E0E3;
+  --color-border-subtle: #E9EFF1;
+  --color-border-strong: #BECBCD;
 
-  --color-success: #1A7F37;
-  --color-error: #CF222E;
-  --color-warning: #9A6700;
-  --color-success-soft: #E7F4EB;
-  --color-success-border: #BBE3C5;
+  --color-success: #279B72;
+  --color-error: #D35D68;
+  --color-warning: #B7791F;
+  --color-success-soft: #E6F4EE;
+  --color-success-border: #B8DDCF;
   --color-embed-bg: var(--acc-weak);
   --color-embed-text: var(--acc);
-  --color-vision-bg: #E7F4EB;
-  --color-vision-text: #1A7F37;
-  --color-diff-add-bg: #E7F4EB;
-  --color-diff-add-text: #1A7F37;
-  --color-diff-del-bg: #FDEEEC;
-  --color-diff-del-text: #CF222E;
-  --color-danger-soft: #FDEEEC;
-  /* Agent 执行输出 / 代码井保持深色；独立用户终端改用当前主题。 */
-  --color-exec-bg: #0A0B0E;
-  --color-exec-text: #C9CDD4;
+  --color-vision-bg: #E6F4EE;
+  --color-vision-text: #237D61;
+  --color-diff-add-bg: #E6F4EE;
+  --color-diff-add-text: #237D61;
+  --color-diff-del-bg: #FCECEE;
+  --color-diff-del-text: #B94754;
+  --color-danger-soft: #FCECEE;
+  --color-exec-bg: #EEF2F3;
+  --color-exec-text: #415156;
 
-  --shadow-sm: 0 1px 2px rgba(16, 18, 22, 0.06);
-  --shadow-md: 0 1px 2px rgba(16, 18, 22, 0.05), 0 6px 18px rgba(16, 18, 22, 0.06);
-  --shadow-lg: 0 1px 2px rgba(16, 18, 22, 0.06), 0 12px 32px rgba(16, 18, 22, 0.12);
+  --shadow-sm: 0 1px 2px rgba(23, 33, 38, 0.05);
+  --shadow-md: 0 1px 2px rgba(23, 33, 38, 0.04), 0 6px 18px rgba(23, 33, 38, 0.06);
+  --shadow-lg: 0 1px 2px rgba(23, 33, 38, 0.05), 0 12px 32px rgba(23, 33, 38, 0.10);
 
   /* Design Spec 名 token（新结构件直接用，需在浅色下重定义）。 */
   --bg-elev: #FFFFFF;
-  --bg-hover: #EBEDF1;
-  --bg-inset: #F1F2F5;
-  --border-soft: #ECEEF1;
-  --tx-0: #15171C;
-  --tx-1: #565D68;
-  --tx-2: #8A919C;
-  --prose: #2C313A;
-  --grn: #1A7F37;
-  --red: #CF222E;
-  --page: #E6E8EC;
+  --bg-hover: #E7EEEF;
+  --bg-inset: #EEF2F3;
+  --border-soft: #E9EFF1;
+  --tx-0: #172126;
+  --tx-1: #5F6D73;
+  --tx-2: #8B979D;
+  --prose: #344348;
+  --grn: #279B72;
+  --red: #D35D68;
+  --page: #E6ECEE;
 }
 
 @media (prefers-reduced-motion: reduce) {
