@@ -1,6 +1,6 @@
 # Deepen five EasyWork modules
 
-Status: active
+Status: resolved
 Type: wayfinder:map
 
 ## Destination
@@ -20,6 +20,12 @@ Deepen the Agent Turn UI, Workbench View Session, Source Conversation lifecycle,
 ## Decisions so far
 
 - [Confirm the five-module deepening contract](issues/01-confirm-deepening-contract.md) — behavior-compatible scope, module ownership, test strategy, sequence, and domain terms are agreed.
+- [Deepen the Agent Turn UI](issues/02-deepen-agent-turn-ui.md) — `AgentTurnController` now owns the complete client turn lifecycle while Chat and Workspace only supply policy and presentation.
+- [Deepen the Workbench View Session](issues/03-deepen-workbench-view-session.md) — one module now owns open views, active selection, close fallback, terminal restoration, and file/browser navigation through internal adapters.
+- [Deepen the Source Conversation lifecycle](issues/04-deepen-source-conversation-lifecycle.md) — run claims, deletion barriers, source-owned cleanup, Project reuse, and non-fatal scratch removal now live behind one lifecycle interface.
+- [Deepen the Skill Candidate lifecycle](issues/05-deepen-skill-candidate-lifecycle.md) — Candidate review, validation, approval, provenance, telemetry, archive, snapshots, restore, and rollback now share one guarded state interface.
+- [Deepen Provider Model Configuration](issues/06-deepen-provider-model-configuration.md) — Core now solely owns route identity, catalog inheritance, runtime model construction, projections, and protocol compatibility.
+- [Align documentation and validate the completed architecture](issues/07-align-docs-and-validate-architecture.md) — documentation, generated design output, automated/Rust/packaging checks, Computer Use smoke coverage, and final Standards/Spec review all passed.
 
 ## Not yet specified
 
