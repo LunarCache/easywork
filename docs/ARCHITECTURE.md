@@ -32,7 +32,8 @@
 | 深模块 | 所有权 | 外部 adapter / caller |
 |---|---|---|
 | Agent Turn（UI） | 发送、重试、停止、审批、AgentEvent 消费、usage、artifacts、错误与完成 | SDK transport；Chat / Workspace policy；React hook |
-| Workbench View Session（UI） | 视图打开 / 激活 / 关闭回退 / 恢复、文件与 URL 导航、terminal 关闭确认 | filesystem / browser / PTY adapter；SideDock renderer |
+| Workbench View Session（UI） | 工作台视图打开 / 激活 / 关闭回退、文件与 URL 导航 | filesystem / browser adapter；SideDock renderer |
+| Terminal Panel Session（UI） | Desktop PTY 恢复 / 创建 / 激活 / 关闭回退与前台任务确认 | PTY adapter；conversation-bottom TerminalPanel renderer |
 | Source Conversation（core） | run claim、thread / Project 删除屏障、来源事实 / Candidate / repo / pi session / scratch 清理 | ConversationRepo、Memory、Skill lifecycle、SessionHost、filesystem |
 | Skill Candidate（core） | 审核资格、验证、来源、批准、遥测、pin / archive / snapshot / restore / rollback | SQLite/filesystem 与 reviewer internal adapters；routes/tools/coordinator callers |
 | Provider Model Configuration（core） | saved config normalization、route / upstream identity、能力继承、最终 runtime model、协议 compat | pi catalog adapter；ProviderManager / AgentProviderRuntime / HTTP projections |

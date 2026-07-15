@@ -1,6 +1,4 @@
-import type { TerminalSessionInfo } from "./terminal-runtime.js";
-
-export type WorkbenchViewKind = "diff" | "files" | "browser" | "terminal";
+export type WorkbenchViewKind = "diff" | "files" | "browser";
 export type WorkbenchOpenKind = WorkbenchViewKind;
 
 export type WorkbenchBrowserPage =
@@ -30,8 +28,7 @@ interface WorkbenchViewBase {
 export type WorkbenchView =
   | (WorkbenchViewBase & { kind: "diff" })
   | (WorkbenchViewBase & { kind: "files"; selection: WorkbenchFileSelection | null })
-  | (WorkbenchViewBase & { kind: "browser"; page: WorkbenchBrowserPage | null })
-  | (WorkbenchViewBase & { kind: "terminal"; terminal: TerminalSessionInfo });
+  | (WorkbenchViewBase & { kind: "browser"; page: WorkbenchBrowserPage | null });
 
 export interface WorkbenchViewState {
   views: WorkbenchView[];
@@ -46,13 +43,6 @@ export interface WorkbenchViewAdapters {
     contains(path: string): boolean;
   };
   browser: { loadHtml(path: string): Promise<WorkbenchBrowserPage | null> };
-  terminal: {
-    readonly available: boolean;
-    list(): Promise<TerminalSessionInfo[]>;
-    create(): Promise<TerminalSessionInfo>;
-    close(sessionId: string, force?: boolean): Promise<"closed" | "confirmation_required">;
-    confirmClose(): Promise<boolean>;
-  };
 }
 
 export interface WorkbenchViewSessionOptions {
@@ -76,13 +66,12 @@ const STATIC_VIEW = {
   diff: { id: "diff", kind: "diff", label: "改动" },
   files: { id: "files", kind: "files", label: "文件", selection: null },
   browser: { id: "preview", kind: "browser", label: "浏览器", page: null },
-} as const satisfies Record<Exclude<WorkbenchViewKind, "terminal">, WorkbenchView>;
+} as const satisfies Record<WorkbenchViewKind, WorkbenchView>;
 
 /** Owns one Workbench View Session; rendering remains outside this module. */
 export class WorkbenchViewSession {
   private state: WorkbenchViewState;
   private readonly listeners = new Set<Listener>();
-  private restoreVersion = 0;
 
   constructor(private readonly options: WorkbenchViewSessionOptions) {
     const initial = this.staticView(options.defaultView());
@@ -99,30 +88,14 @@ export class WorkbenchViewSession {
   }
 
   availableKinds(): WorkbenchOpenKind[] {
-    return (["diff", "terminal", "browser", "files"] as const).filter((kind) => {
+    return (["diff", "browser", "files"] as const).filter((kind) => {
       if (kind === "diff") return this.options.adapters.diff.available();
-      if (kind === "terminal") return this.options.adapters.terminal.available;
       return true;
     });
   }
 
   async open(kind: WorkbenchOpenKind): Promise<boolean> {
     if (kind === "diff" && !this.options.adapters.diff.available()) return false;
-    if (kind === "terminal") {
-      if (!this.options.adapters.terminal.available) return false;
-      this.setState({ error: null });
-      try {
-        const view = this.terminalView(await this.options.adapters.terminal.create());
-        const views = this.state.views.some((candidate) => candidate.id === view.id)
-          ? this.state.views
-          : [...this.state.views, view];
-        this.setState({ views, activeViewId: view.id });
-        return true;
-      } catch (error) {
-        this.setState({ error: error instanceof Error ? error.message : String(error) });
-        return false;
-      }
-    }
     const view = this.staticView(kind);
     const views = this.state.views.some((candidate) => candidate.id === view.id)
       ? this.state.views
@@ -140,19 +113,6 @@ export class WorkbenchViewSession {
   async close(id: string): Promise<boolean> {
     const index = this.state.views.findIndex((view) => view.id === id);
     if (index < 0) return false;
-    const closing = this.state.views[index]!;
-    if (closing.kind === "terminal") {
-      try {
-        const outcome = await this.options.adapters.terminal.close(closing.terminal.sessionId);
-        if (outcome === "confirmation_required") {
-          if (!(await this.options.adapters.terminal.confirmClose())) return false;
-          await this.options.adapters.terminal.close(closing.terminal.sessionId, true);
-        }
-      } catch (error) {
-        this.setState({ error: error instanceof Error ? error.message : String(error) });
-        return false;
-      }
-    }
     const remaining = this.state.views.filter((view) => view.id !== id);
     const activeViewId =
       this.state.activeViewId === id
@@ -161,20 +121,6 @@ export class WorkbenchViewSession {
     this.setState({ views: remaining, activeViewId });
     if (remaining.length === 0) this.options.onEmpty();
     return true;
-  }
-
-  async restore(): Promise<void> {
-    const restoreVersion = ++this.restoreVersion;
-    if (!this.options.adapters.terminal.available) return;
-    try {
-      const sessions = await this.options.adapters.terminal.list();
-      if (restoreVersion !== this.restoreVersion) return;
-      const known = new Set(this.state.views.map((view) => view.id));
-      const restored = sessions.map((session) => this.terminalView(session)).filter((view) => !known.has(view.id));
-      if (restored.length > 0) this.setState({ views: [...this.state.views, ...restored] });
-    } catch {
-      // Terminal restoration is best effort; ordinary workbench views remain usable.
-    }
   }
 
   async navigate(target: WorkbenchNavigation): Promise<WorkbenchNavigationResult> {
@@ -246,15 +192,6 @@ export class WorkbenchViewSession {
 
   private staticView(kind: "diff" | "files" | "browser"): WorkbenchView {
     return { ...STATIC_VIEW[kind] };
-  }
-
-  private terminalView(session: TerminalSessionInfo): WorkbenchView {
-    return {
-      id: `terminal-${session.sessionId}`,
-      kind: "terminal",
-      label: session.title,
-      terminal: session,
-    };
   }
 
   private setBrowserPage(page: WorkbenchBrowserPage): void {

@@ -6,6 +6,7 @@ import {
   ChevronIcon,
   FolderClosedIcon,
   GitBranchIcon,
+  TerminalIcon,
 } from "../icons.js";
 
 /**
@@ -24,6 +25,9 @@ export function Titlebar({
   showDock,
   dockOpen,
   onToggleDock,
+  showTerminal,
+  terminalOpen,
+  onToggleTerminal,
 }: {
   sidebarOpen: boolean;
   sidebarWidth: number;
@@ -35,6 +39,9 @@ export function Titlebar({
   showDock: boolean;
   dockOpen: boolean;
   onToggleDock: () => void;
+  showTerminal: boolean;
+  terminalOpen: boolean;
+  onToggleTerminal: () => void;
 }) {
   return (
     <div className="ad-titlebar" data-tauri-drag-region>
@@ -76,7 +83,7 @@ export function Titlebar({
         )}
         <span className="ad-spacer" data-tauri-drag-region />
         <div
-          className={`ad-tb-dock-area ${dockOpen && showDock ? "open" : ""} ${showDock ? "" : "hidden"}`}
+          className={`ad-tb-dock-area ${dockOpen && showDock ? "open" : ""} ${showDock || showTerminal ? "" : "hidden"}`}
           data-testid="side-dock-titlebar-area"
           data-tauri-drag-region
         >
@@ -86,6 +93,17 @@ export function Titlebar({
             data-testid="side-dock-titlebar-host"
             data-tauri-drag-region
           />
+          {showTerminal && (
+            <button
+              className={`ad-tb-dock ${terminalOpen ? "on" : ""}`}
+              data-testid="terminal-toggle"
+              title={terminalOpen ? "收起终端" : "打开终端"}
+              aria-pressed={terminalOpen}
+              onClick={onToggleTerminal}
+            >
+              <TerminalIcon size={17} />
+            </button>
+          )}
           {showDock && (
             <button
               className={`ad-tb-dock ${dockOpen ? "on" : ""}`}

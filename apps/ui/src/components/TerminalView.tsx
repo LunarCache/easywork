@@ -4,6 +4,21 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalRuntime, TerminalSessionInfo } from "../lib/terminal-runtime.js";
 
+function cssToken(element: Element, name: string, fallback: string): string {
+  return getComputedStyle(element).getPropertyValue(name).trim() || fallback;
+}
+
+function terminalTheme(host: Element) {
+  const root = document.documentElement;
+  const computed = getComputedStyle(host);
+  return {
+    background: computed.backgroundColor || "#0d0e12",
+    foreground: computed.color || "#e7e9ed",
+    cursor: computed.color || "#e7e9ed",
+    selectionBackground: cssToken(root, "--acc-weak", "rgba(59, 130, 246, .15)"),
+  };
+}
+
 function decodeBase64(value: string): Uint8Array {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
@@ -34,12 +49,7 @@ export function TerminalView({
       fontSize: 12,
       lineHeight: 1.25,
       scrollback: 10_000,
-      theme: {
-        background: "#0a0c10",
-        foreground: "#e8edf4",
-        cursor: "#e8edf4",
-        selectionBackground: "#334155",
-      },
+      theme: terminalTheme(host),
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
@@ -73,12 +83,17 @@ export function TerminalView({
     };
     const observer = new ResizeObserver(resize);
     observer.observe(host);
+    const themeObserver = new MutationObserver(() => {
+      terminal.options.theme = terminalTheme(host);
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     resize();
 
     return () => {
       disposed = true;
       detach?.();
       observer.disconnect();
+      themeObserver.disconnect();
       input.dispose();
       terminal.dispose();
     };

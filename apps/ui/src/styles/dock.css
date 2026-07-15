@@ -1,8 +1,8 @@
-/* 统一右侧「工作台坞」：改动 / 文件 / 终端 / 预览（对话区与工作区共用） */
-/* 宽屏贴在主列右侧；组件常驻挂载以保留终端历史和当前视图。 */
+/* 统一右侧「工作台坞」：改动 / 文件 / 浏览器（对话区与工作区共用） */
+/* 宽屏贴在主列右侧；组件常驻挂载以保留当前视图状态。 */
 .side-dock { position: relative; flex: none; height: 100%; width: 420px; border-left: 1px solid var(--border-soft); background: var(--bg); display: flex; flex-direction: column; min-height: 0; }
 .side-dock:not(.open) { display: none; }
-.sd-resize-handle { position: absolute; z-index: 4; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; outline: none; }
+.sd-resize-handle { position: fixed; z-index: 40; top: 0; right: calc(var(--side-dock-width, 420px) - 4px); bottom: 0; width: 8px; cursor: col-resize; outline: none; }
 .sd-resize-handle::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background 120ms ease; }
 .sd-resize-handle:hover::after, .sd-resize-handle:focus-visible::after { background: var(--accent); }
 /* —— 标题栏动态标签：与工作台抽屉按钮同一行 —— */
@@ -30,7 +30,6 @@
 .sd-view-menu .sd-menu-check { margin-left: auto; color: var(--accent); }
 /* 放大到标题栏下方的整个工作区；标签与抽屉按钮继续留在同一标题栏。 */
 .side-dock.max { position: fixed; top: var(--ad-titlebar-height); right: 0; bottom: 0; left: 0; width: auto; height: auto; z-index: 30; }
-.side-dock.max .sd-resize-handle { display: none; }
 .sd-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .sd-url { flex: none; }
 .rev-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 650; }
@@ -103,14 +102,9 @@
 .rev-csubject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .rev-cmeta { flex: none; font-size: 11px; color: var(--muted); }
 
-/* 工作区面板 Diff/Terminal/Files 标签页 */
+/* 工作区面板 Diff/Files 标签页 */
 .wp-term { flex: 1; min-height: 0; margin: 0; border-radius: 0; max-height: none; overflow: auto; }
 .wp-term-cmd { color: #7b8694; margin-bottom: 8px; }
-
-/* 真终端：xterm 直接填充工作台正文，不再叠加伪命令输入栏。 */
-.terminal-view { flex: 1; min-width: 0; min-height: 0; padding: 8px 0 6px 8px; overflow: hidden; background: #0a0c10; }
-.terminal-view .xterm { width: 100%; height: 100%; }
-.terminal-view .xterm-viewport { scrollbar-width: thin; scrollbar-color: #303846 transparent; }
 
 /* 浏览器 tab：可编辑地址栏 + iframe（来源链接仍可自动导航）。 */
 .preview-tab { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -136,5 +130,5 @@
 /* 中窄窗口将工作台变为右侧浮层，入口和内容都继续可用。 */
 @media (max-width: 1100px) {
   .side-dock.open:not(.max) { position: fixed; z-index: 30; top: var(--ad-titlebar-height); right: 0; bottom: 0; width: min(92vw, 520px) !important; height: auto; box-shadow: -18px 0 40px rgba(0, 0, 0, 0.18); }
-  .side-dock.open:not(.max) .sd-resize-handle { display: none; }
+  .sd-resize-handle { display: none; }
 }

@@ -8,6 +8,7 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "./styles/config.css";
 @import "./styles/dock.css";
+@import "./styles/terminal.css";
 @import "./styles/inbox.css";
 
 /* ================================================================
@@ -148,7 +149,7 @@
 
 /* ================================================================
    浅色主题（[data-theme="light"]）—— 覆盖 @theme --color-* + Design Spec 名 token
-   （冷灰浅色，与深色同强调色体系；终端/代码井保持深色以维持对比）。
+   （冷灰浅色，与深色同强调色体系；Agent 执行输出 / 代码井保持深色以维持对比）。
    ================================================================ */
 [data-theme="light"] {
   --color-bg-primary: #FBFBFC;
@@ -189,7 +190,7 @@
   --color-diff-del-bg: #FDEEEC;
   --color-diff-del-text: #CF222E;
   --color-danger-soft: #FDEEEC;
-  /* 终端 / 代码井保持深色（浅色下读 ANSI 输出更稳）。 */
+  /* Agent 执行输出 / 代码井保持深色；独立用户终端改用当前主题。 */
   --color-exec-bg: #0A0B0E;
   --color-exec-text: #C9CDD4;
 
@@ -533,11 +534,11 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .files-empty { margin: auto; }
 
 /* —— resizer —— */
-/* 分割线由侧栏 border-right 提供；resizer 仅作透明拖拽条（hover 时整条高亮提示）。 */
-.ad-resizer { position: relative; z-index: 4; width: 6px; flex: none; cursor: col-resize; background: transparent; }
-.ad-resizer::before { content: ""; position: absolute; top: calc(0px - var(--ad-titlebar-height)); right: 0; bottom: 0; left: 0; background: transparent; }
+/* 分割线由侧栏 border-right 提供；拖拽热区居中覆盖边界、贯穿标题栏，且不占布局宽度。 */
+.ad-resizer { position: relative; z-index: 40; width: 8px; height: calc(100% + var(--ad-titlebar-height)); margin: calc(0px - var(--ad-titlebar-height)) -4px 0; align-self: flex-start; flex: none; cursor: col-resize; outline: none; background: transparent; }
+.ad-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background 120ms ease; }
 .ad-resizer span { display: none; }
-.ad-resizer:hover::before { background: color-mix(in srgb, var(--acc) 10%, transparent); }
+.ad-resizer:hover::before, .ad-resizer:focus-visible::before { background: var(--accent); }
 
 /* —— 主区（对话/工作区/收件箱槽位）—— */
 .ad-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: color-mix(in srgb, var(--color-bg-chat) 96%, var(--bg-inset)); }
@@ -727,6 +728,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
    聊天
    ================================================================ */
 .chat-wrap { flex: 1; position: relative; display: flex; min-height: 0; min-width: 0; overflow: hidden; }
+.conversation-column { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .chat { flex: 1; display: flex; flex-direction: column; height: 100%; min-width: 0; position: relative; }
 .chat.is-empty { justify-content: center; }
 .bar { padding: 13px 24px; display: flex; align-items: center; gap: 9px; }

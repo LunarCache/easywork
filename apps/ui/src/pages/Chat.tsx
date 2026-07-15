@@ -7,6 +7,7 @@ import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
 import { ComposerContextPill, ComposerContextStrip, ComposerUsagePill } from "../components/ComposerContextStrip.js";
 import { SideDock, type BrowserTarget } from "../components/SideDock.js";
+import { TerminalPanel } from "../components/TerminalPanel.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
 import { THINK_LABEL, nextThink } from "../lib/slash.js";
@@ -65,6 +66,8 @@ export function Chat({
   onSaved,
   dockOpen,
   setDockOpen,
+  terminalOpen,
+  setTerminalOpen,
 }: {
   models: string[];
   modelSources?: ModelSourceInfo[];
@@ -74,6 +77,8 @@ export function Chat({
   onSaved: () => void;
   dockOpen: boolean;
   setDockOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  terminalOpen: boolean;
+  setTerminalOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const { model, setModel } = useAvailableModel(models);
   const [input, setInput] = useState("");
@@ -314,6 +319,7 @@ export function Chat({
 
   return (
     <div className="chat-wrap" data-testid="chat-root" data-thread-id={threadId}>
+      <div className="conversation-column">
       <div className={`chat ${msgs.length === 0 ? "is-empty" : ""}`}>
         <div className="messages" ref={scrollRef} onScroll={onMessagesScroll}>
           {msgs.length === 0 && (
@@ -496,6 +502,13 @@ export function Chat({
             </div>
           )}
         </footer>
+      </div>
+      <TerminalPanel
+        open={terminalOpen}
+        onClose={() => setTerminalOpen(false)}
+        previewScope="chat"
+        previewId={threadId}
+      />
       </div>
       <SideDock
         open={dockOpen}

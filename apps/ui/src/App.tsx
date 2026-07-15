@@ -15,6 +15,7 @@ import { SettingsPageHost as Settings, useSettingsPageHost } from "./settings/Se
 import { deriveSkillAttention, type SkillAttention } from "./components/SkillAttentionBadge.js";
 import { Inbox } from "./pages/Inbox.js";
 import { FolderTreeIcon, PlusIcon } from "./icons.js";
+import { useResizableWidth } from "./hooks/useResizableWidth.js";
 
 type Status = "connecting" | "ok" | "unauthorized" | "unreachable";
 interface ThreadItem {
@@ -26,11 +27,9 @@ interface ThreadItem {
 }
 
 const SESSION_W_KEY = "ew.sessionWidth";
-
-const loadSessionWidth = (): number => {
-  const n = Number(localStorage.getItem(SESSION_W_KEY));
-  return Number.isFinite(n) && n >= 208 && n <= 420 ? n : 248;
-};
+const SESSION_W_MIN = 200;
+const SESSION_W_MAX = 460;
+const SESSION_W_DEFAULT = 248;
 
 export function App() {
   const { confirm: askConfirm, alert: showAlert, dialog: confirmDialog } = useConfirm();
@@ -49,10 +48,20 @@ export function App() {
   const [workThreadId, setWorkThreadId] = useState<string>("");
   const [inboxThreadId, setInboxThreadId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemePrefs>(loadThemePrefs);
-  const [sessionWidth, setSessionWidth] = useState<number>(loadSessionWidth);
+  const {
+    width: sessionWidth,
+    onResizeStart,
+    resizeByKeyboard: resizeSessionByKeyboard,
+  } = useResizableWidth({
+    storageKey: SESSION_W_KEY,
+    min: SESSION_W_MIN,
+    max: SESSION_W_MAX,
+    defaultValue: SESSION_W_DEFAULT,
+  });
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [workBranch, setWorkBranch] = useState<string | undefined>(undefined);
   const workspaceCreatePending = useRef(false);
   const skillAttentionWatchGeneration = useRef(0);
@@ -73,6 +82,7 @@ export function App() {
   // 切换模式 / 会话 / 工作区时收起工作台面板（dockOpen 是 App 级共享态，避免跨会话「带着」开着的面板）+ 清空分支（由新 Workspace 重新上报）。
   useEffect(() => {
     setDockOpen(false);
+    setTerminalOpen(false);
     setWorkBranch(undefined);
   }, [mode, threadId, workThreadId, projectId]);
 
@@ -393,29 +403,6 @@ export function App() {
   const statusText =
     status === "ok" ? "已连接" : status === "connecting" ? "连接中…" : status === "unauthorized" ? "未授权" : "未连接";
 
-  // 会话列表宽度拖拽（持久化）。
-  const onResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = sessionWidth;
-    let w = startW;
-    const move = (ev: MouseEvent) => {
-      w = Math.min(460, Math.max(200, startW + ev.clientX - startX));
-      setSessionWidth(w);
-    };
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-      try {
-        localStorage.setItem(SESSION_W_KEY, String(w));
-      } catch {
-        /* ignore */
-      }
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-  };
-
   const project = projects.find((p) => p.id === projectId);
   // 工作台面板仅在「对话」或「有项目且不在文件浏览页」的工作区会话里可用（空态/文件页无 dock，开关无意义）。
   const inWorkChat = mode === "work" && !!project && filesProjectId !== project.id;
@@ -439,6 +426,9 @@ export function App() {
         showDock={!settingsHost.isOpen && (mode === "chat" || inWorkChat)}
         dockOpen={dockOpen}
         onToggleDock={() => setDockOpen((v) => !v)}
+        showTerminal={desktop && !settingsHost.isOpen && (mode === "chat" || inWorkChat)}
+        terminalOpen={terminalOpen}
+        onToggleTerminal={() => setTerminalOpen((value) => !value)}
         {...(mode === "work" && project ? { projectName: project.name } : {})}
         {...(mode === "work" && workBranch ? { branch: workBranch } : {})}
       />
@@ -471,7 +461,28 @@ export function App() {
                 skillAttention={skillAttention}
               />
             </div>
-            <div className="ad-resizer" title="拖动调整宽度" onMouseDown={onResizeStart}>
+            <div
+              className="ad-resizer"
+              data-testid="sidebar-resize-handle"
+              title="拖动调整宽度"
+              role="separator"
+              aria-label="调整侧栏宽度"
+              aria-orientation="vertical"
+              aria-valuemin={SESSION_W_MIN}
+              aria-valuemax={SESSION_W_MAX}
+              aria-valuenow={sessionWidth}
+              tabIndex={0}
+              onMouseDown={onResizeStart}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  resizeSessionByKeyboard(-16);
+                } else if (event.key === "ArrowRight") {
+                  event.preventDefault();
+                  resizeSessionByKeyboard(16);
+                }
+              }}
+            >
               <span />
             </div>
           </>
@@ -487,8 +498,10 @@ export function App() {
               contexts={contexts}
               threadId={threadId}
               onSaved={() => { void refreshThreads(); void watchSkillAttention(); }}
-              dockOpen={dockOpen}
+              dockOpen={dockOpen && !settingsHost.isOpen}
               setDockOpen={setDockOpen}
+              terminalOpen={terminalOpen}
+              setTerminalOpen={setTerminalOpen}
             />
           )}
           {mode === "work" &&
@@ -509,8 +522,10 @@ export function App() {
                 onBranchChange={setWorkBranch}
                 onSelectProject={(id) => void selectProject(id)}
                 onOpenFolder={() => void openWorkspaceFolder()}
-                dockOpen={dockOpen}
+                dockOpen={dockOpen && !settingsHost.isOpen}
                 setDockOpen={setDockOpen}
+                terminalOpen={terminalOpen}
+                setTerminalOpen={setTerminalOpen}
               />
             ) : (
               <div className="app-empty">

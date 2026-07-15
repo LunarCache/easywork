@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { ChannelStatus, StoredMessage } from "@ew/shared";
 import type { InboxThread } from "@ew/sdk";
 import Markdown from "react-markdown";
@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { getClient } from "../lib/client.js";
 import { messageText } from "../lib/agent-stream.js";
+import { useResizableWidth } from "../hooks/useResizableWidth.js";
 import {
   ChatIcon,
   ClockIcon,
@@ -26,15 +27,6 @@ const INBOX_LIST_W_KEY = "ew.inboxListWidth";
 const INBOX_LIST_MIN = 220;
 const INBOX_LIST_MAX = 380;
 const INBOX_LIST_DEFAULT = 280;
-
-function loadInboxListWidth(): number {
-  try {
-    const n = Number(localStorage.getItem(INBOX_LIST_W_KEY));
-    return Number.isFinite(n) && n >= INBOX_LIST_MIN && n <= INBOX_LIST_MAX ? n : INBOX_LIST_DEFAULT;
-  } catch {
-    return INBOX_LIST_DEFAULT;
-  }
-}
 
 const CHANNEL_META: Record<string, { label: string; short: string }> = {
   telegram: { label: "Telegram", short: "TG" },
@@ -197,7 +189,16 @@ export function Inbox({
   const [loading, setLoading] = useState(true);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [listWidth, setListWidth] = useState<number>(loadInboxListWidth);
+  const {
+    width: listWidth,
+    onResizeStart: onListResizeStart,
+    resizeByKeyboard: resizeListByKeyboard,
+  } = useResizableWidth({
+    storageKey: INBOX_LIST_W_KEY,
+    min: INBOX_LIST_MIN,
+    max: INBOX_LIST_MAX,
+    defaultValue: INBOX_LIST_DEFAULT,
+  });
   const [detailOpen, setDetailOpen] = useState(false);
   const selectedIdRef = useRef<string | null>(null);
 
@@ -331,28 +332,6 @@ export function Inbox({
     else window.dispatchEvent(new CustomEvent("ew:open-settings", { detail: "channels" }));
   };
 
-  const onListResizeStart = (e: ReactMouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = listWidth;
-    let width = startW;
-    const move = (ev: MouseEvent) => {
-      width = Math.min(INBOX_LIST_MAX, Math.max(INBOX_LIST_MIN, startW + ev.clientX - startX));
-      setListWidth(width);
-    };
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-      try {
-        localStorage.setItem(INBOX_LIST_W_KEY, String(width));
-      } catch {
-        /* ignore */
-      }
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-  };
-
   useEffect(() => {
     if (!detailOpen) return;
     const onKeyDown = (ev: KeyboardEvent) => {
@@ -435,7 +414,28 @@ export function Inbox({
         </div>
       </aside>
 
-      <div className="inbox-resizer" title="拖动调整收件箱列表宽度" onMouseDown={onListResizeStart}>
+      <div
+        className="inbox-resizer"
+        data-testid="inbox-resize-handle"
+        title="拖动调整收件箱列表宽度"
+        role="separator"
+        aria-label="调整收件箱列表宽度"
+        aria-orientation="vertical"
+        aria-valuemin={INBOX_LIST_MIN}
+        aria-valuemax={INBOX_LIST_MAX}
+        aria-valuenow={listWidth}
+        tabIndex={0}
+        onMouseDown={onListResizeStart}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            resizeListByKeyboard(-16);
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            resizeListByKeyboard(16);
+          }
+        }}
+      >
         <span />
       </div>
 

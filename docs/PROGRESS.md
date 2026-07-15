@@ -11,11 +11,11 @@
 - **云端推理**：pi-ai 内置 provider + 自定义多协议兼容端点；provider 提供默认 API / Base URL，模型可独立覆盖以支持聚合商内 OpenAI 与 Anthropic-only 模型并存；模型目录支持自动/手动模板绑定，运行时继承名称 / reasoning / thinking map / 输出上限，UI 选择模板时把上下文与模态复制进逐模型配置，报文 `compat` 保持协议隔离；云端流式/非流式统一经 pi-ai（含 OAuth）。
 - **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi；本地 proxy、云端 pi 与 engine fallback 的全部 SSE 写口均具备断流 error listener 和 ended/destroyed 守卫。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/explore_web）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
-- **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 浏览器；Desktop 另有多实例真终端，独立于 Agent 工具命令）。
+- **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 浏览器）；Desktop 多实例真终端由标题栏独立入口在对话区底部打开，并独立于 Agent 工具命令。
 - **记忆（作用域化）**：Core Memory = User Profile / Agent Notes；每工作区私有 conventions / decisions / pitfalls；derived facts 保留来源所有权，manifest 有界；sqlite-vec ⊕ 词法召回，markdown 可手改回灌。外部 provider 当前仅为宿主注入 seam，Desktop / CLI 无配置入口，Mem0 仍是骨架；注入后也只做 additive、受限且可关闭的召回。
 - **Skill 学习闭环**：Chat/设置显式 Learn + restricted background review → pending Candidate → 用户审核批准 → 全局/工作区原子激活；支持证据、package 安全验证、来源删除、乐观锁 patch、使用反馈、pin、stale、可恢复归档、快照与回滚。
 - **思考能力与过程**：`reasoning` 能力由运行时模型投影到 UI，推理模型首次默认中档、显式关闭按模型持久化；reasoning 内容落库并跨会话回放（不回喂模型）。
-- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon，并以 `portable-pty` 托管窗口级真终端）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 可调宽「工作台」面板（标题栏可关闭动态标签、HTML 直达浏览器、Desktop 多终端、文件主从 / 放大双栏、窄屏浮层）+ 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；WebView 启用显式 CSP，保留 IPC/daemon/预览来源并禁止远程脚本、对象插件与表单提交。
+- **桌面 / UI**：Tauri 2 外壳（sidecar 拉起 daemon，并以 `portable-pty` 托管窗口级真终端）+ React 19 前端（"Agent Tasks" 工作台设计语言，明暗双主题）；展开式侧栏（项目/对话分组）+ 三栏可拖拽 + 可调宽「工作台」面板（标题栏可关闭动态标签、HTML 直达浏览器、文件主从 / 放大双栏、窄屏浮层）+ 标题栏独立终端按钮与对话区底部多终端面板 + 外部渠道聊天优先收件箱 + 整页设置（`SettingsHost` page-host，模型/渠道/Skills/MCP/记忆 keep-alive 内嵌）+ 统一弹层；WebView 启用显式 CSP，保留 IPC/daemon/预览来源并禁止远程脚本、对象插件与表单提交。
 - **外部渠道**：`@ew/im-connectors` Channel Gateway（adapter registry + 配置/状态 + allowlist + webhook 分发），core 侧 `ChannelOperations` 统一连接器生命周期、Feishu/WeChat 扫码 setup session、收件箱 read model 与 SSE invalidation；Telegram 已迁入同一抽象并支持可取消 long-poll；Feishu/Lark 默认走官方 SDK WebSocket 长连接并支持扫码创建应用，高级模式保留 webhook（URL verification、token/signature、加密回调解密、文本收发），且 public webhook 只在 `transport:webhook` + 验证 secret 配置完整时启用；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；渠道 secret 已迁到 macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI，旧 SQLite 明文自动迁移并去敏；Discord / 企业微信待补平台 adapter。
 - **存储**：`node:sqlite`（ConversationRepo + FTS5 全文检索 + 设置 / provider / MCP / IM 非敏感配置）+ 系统渠道密钥存储。
 - **命令行（CLI）**：SEA daemon 二进制同时也是终端客户端 —— `repl`（交互多轮 + 工具审批 y/n + Ctrl-C 中断本轮）/ `run`（一次性；无位置参数时可从 stdin 读取，`-t` 续接会话）/ `models ls·pull·rm` / `thread ls·show·rm` / `mem ls·search·rm` / `serve` / `status` / `stop`；自动拉起/发现本机 daemon，复用 `@ew/sdk` 打 HTTP；`EW_BASEURL` 可直连远端。macOS / Windows 安装包仅把该二进制作为 desktop sidecar，不会把 `easywork` 命令安装到 `PATH`。
@@ -35,6 +35,19 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-15 — 布局拖拽分隔线贯穿修复
+
+- **全窗边界**：主侧栏拖拽热区向上覆盖标题栏且不再占用 flex 宽度；右侧工作台把热区 portal 到全局层，避开对话容器裁切，使同一条边界从窗口顶部贯穿到底部。
+- **同类收口**：检查全部可调宽布局后，将收件箱列表也改为零占宽覆盖式热区和整高高亮；设置导航、文件树与终端边界不是可调宽分隔线，现有覆盖范围符合各自容器语义。
+- **交互与回归**：三处均补齐 `separator` 语义、方向键调宽与持久化；Playwright 锁定顶部拖拽、整高命中、零额外间隔、设置页隐藏工作台热区及收件箱内部边界。全量验收为 Vitest **395 passed / 1 skipped**、Playwright **43 passed**，lint、typecheck 与 build 均通过。
+
+## 2026-07-15 — Desktop 终端从右侧工作台独立
+
+- **独立入口与布局**：标题栏右端在工作台开关左侧新增终端按钮；点击后终端在 Chat / Workspace 对话列底部展开，不再占用 SideDock 标签和宽度。
+- **独立生命周期**：新增 `TerminalPanelSession`，统一 runtime 会话恢复、首次打开自动创建、多会话激活、相邻关闭回退与前台任务确认；`WorkbenchViewSession` 回归只管理改动 / 文件 / 浏览器。
+- **主题一致性**：面板、工具栏与 xterm 都读取当前应用主题 token，浅色主题不再固定使用深色终端井；主题切换时 xterm 即时更新。
+- **回归锁定**：定向 Vitest 覆盖恢复 / 创建 / 激活 / 关闭确认与恢复失败不误建重复 PTY，Playwright 覆盖独立入口、底部布局、多会话、隐藏 / reload 恢复与浏览器能力隐藏；全量验收为 Vitest **395 passed / 1 skipped**、Playwright **41 passed**，lint、typecheck、build 与 debug `.app` 构建均通过。
 
 ## 2026-07-14 — 自定义 Provider 逐模型混合协议
 

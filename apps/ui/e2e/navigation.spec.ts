@@ -88,31 +88,26 @@ async function installFakeTerminalRuntime(page: import("@playwright/test").Page,
 test.describe("navigation e2e", () => {
   test("浏览器运行时不暴露 Desktop PTY 终端", async ({ page, openApp }) => {
     await openApp();
-    await page.getByTitle("打开工作台").click();
-    await page.getByTestId("side-dock-add-view").click();
-
-    await expect(page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" })).toHaveCount(0);
+    await expect(page.getByTestId("terminal-toggle")).toHaveCount(0);
   });
 
-  test("Desktop PTY 支持多个终端标签，隐藏工作台保持会话，关闭标签结束会话", async ({ page, openApp, info }) => {
+  test("Desktop PTY 在对话区底部独立打开，支持多会话、隐藏恢复和关闭", async ({ page, openApp, info }) => {
     await installFakeTerminalRuntime(page, info);
     await openApp();
     await page.getByTestId("home-new-workspace").click();
     await expect(page.getByTestId("workspace-composer-input")).toBeVisible();
-    await page.getByTitle("打开工作台").click();
+    await page.getByTestId("terminal-toggle").click();
 
-    for (let index = 0; index < 2; index += 1) {
-      await page.getByTestId("side-dock-add-view").click();
-      await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" }).click();
-    }
+    await expect(page.getByTestId("terminal-panel")).toBeVisible();
+    await page.getByTestId("terminal-panel-new").click();
 
-    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(2);
-    await expect(page.locator(".side-dock .xterm")).toBeVisible();
-    await expect(page.locator(".side-dock .xterm-screen")).toContainText("ready:term-2");
-    await page.locator(".side-dock .xterm-helper-textarea").focus();
+    await expect(page.locator(".terminal-panel-tab-shell")).toHaveCount(2);
+    await expect(page.locator(".terminal-panel .xterm")).toBeVisible();
+    await expect(page.locator(".terminal-panel .xterm-screen")).toContainText("ready:term-2");
+    await page.locator(".terminal-panel .xterm-helper-textarea").focus();
     await page.keyboard.type("echo hello");
     await page.keyboard.press("Enter");
-    await expect(page.locator(".side-dock .xterm-screen")).toContainText("echo hello");
+    await expect(page.locator(".terminal-panel .xterm-screen")).toContainText("echo hello");
     await expect.poll(() => page.evaluate(() => {
       const calls = (window as unknown as { __fakeTerminal: { calls: Array<{ command: string }> } }).__fakeTerminal.calls;
       return {
@@ -121,40 +116,47 @@ test.describe("navigation e2e", () => {
       };
     })).toEqual({ wrote: true, resized: true });
 
-    await page.getByTitle("关闭工作台").click();
-    await page.getByTitle("打开工作台").click();
-    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(2);
+    await page.getByTestId("terminal-toggle").click();
+    await expect(page.getByTestId("terminal-panel")).not.toBeVisible();
+    await page.getByTestId("terminal-toggle").click();
+    await expect(page.locator(".terminal-panel-tab-shell")).toHaveCount(2);
     await expect.poll(() => page.evaluate(() => (window as unknown as { __fakeTerminal: { sessions: unknown[] } }).__fakeTerminal.sessions.length)).toBe(2);
+
+    await page.getByTitle("打开工作台").click();
+    await page.getByTestId("side-dock-add-view").click();
+    await expect(page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" })).toHaveCount(0);
 
     await page.getByRole("button", { name: /新对话/ }).click();
     await expect(page.getByTestId("chat-composer-input")).toBeVisible();
     await page.locator('button[data-testid^="sidebar-project-"]').first().click();
     await expect(page.getByTestId("workspace-composer-input")).toBeVisible();
-    await page.getByTitle("打开工作台").click();
-    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(2);
-    await page.locator(".sd-tab-shell").filter({ hasText: "终端 2" }).getByRole("tab").click();
-    await expect(page.locator(".side-dock .xterm-screen")).toContainText("ready:term-2");
+    await page.getByTestId("terminal-toggle").click();
+    await expect(page.locator(".terminal-panel-tab-shell")).toHaveCount(2);
+    await page.getByRole("tab", { name: "终端 2" }).click();
+    await expect(page.locator(".terminal-panel .xterm-screen")).toContainText("ready:term-2");
 
     await page.reload();
     await expect(page.getByTestId("sidebar-settings")).toBeVisible();
     await page.locator('button[data-testid^="sidebar-project-"]').first().click();
     await expect(page.getByTestId("workspace-composer-input")).toBeVisible();
-    await page.getByTitle("打开工作台").click();
-    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(2);
-    await page.locator(".sd-tab-shell").filter({ hasText: "终端 2" }).getByRole("tab").click();
-    await expect(page.locator(".side-dock .xterm-screen")).toContainText("ready:term-2");
+    await page.getByTestId("terminal-toggle").click();
+    await expect(page.locator(".terminal-panel-tab-shell")).toHaveCount(2);
+    await page.getByRole("tab", { name: "终端 2" }).click();
+    await expect(page.locator(".terminal-panel .xterm-screen")).toContainText("ready:term-2");
 
     await page.getByTitle("关闭终端 2标签").click();
-    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端" })).toHaveCount(1);
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __fakeTerminal: { sessions: unknown[] } }).__fakeTerminal.sessions.length)).toBe(1);
+    await expect(page.locator(".terminal-panel-tab-shell")).toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => {
+      const calls = (window as unknown as { __fakeTerminal: { calls: Array<{ command: string; args: Record<string, unknown> }> } }).__fakeTerminal.calls;
+      return calls.some((call) => call.command === "terminal_close" && call.args.sessionId === "term-2");
+    })).toBe(true);
   });
 
   test("关闭存在前台任务的终端前需要确认", async ({ page, openApp, info }) => {
     await installFakeTerminalRuntime(page, info);
     await openApp();
-    await page.getByTitle("打开工作台").click();
-    await page.getByTestId("side-dock-add-view").click();
-    await page.getByTestId("side-dock-view-menu").getByRole("menuitem", { name: "终端" }).click();
+    await page.getByTestId("terminal-toggle").click();
+    await expect(page.getByRole("tab", { name: "终端 1" })).toBeVisible();
     await page.evaluate(() => {
       (window as unknown as { __fakeTerminal: { state: { busy: boolean } } }).__fakeTerminal.state.busy = true;
     });
@@ -162,11 +164,11 @@ test.describe("navigation e2e", () => {
     await page.getByTitle("关闭终端 1标签").click();
     await expect(page.getByRole("dialog")).toContainText("终端中仍有前台任务");
     await page.getByRole("button", { name: "取消" }).click();
-    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端 1" })).toHaveCount(1);
+    await expect(page.getByRole("tab", { name: "终端 1" })).toHaveCount(1);
 
     await page.getByTitle("关闭终端 1标签").click();
     await page.getByRole("button", { name: "结束终端" }).click();
-    await expect(page.locator(".sd-tab-shell").filter({ hasText: "终端 1" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "终端 1" })).toHaveCount(0);
   });
 
   test("首页新建工作区直接进入默认空白工作区，目录选择保留为后续显式动作", async ({ page, openApp, client }) => {
@@ -365,6 +367,89 @@ test.describe("navigation e2e", () => {
     await link.click();
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveClass(/on/);
     await expect(address).toHaveValue("https://example.com/docs");
+  });
+
+  test("左右布局拖拽线贯穿窗口且不额外占用布局间隔", async ({ page, openApp }) => {
+    await openApp();
+    const viewport = page.viewportSize();
+    const sidebar = page.locator(".ad-sessions-wrap");
+    const main = page.locator(".ad-main");
+    const sidebarHandle = page.locator(".ad-resizer");
+    const [sidebarBox, mainBox, sidebarGrip] = await Promise.all([
+      sidebar.boundingBox(),
+      main.boundingBox(),
+      sidebarHandle.boundingBox(),
+    ]);
+    expect(viewport).not.toBeNull();
+    expect(sidebarBox).not.toBeNull();
+    expect(mainBox).not.toBeNull();
+    expect(sidebarGrip).not.toBeNull();
+    expect(Math.round(sidebarGrip!.y)).toBe(0);
+    expect(Math.round(sidebarGrip!.height)).toBe(viewport!.height);
+    expect(Math.abs(mainBox!.x - (sidebarBox!.x + sidebarBox!.width))).toBeLessThanOrEqual(1);
+
+    await page.mouse.move(sidebarGrip!.x + sidebarGrip!.width / 2, 20);
+    await page.mouse.down();
+    await page.mouse.move(sidebarGrip!.x + 60, 20);
+    await page.mouse.up();
+    await expect.poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0)).toBeGreaterThan(
+      Math.round(sidebarBox!.width + 40),
+    );
+
+    await page.getByTitle("打开工作台").click();
+    const dock = page.getByTestId("side-dock");
+    const dockHandle = page.getByTestId("side-dock-resize-handle");
+    const [dockBefore, dockGrip] = await Promise.all([dock.boundingBox(), dockHandle.boundingBox()]);
+    expect(dockBefore).not.toBeNull();
+    expect(dockGrip).not.toBeNull();
+    expect(Math.round(dockGrip!.y)).toBe(0);
+    expect(Math.round(dockGrip!.height)).toBe(viewport!.height);
+
+    await page.mouse.move(dockGrip!.x + dockGrip!.width / 2, 20);
+    await page.mouse.down();
+    await page.mouse.move(dockGrip!.x - 70, 20);
+    await page.mouse.up();
+    await expect.poll(async () => Math.round((await dock.boundingBox())?.width ?? 0)).toBeGreaterThan(
+      Math.round(dockBefore!.width + 50),
+    );
+
+    await page.getByTestId("sidebar-settings").click();
+    await expect(page.getByTestId("side-dock-resize-handle")).toHaveCount(0);
+  });
+
+  test("收件箱内部拖拽线贯穿内容区且不额外占用布局间隔", async ({ page, openApp }) => {
+    await openApp();
+    await page.getByRole("button", { name: "收件箱", exact: true }).click();
+
+    const inbox = page.getByTestId("inbox-page");
+    const list = page.locator(".inbox-list");
+    const conversation = page.locator(".inbox-conversation");
+    const handle = page.getByTestId("inbox-resize-handle");
+    const line = handle.locator("span");
+    const [inboxBox, listBefore, conversationBox, handleBox, lineBox] = await Promise.all([
+      inbox.boundingBox(),
+      list.boundingBox(),
+      conversation.boundingBox(),
+      handle.boundingBox(),
+      line.boundingBox(),
+    ]);
+    expect(inboxBox).not.toBeNull();
+    expect(listBefore).not.toBeNull();
+    expect(conversationBox).not.toBeNull();
+    expect(handleBox).not.toBeNull();
+    expect(lineBox).not.toBeNull();
+    expect(Math.round(handleBox!.y)).toBe(Math.round(inboxBox!.y));
+    expect(Math.round(handleBox!.height)).toBe(Math.round(inboxBox!.height));
+    expect(Math.round(lineBox!.height)).toBe(Math.round(handleBox!.height));
+    expect(Math.abs(conversationBox!.x - (listBefore!.x + listBefore!.width))).toBeLessThanOrEqual(1);
+
+    await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(handleBox!.x + 50, handleBox!.y + 8);
+    await page.mouse.up();
+    await expect.poll(async () => Math.round((await list.boundingBox())?.width ?? 0)).toBeGreaterThan(
+      Math.round(listBefore!.width + 35),
+    );
   });
 
   test("工作台宽度可拖拽并持久化，窄窗口改为浮层而不是消失", async ({ page, openApp }) => {

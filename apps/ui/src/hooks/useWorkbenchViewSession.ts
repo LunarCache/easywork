@@ -3,7 +3,6 @@ import type { WsEntry } from "@ew/sdk";
 import { getClient } from "../lib/client.js";
 import { matchFileTarget } from "../lib/file-target.js";
 import { resolvePreviewKind } from "../lib/preview.js";
-import type { TerminalRuntime } from "../lib/terminal-runtime.js";
 import {
   WorkbenchViewSession,
   type WorkbenchBrowserTarget,
@@ -22,8 +21,6 @@ interface WorkbenchViewSessionOptions {
   fileTarget?: WorkbenchFileTarget | null;
   hasDiff: boolean;
   routeFileTargetsToDiff: boolean;
-  terminalRuntime: TerminalRuntime;
-  confirmTerminalClose(): Promise<boolean>;
 }
 
 /** React/daemon adapter for the framework-independent Workbench View Session module. */
@@ -59,23 +56,6 @@ export function useWorkbenchViewSession(options: WorkbenchViewSessionOptions) {
               : null;
           },
         },
-        terminal: {
-          get available() {
-            return latest.current.terminalRuntime.available;
-          },
-          list: () => {
-            const { previewScope, previewId, terminalRuntime } = latest.current;
-            return terminalRuntime.list(`${previewScope}:${previewId}`);
-          },
-          create: async () => {
-            const { previewScope, previewId, terminalRuntime } = latest.current;
-            const scope = `${previewScope}:${previewId}`;
-            const { cwd } = await getClient().terminalContext(previewScope, previewId);
-            return terminalRuntime.create({ scope, cwd, cols: 80, rows: 24 });
-          },
-          close: (sessionId, force) => latest.current.terminalRuntime.close(sessionId, force),
-          confirmClose: () => latest.current.confirmTerminalClose(),
-        },
       },
     });
   }
@@ -86,11 +66,6 @@ export function useWorkbenchViewSession(options: WorkbenchViewSessionOptions) {
     () => session.getState(),
     () => session.getState(),
   );
-
-  const terminalScope = `${options.previewScope}:${options.previewId}`;
-  useEffect(() => {
-    void session.restore();
-  }, [session, terminalScope]);
 
   useEffect(() => session.ensureVisible(options.visible), [options.visible, session]);
 

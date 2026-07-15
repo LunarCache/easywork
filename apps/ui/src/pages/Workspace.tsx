@@ -10,6 +10,7 @@ import { ApprovalCard } from "../components/ApprovalCard.js";
 import { ComposerContextPill, ComposerUsagePill } from "../components/ComposerContextStrip.js";
 import { ContextBar } from "../components/ContextBar.js";
 import { SideDock, type BrowserTarget } from "../components/SideDock.js";
+import { TerminalPanel } from "../components/TerminalPanel.js";
 import { ModelSelect } from "../components/ModelSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
 import { THINK_LABEL, nextThink } from "../lib/slash.js";
@@ -67,6 +68,8 @@ export function Workspace({
   onOpenFolder,
   dockOpen,
   setDockOpen,
+  terminalOpen,
+  setTerminalOpen,
 }: {
   project: Project;
   /** 全部工作区（供 composer 上下文条切换）。 */
@@ -88,6 +91,8 @@ export function Workspace({
   onOpenFolder: () => void;
   dockOpen: boolean;
   setDockOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  terminalOpen: boolean;
+  setTerminalOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
   const { model, setModel } = useAvailableModel(models);
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>(project.approvalMode ?? "approve-each");
@@ -489,6 +494,7 @@ export function Workspace({
 
   return (
     <div className="workspace">
+      <div className="conversation-column">
       <div className={`ws-main ${empty ? "empty-state" : ""}`}>
         {empty ? (
           <div className="ws-hero">
@@ -528,6 +534,13 @@ export function Workspace({
             {composer}
           </>
         )}
+      </div>
+      <TerminalPanel
+        open={terminalOpen}
+        onClose={() => setTerminalOpen(false)}
+        previewScope="workspace"
+        previewId={project.id}
+      />
       </div>
 
       <SideDock

@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -13,15 +12,14 @@ import { getClient } from "../lib/client.js";
 import { useConfirm } from "./ConfirmDialog.js";
 import { FileViewer } from "./FileViewer.js";
 import { fileType, formatFileSize } from "../lib/filetype.js";
-import { getTerminalRuntime } from "../lib/terminal-runtime.js";
 import { useWorkbenchViewSession } from "../hooks/useWorkbenchViewSession.js";
+import { useResizableWidth } from "../hooks/useResizableWidth.js";
 import type {
   WorkbenchBrowserPage,
   WorkbenchBrowserTarget,
   WorkbenchNavigationResult,
   WorkbenchViewKind,
 } from "../lib/workbench-view-session.js";
-import { TerminalView } from "./TerminalView.js";
 import {
   ChevronIcon,
   CommitIcon,
@@ -36,7 +34,6 @@ import {
   MinimizeIcon,
   PlusIcon,
   RefreshIcon,
-  TerminalIcon,
   UndoIcon,
   UploadIcon,
   XIcon,
@@ -53,7 +50,6 @@ export interface GitContext {
 const TAB_META: Record<WorkbenchViewKind, { label: string; icon: () => ReactNode }> = {
   diff: { label: "改动", icon: () => <FileIcon size={14} /> },
   files: { label: "文件", icon: () => <FolderIcon size={14} /> },
-  terminal: { label: "终端", icon: () => <TerminalIcon size={14} /> },
   browser: { label: "浏览器", icon: () => <GlobeIcon size={14} /> },
 };
 export type BrowserTarget = WorkbenchBrowserTarget;
@@ -62,27 +58,6 @@ const DOCK_WIDTH_KEY = "easywork.side-dock.width";
 const DOCK_WIDTH_DEFAULT = 420;
 const DOCK_WIDTH_MIN = 320;
 const DOCK_WIDTH_MAX = 760;
-
-function clampDockWidth(width: number): number {
-  return Math.min(DOCK_WIDTH_MAX, Math.max(DOCK_WIDTH_MIN, width));
-}
-
-function readDockWidth(): number {
-  try {
-    const stored = Number(localStorage.getItem(DOCK_WIDTH_KEY));
-    return Number.isFinite(stored) && stored > 0 ? clampDockWidth(stored) : DOCK_WIDTH_DEFAULT;
-  } catch {
-    return DOCK_WIDTH_DEFAULT;
-  }
-}
-
-function persistDockWidth(width: number): void {
-  try {
-    localStorage.setItem(DOCK_WIDTH_KEY, String(width));
-  } catch {
-    /* ignore */
-  }
-}
 
 function fileIconFor(p: string) {
   const ft = fileType(p);
@@ -95,7 +70,7 @@ function DockEmpty({ children }: { children: ReactNode }) {
 
 /**
  * 统一右侧「工作台坞」：对话区与工作区共用。
- * tab = 改动(git，按需) / 文件(工件+文件树) / 多实例真终端 / 预览(网页)。
+ * tab = 改动(git，按需) / 文件(工件+文件树) / 预览(网页)。
  * 合并了原 ArtifactsPanel、独立 WebPreview、WorkspacePanel 三套抽屉。
  */
 export function SideDock({
@@ -128,17 +103,24 @@ export function SideDock({
 }) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [maxed, setMaxed] = useState(false);
-  const [dockWidth, setDockWidth] = useState(readDockWidth);
+  const {
+    width: dockWidth,
+    onResizeStart,
+    resizeByKeyboard,
+  } = useResizableWidth({
+    storageKey: DOCK_WIDTH_KEY,
+    min: DOCK_WIDTH_MIN,
+    max: DOCK_WIDTH_MAX,
+    defaultValue: DOCK_WIDTH_DEFAULT,
+    dragDirection: -1,
+  });
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const repo = !!git?.status.repo;
-  const terminalRuntime = useMemo(() => getTerminalRuntime(), []);
-  const { confirm: confirmTerminalClose, dialog: terminalConfirmDialog } = useConfirm();
   const {
     views: openViews,
     activeViewId,
     activeView,
-    error: terminalError,
     availableKinds,
     open: openView,
     activate: activateView,
@@ -147,7 +129,6 @@ export function SideDock({
     openFile,
     clearFileSelection,
     clearBrowser,
-    reportError,
   } = useWorkbenchViewSession({
     visible: open,
     onEmpty: onClose,
@@ -158,14 +139,6 @@ export function SideDock({
     fileTarget: target,
     hasDiff: Boolean(git),
     routeFileTargetsToDiff: repo,
-    terminalRuntime,
-    confirmTerminalClose: () =>
-      confirmTerminalClose({
-        title: "终端中仍有前台任务",
-        body: "关闭标签会结束该终端及其中正在运行的进程。",
-        danger: true,
-        okLabel: "结束终端",
-      }),
   });
 
   useEffect(() => {
@@ -196,36 +169,6 @@ export function SideDock({
     };
   }, [addMenuOpen]);
 
-
-  const onResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = dockWidth;
-    let width = startWidth;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    const move = (moveEvent: MouseEvent) => {
-      width = clampDockWidth(startWidth + startX - moveEvent.clientX);
-      setDockWidth(width);
-    };
-    const up = () => {
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-      persistDockWidth(width);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-  };
-
-  const resizeByKeyboard = (delta: number) => {
-    setDockWidth((current) => {
-      const width = clampDockWidth(current + delta);
-      persistDockWidth(width);
-      return width;
-    });
-  };
 
   const titlebarTabs = open && toolbarHost
     ? createPortal(
@@ -281,7 +224,7 @@ export function SideDock({
                 >
                   {TAB_META[tab].icon()}
                   <span>{TAB_META[tab].label}</span>
-                  {tab !== "terminal" && openViews.some((candidate) => candidate.kind === tab) && <CheckIcon size={14} className="sd-menu-check" />}
+                  {openViews.some((candidate) => candidate.kind === tab) && <CheckIcon size={14} className="sd-menu-check" />}
                 </button>
               ))}
             </div>
@@ -294,15 +237,8 @@ export function SideDock({
       toolbarHost,
     )
     : null;
-
-  return (
-    <>
-      {titlebarTabs}
-      <aside
-      className={`side-dock ${open ? "open" : ""} ${maxed ? "max" : ""}`}
-      data-testid="side-dock"
-      style={maxed ? undefined : { width: dockWidth }}
-    >
+  const resizeHandle = open && !maxed
+    ? createPortal(
       <div
         className="sd-resize-handle"
         data-testid="side-dock-resize-handle"
@@ -323,9 +259,21 @@ export function SideDock({
             resizeByKeyboard(-16);
           }
         }}
-      />
+      />,
+      document.body,
+    )
+    : null;
+
+  return (
+    <>
+      {titlebarTabs}
+      {resizeHandle}
+      <aside
+      className={`side-dock ${open ? "open" : ""} ${maxed ? "max" : ""}`}
+      data-testid="side-dock"
+      style={maxed ? undefined : { width: dockWidth }}
+    >
       <div className="sd-body">
-        {terminalError && <div className="wpv-error">无法启动终端：{terminalError}</div>}
         {activeView?.kind === "diff" && git && <DiffTab git={git} />}
         {activeView?.kind === "files" && (
           <FilesTab
@@ -341,9 +289,6 @@ export function SideDock({
             onClearSelection={clearFileSelection}
           />
         )}
-        {activeView?.kind === "terminal" && activeView.terminal && (
-          <TerminalView runtime={terminalRuntime} session={activeView.terminal} onError={reportError} />
-        )}
         {activeView?.kind === "browser" && (
           <PreviewTab
             page={activeView.page ?? null}
@@ -353,7 +298,6 @@ export function SideDock({
         )}
       </div>
       </aside>
-      {terminalConfirmDialog}
     </>
   );
 }
