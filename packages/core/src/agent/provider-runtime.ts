@@ -9,11 +9,6 @@ import type {
   Model,
 } from "@earendil-works/pi-ai";
 import type { LocalBackend } from "../engine/local-backend.js";
-import {
-  contextWindowForModel,
-  runtimeModelForProviderConfig,
-  runtimeModelsForProviderConfig,
-} from "../providers/catalog.js";
 import type { ProviderManager } from "../providers/manager.js";
 
 interface AgentProviderRuntimeDeps {
@@ -75,7 +70,7 @@ export class AgentProviderRuntime {
           ...(cfg.headers ? { headers: cfg.headers } : {}),
           api: cfg.api ?? "openai-completions",
           authHeader: true,
-          models: runtimeModelsForProviderConfig(cfg),
+          models: this.deps.providers.runtimeModels(cfg.id),
         });
       }
       this.registeredProviders.add(cfg.id);
@@ -94,7 +89,7 @@ export class AgentProviderRuntime {
 
   /** Cloud provider 配置版本；仅云端模型参与 SessionHost 的惰性会话重建。 */
   modelRevision(modelId: string): number {
-    return this.deps.providers.resolveModelRef(modelId) ? this.cloudRevision : 0;
+    return this.deps.providers.findByModel(modelId) ? this.cloudRevision : 0;
   }
 
   isLocalModel(modelId: string): boolean {
@@ -125,28 +120,8 @@ export class AgentProviderRuntime {
     const ref = this.deps.providers.resolveModelRef(modelId);
     if (ref) {
       const cfg = ref.config;
-      const upstreamModelId = ref.modelId;
       if (!this.registeredProviders.has(cfg.id)) this.syncCloudProviders();
-      const m = this.modelRegistry.find(cfg.id, upstreamModelId);
-      if (m) {
-        const ctx = contextWindowForModel(cfg, upstreamModelId);
-        return {
-          ...m,
-          ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl } : {}),
-          ...(ctx ? { contextWindow: ctx } : {}),
-          ...(cfg.headers ? { headers: cfg.headers } : {}),
-        };
-      }
-      if ((cfg.kind ?? "openai-compatible") === "pi-native") {
-        throw new Error(`pi_native_model_not_found: ${cfg.id}/${upstreamModelId}`);
-      }
-      // registry 未命中（理论不应发生）→ 手搓兜底，带上 headers，鉴权由共享 AuthStorage 提供。
-      return {
-        ...runtimeModelForProviderConfig(cfg, upstreamModelId),
-        api: cfg.api ?? "openai-completions",
-        provider: cfg.id,
-        baseUrl: cfg.baseUrl ?? "",
-      };
+      return ref.runtimeModel;
     }
     throw new Error(`model_not_resolvable: ${modelId}`);
   }

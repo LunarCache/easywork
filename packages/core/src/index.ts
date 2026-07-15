@@ -21,6 +21,13 @@ export { parseGGUFBuffer, readGGUFHeader, type GGUFMetadata } from "./models/ggu
 // 云端 provider
 export { ProviderManager, type CloudProviderConfig } from "./providers/manager.js";
 export {
+  ProviderModelConfiguration,
+  type ConfiguredProviderModel,
+  type ProviderModelCatalogAdapter,
+  type ProviderModelIdentity,
+  type ProviderModelProjection,
+} from "./providers/model-configuration.js";
+export {
   ProviderCatalog,
   normalizeProviderConfig,
   runtimeModelForProviderConfig,

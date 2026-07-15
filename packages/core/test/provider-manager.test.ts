@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EngineRegistry } from "../src/engine/registry.js";
+import { ProviderModelConfiguration } from "../src/providers/model-configuration.js";
 import { ProviderManager } from "../src/providers/manager.js";
 
 describe("ProviderManager", () => {
@@ -28,5 +29,27 @@ describe("ProviderManager", () => {
     expect(providers.modelIds()).toEqual([routeId]);
     await registry.resolve(routeId).chat({ model: routeId, messages: [{ role: "user", content: "hi" }] });
     expect(upstreamModel).toBe("deepseek-v4");
+  });
+
+  it("can list and remove a stale pi-native route without resolving its runtime model", () => {
+    const providers = new ProviderManager(new EngineRegistry(), {
+      modelConfiguration: new ProviderModelConfiguration({
+        providers: () => [],
+        model: () => undefined,
+      }),
+    });
+    providers.add({
+      id: "native-provider",
+      kind: "pi-native",
+      modelConfigs: [{
+        id: "removed-upstream-model",
+        contextWindow: 32_768,
+        inputModalities: ["text"],
+      }],
+    });
+
+    expect(providers.modelIds()).toEqual(["provider:native-provider:removed-upstream-model"]);
+    expect(() => providers.remove("native-provider")).not.toThrow();
+    expect(providers.dump()).toEqual([]);
   });
 });

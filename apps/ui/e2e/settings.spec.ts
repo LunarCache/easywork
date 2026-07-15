@@ -72,7 +72,7 @@ test.describe("settings e2e", () => {
     await expect(page.getByTestId("models-tab-local")).toHaveAttribute("data-active", "1");
   });
 
-  test("自定义模型跨 API 协议匹配目录模板时继承能力元数据", async ({ page, openApp }) => {
+  test("自定义模型跨 API 协议时用目录投影编辑 context、模态与推理提示", async ({ page, openApp }) => {
     await page.route("**/providers", async (route) => {
       if (route.request().method() !== "GET") return route.continue();
       await route.fulfill({ json: { providers: [] } });

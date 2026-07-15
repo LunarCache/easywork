@@ -6,32 +6,20 @@ import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { streamSimple } from "@earendil-works/pi-ai";
 import { AgentProviderRuntime } from "../src/agent/provider-runtime.js";
 import { SessionHost } from "../src/agent/session-host.js";
+import { EngineRegistry } from "../src/engine/registry.js";
 import type { LocalBackend } from "../src/engine/local-backend.js";
-import { parseProviderModelRouteId, providerModelRouteId } from "../src/providers/catalog.js";
-import type { ProviderManager, CloudProviderConfig } from "../src/providers/manager.js";
+import { ProviderManager, type CloudProviderConfig } from "../src/providers/manager.js";
 
 // R2：把 EasyWork 云端 provider 同步进 pi 的共享、落盘 AuthStorage，并能全量对账（增/删）。
 function makeDeps(configs: CloudProviderConfig[]) {
   const local = { baseUrlFor: () => undefined, contexts: () => ({}) } as unknown as LocalBackend;
-  let dump = configs;
-  const resolveModelRef = (id: string) => {
-    const scoped = parseProviderModelRouteId(id);
-    if (scoped) {
-      const config = dump.find((c) => c.id === scoped.providerId && c.modelConfigs.some((m) => m.id === scoped.modelId));
-      return config ? { config, routeId: id, modelId: scoped.modelId } : undefined;
-    }
-    const config = dump.find((c) => c.modelConfigs.some((m) => m.id === id));
-    return config ? { config, routeId: providerModelRouteId(config.id, id), modelId: id } : undefined;
+  const providers = new ProviderManager(new EngineRegistry());
+  for (const config of configs) providers.add(config);
+  const setDump = (next: CloudProviderConfig[]) => {
+    for (const config of providers.dump()) providers.remove(config.id);
+    for (const config of next) providers.add(config);
   };
-  const providers = {
-    dump: () => dump,
-    findByModel: (id: string) => resolveModelRef(id)?.config,
-    resolveModelRef,
-    setDump: (next: CloudProviderConfig[]) => {
-      dump = next;
-    },
-  } as unknown as ProviderManager & { setDump: (n: CloudProviderConfig[]) => void };
-  return { local, providers };
+  return { local, providers, setDump };
 }
 
 function makeRuntime(configs: CloudProviderConfig[], agentDir: string) {
@@ -51,7 +39,7 @@ describe("AgentProviderRuntime", () => {
       apiKey: "sk-test-123",
       modelConfigs: [{ id: "some/model", contextWindow: 32768, inputModalities: ["text"] }],
     };
-    const { providers, runtime } = makeRuntime([cfg], agentDir);
+    const { runtime, setDump } = makeRuntime([cfg], agentDir);
 
     // 重新打开同一 auth.json，断言持久化结果（与 host 内句柄解耦）。
     const reopened = () => AuthStorage.create(path.join(agentDir, "auth.json"));
@@ -60,7 +48,7 @@ describe("AgentProviderRuntime", () => {
     expect(store.get("openrouter")).toEqual({ type: "api_key", key: "sk-test-123" });
 
     // 删除该 provider 后对账 → 凭据被注销。
-    (providers as unknown as { setDump: (n: CloudProviderConfig[]) => void }).setDump([]);
+    setDump([]);
     runtime.syncCloudProviders();
     store = reopened();
     expect(store.get("openrouter")).toBeUndefined();
@@ -98,9 +86,9 @@ describe("AgentProviderRuntime", () => {
       api: "anthropic-messages",
       modelConfigs: [{ id: "claude-haiku-4-5", contextWindow: 200000, inputModalities: ["text"] }],
     };
-    const { providers, runtime } = makeRuntime([cfg], agentDir);
+    const { runtime, setDump } = makeRuntime([cfg], agentDir);
 
-    (providers as unknown as { setDump: (n: CloudProviderConfig[]) => void }).setDump([]);
+    setDump([]);
     runtime.syncCloudProviders();
 
     const store = AuthStorage.create(authPath);
@@ -221,14 +209,14 @@ describe("AgentProviderRuntime", () => {
 
   it("advances only cloud model revisions when provider registrations are refreshed", () => {
     const agentDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ew-provider-revision-")));
-    const { runtime } = makeRuntime([{
+    const { providers, runtime } = makeRuntime([{
       id: "cloud",
       kind: "openai-compatible",
       baseUrl: "https://cloud.example/v1",
       apiKey: "sk-cloud",
       modelConfigs: [{ id: "model-a", contextWindow: 32768, inputModalities: ["text"] }],
     }], agentDir);
-    const routeId = providerModelRouteId("cloud", "model-a");
+    const routeId = providers.modelIds()[0]!;
     const before = runtime.modelRevision(routeId);
 
     runtime.syncCloudProviders();

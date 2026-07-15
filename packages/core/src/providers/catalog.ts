@@ -1,16 +1,28 @@
 import {
-  getModel as defaultGetPiModel,
   getModels as defaultGetPiModels,
   getProviders as defaultGetPiProviders,
 } from "@earendil-works/pi-ai";
-import type { Api, Model, OpenAICompletionsCompat } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import type {
-  CloudProviderConfig,
-  CloudProviderKind,
   CloudProviderModelConfig,
   CloudProviderModelModality,
 } from "./manager.js";
+import { DEFAULT_COMPATIBLE_CONTEXT_WINDOW } from "./model-configuration.js";
+
+export {
+  DEFAULT_COMPATIBLE_CONTEXT_WINDOW,
+  contextWindowForModel,
+  inputModalitiesForModel,
+  modelConfigForModel,
+  modelIdsForProvider,
+  normalizeProviderConfig,
+  parseProviderModelRouteId,
+  providerModelRouteId,
+  routeIdsForProvider,
+  runtimeModelForProviderConfig,
+  runtimeModelsForProviderConfig,
+  type NormalizedCloudProviderConfig,
+} from "./model-configuration.js";
 
 type PiProvider = ReturnType<typeof defaultGetPiProviders>[number];
 
@@ -51,10 +63,6 @@ export const ProviderModelProbeSchema = z.object({
 });
 
 export type ProviderModelProbeInput = z.infer<typeof ProviderModelProbeSchema>;
-export type NormalizedCloudProviderConfig = CloudProviderConfig & { kind: CloudProviderKind };
-
-const PROVIDER_MODEL_ROUTE_PREFIX = "provider:";
-
 export interface ProviderApiFamily {
   id: string;
   label: string;
@@ -89,19 +97,6 @@ export interface ProviderModelProbeResult {
   models: string[];
 }
 
-export interface ProviderRuntimeModel {
-  id: string;
-  name: string;
-  reasoning: boolean;
-  thinkingLevelMap?: Model<Api>["thinkingLevelMap"];
-  input: CloudProviderModelModality[];
-  cost: Model<Api>["cost"];
-  contextWindow: number;
-  maxTokens: number;
-  headers?: Record<string, string>;
-  compat?: Model<Api>["compat"];
-}
-
 interface PiCatalogModel {
   id: string;
   name: string;
@@ -116,8 +111,6 @@ export interface ProviderCatalogDeps {
   getPiProviders?: () => string[];
   getPiModels?: (provider: string) => PiCatalogModel[];
 }
-
-export const DEFAULT_COMPATIBLE_CONTEXT_WINDOW = 32768;
 
 const API_FAMILY_LABELS: Record<string, string> = {
   "openai-completions": "OpenAI Chat Completions",
@@ -290,147 +283,6 @@ export class ProviderCatalog {
   }
 }
 
-export function normalizeProviderConfig(cfg: CloudProviderConfig): NormalizedCloudProviderConfig {
-  const kind = cfg.kind ?? "openai-compatible";
-  if (kind === "openai-compatible" && !cfg.baseUrl) {
-    throw new Error("openai-compatible provider requires baseUrl");
-  }
-  const modelConfigs = normalizeModelConfigs(cfg.modelConfigs);
-  if (modelConfigs.length === 0) {
-    throw new Error("provider requires at least one modelConfig");
-  }
-  return {
-    ...cfg,
-    kind,
-    modelConfigs,
-    ...(cfg.baseUrl ? { baseUrl: cfg.baseUrl.replace(/\/$/, "") } : {}),
-  };
-}
-
-export function modelIdsForProvider(cfg: CloudProviderConfig): string[] {
-  return cfg.modelConfigs.map((m) => m.id);
-}
-
-/** Provider 模型在 EasyWork 内部使用 provider-scoped route id，避免不同 provider 的同名模型互相覆盖。 */
-export function providerModelRouteId(providerId: string, modelId: string): string {
-  return `${PROVIDER_MODEL_ROUTE_PREFIX}${encodeURIComponent(providerId)}:${encodeURIComponent(modelId)}`;
-}
-
-export function parseProviderModelRouteId(id: string): { providerId: string; modelId: string } | undefined {
-  if (!id.startsWith(PROVIDER_MODEL_ROUTE_PREFIX)) return undefined;
-  const rest = id.slice(PROVIDER_MODEL_ROUTE_PREFIX.length);
-  const sep = rest.indexOf(":");
-  if (sep <= 0 || sep >= rest.length - 1) return undefined;
-  try {
-    return {
-      providerId: decodeURIComponent(rest.slice(0, sep)),
-      modelId: decodeURIComponent(rest.slice(sep + 1)),
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-export function routeIdsForProvider(cfg: CloudProviderConfig): string[] {
-  return modelIdsForProvider(cfg).map((modelId) => providerModelRouteId(cfg.id, modelId));
-}
-
-export function modelConfigForModel(cfg: CloudProviderConfig, modelId: string): CloudProviderModelConfig | undefined {
-  return cfg.modelConfigs?.find((m) => m.id === modelId);
-}
-
-export function contextWindowForModel(cfg: CloudProviderConfig, modelId: string): number | undefined {
-  return modelConfigForModel(cfg, modelId)?.contextWindow
-    ?? ((cfg.kind ?? "openai-compatible") === "pi-native"
-      ? defaultGetPiModel(cfg.id as PiProvider, modelId as never)?.contextWindow
-      : undefined);
-}
-
-export function inputModalitiesForModel(cfg: CloudProviderConfig, modelId: string): CloudProviderModelModality[] {
-  return modelConfigForModel(cfg, modelId)?.inputModalities ?? ["text"];
-}
-
-export function runtimeModelsForProviderConfig(cfg: CloudProviderConfig): ProviderRuntimeModel[] {
-  return modelIdsForProvider(cfg).map((modelId) => runtimeModelForProviderConfig(cfg, modelId));
-}
-
-export function runtimeModelForProviderConfig(cfg: CloudProviderConfig, modelId: string): ProviderRuntimeModel {
-  const modelConfig = modelConfigForModel(cfg, modelId);
-  const template = catalogTemplateForModel(modelConfig);
-  const api = cfg.api ?? "openai-completions";
-  // Name/reasoning/token metadata is model-level and survives API adapters. compat is wire-protocol-specific.
-  const compat = template?.api === api ? materializeCatalogCompat(template) : undefined;
-  return {
-    id: modelId,
-    name: template?.name ?? modelId,
-    reasoning: modelConfig?.reasoning ?? template?.reasoning ?? false,
-    ...(template?.thinkingLevelMap ? { thinkingLevelMap: template.thinkingLevelMap } : {}),
-    input: inputModalitiesForModel(cfg, modelId),
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: contextWindowForModel(cfg, modelId) ?? DEFAULT_COMPATIBLE_CONTEXT_WINDOW,
-    maxTokens: template?.maxTokens ?? 4096,
-    ...(cfg.headers ? { headers: cfg.headers } : {}),
-    ...(compat ? { compat } : {}),
-  };
-}
-
-function catalogTemplateForModel(
-  modelConfig: CloudProviderModelConfig | undefined,
-): Model<Api> | undefined {
-  if (!modelConfig || modelConfig.compatibilityMode === "generic") return undefined;
-  const ref = modelConfig.catalogRef;
-  if (ref) {
-    return defaultGetPiModel(ref.providerId as PiProvider, ref.modelId as never) as Model<Api> | undefined;
-  }
-  if (modelConfig.compatibilityMode === "catalog") return undefined;
-
-  const candidates = defaultGetPiProviders()
-    .map((provider) => defaultGetPiModel(provider, modelConfig.id as never) as Model<Api> | undefined)
-    .filter((model): model is Model<Api> => !!model);
-  const lowerId = modelConfig.id.toLowerCase();
-  return candidates.find((model) => lowerId.startsWith(model.provider.toLowerCase()))
-    ?? (candidates.length === 1 ? candidates[0] : undefined);
-}
-
-/**
- * pi-ai normally derives part of OpenAI Chat Completions compatibility from the
- * canonical provider and base URL. Custom endpoints replace both, so preserve
- * the canonical role capability before registering the model under custom auth.
- */
-function materializeCatalogCompat(template: Model<Api>): Model<Api>["compat"] {
-  if (template.api !== "openai-completions") return template.compat;
-  const compat = { ...template.compat } as OpenAICompletionsCompat;
-  if (compat.supportsDeveloperRole === undefined) {
-    compat.supportsDeveloperRole = catalogTemplateSupportsDeveloperRole(template);
-  }
-  return compat;
-}
-
-const CATALOG_PROVIDERS_WITHOUT_DEVELOPER_ROLE = new Set([
-  "ant-ling",
-  "cerebras",
-  "chutes",
-  "cloudflare-ai-gateway",
-  "cloudflare-workers-ai",
-  "deepseek",
-  "moonshotai",
-  "moonshotai-cn",
-  "nvidia",
-  "opencode",
-  "opencode-go",
-  "together",
-  "xai",
-  "zai",
-  "zai-coding-cn",
-]);
-
-function catalogTemplateSupportsDeveloperRole(template: Model<Api>): boolean {
-  if (template.provider === "openrouter") {
-    return template.id.startsWith("anthropic/") || template.id.startsWith("openai/");
-  }
-  return !CATALOG_PROVIDERS_WITHOUT_DEVELOPER_ROLE.has(template.provider);
-}
-
 function modelConfigsFromResponse(payload: unknown): CloudProviderModelConfig[] {
   const data = (payload as { data?: unknown })?.data;
   const rawItems = Array.isArray(data) ? data : Array.isArray(payload) ? payload : [];
@@ -438,31 +290,6 @@ function modelConfigsFromResponse(payload: unknown): CloudProviderModelConfig[] 
   for (const item of rawItems) {
     const model = modelConfigFromResponseItem(item);
     if (model && !out.has(model.id)) out.set(model.id, model);
-  }
-  return [...out.values()];
-}
-
-function normalizeModelConfigs(configs: CloudProviderModelConfig[]): CloudProviderModelConfig[] {
-  const out = new Map<string, CloudProviderModelConfig>();
-  for (const cfg of configs) {
-    const id = cfg.id.trim();
-    if (!id) continue;
-    const inputModalities = normalizeModalities(cfg.inputModalities);
-    const contextWindow = Math.floor(cfg.contextWindow);
-    if (!Number.isFinite(contextWindow) || contextWindow <= 0) continue;
-    out.set(id, {
-      id,
-      contextWindow,
-      inputModalities,
-      ...(cfg.reasoning !== undefined ? { reasoning: cfg.reasoning } : {}),
-      ...(cfg.compatibilityMode ? { compatibilityMode: cfg.compatibilityMode } : {}),
-      ...(cfg.catalogRef?.providerId.trim() && cfg.catalogRef.modelId.trim() ? {
-        catalogRef: {
-          providerId: cfg.catalogRef.providerId.trim(),
-          modelId: cfg.catalogRef.modelId.trim(),
-        },
-      } : {}),
-    });
   }
   return [...out.values()];
 }

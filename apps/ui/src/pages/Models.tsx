@@ -171,13 +171,15 @@ function searchCatalogMatches(
     .slice(0, 24);
 }
 
-function suggestedCatalogMatch(matches: CatalogModelMatch[], modelId: string): CatalogModelMatch | undefined {
+/** UI-only suggestion for editable/display projections; Core resolves the effective runtime template. */
+function suggestedCatalogProjection(matches: CatalogModelMatch[], modelId: string): CatalogModelMatch | undefined {
   const lowerId = modelId.trim().toLowerCase();
   return matches.find(({ provider }) => lowerId.startsWith(provider.id.toLowerCase()))
     ?? (matches.length === 1 ? matches[0] : undefined);
 }
 
-function catalogModelPatch(
+/** Copies explicit catalog values into saved user-editable context/modality fields, never runtime capabilities. */
+function catalogProjectionPatch(
   match: CatalogModelMatch | undefined,
 ): Partial<Omit<ProviderFormModel, "rowId">> {
   if (!match) return { catalogRef: undefined };
@@ -197,7 +199,7 @@ function modelConfigsToForm(
     const compatibilityMode = model.compatibilityMode ?? "auto";
     const pinnedMatch = catalogMatchForRef(catalog, model.catalogRef);
     const suggestedMatch = compatibilityMode === "auto"
-      ? suggestedCatalogMatch(catalogMatches(catalog, model.id), model.id)
+      ? suggestedCatalogProjection(catalogMatches(catalog, model.id), model.id)
       : undefined;
     const match = compatibilityMode === "generic" ? undefined : pinnedMatch ?? suggestedMatch;
     const catalogRef = catalog.length > 0 ? match?.ref : model.catalogRef;
@@ -208,7 +210,7 @@ function modelConfigsToForm(
       compatibilityMode,
       ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
       ...(catalogRef ? { catalogRef } : {}),
-      ...(inheritCatalogMetadata ? catalogModelPatch(match) : {}),
+      ...(inheritCatalogMetadata ? catalogProjectionPatch(match) : {}),
     });
   });
   return rows.length > 0 ? rows : [newProviderModelRow()];
@@ -743,11 +745,11 @@ export function Models({ onChange }: { onChange: () => void }) {
   };
   const updateProviderModelId = (model: ProviderFormModel, id: string) => {
     const match = model.compatibilityMode === "auto"
-      ? suggestedCatalogMatch(catalogMatches(providerCatalog, id), id)
+      ? suggestedCatalogProjection(catalogMatches(providerCatalog, id), id)
       : undefined;
     updateProviderModel(model.rowId, {
       id,
-      ...(model.compatibilityMode === "auto" ? catalogModelPatch(match) : {}),
+      ...(model.compatibilityMode === "auto" ? catalogProjectionPatch(match) : {}),
     });
   };
   const selectProviderApi = (api: string) => {
@@ -758,11 +760,11 @@ export function Models({ onChange }: { onChange: () => void }) {
         if (model.compatibilityMode === "generic") return model;
         const pinned = catalogMatchForRef(providerCatalog, model.catalogRef);
         if (model.compatibilityMode === "catalog" && pinned) return model;
-        const match = suggestedCatalogMatch(catalogMatches(providerCatalog, model.id), model.id);
+        const match = suggestedCatalogProjection(catalogMatches(providerCatalog, model.id), model.id);
         return {
           ...model,
           compatibilityMode: "auto",
-          ...catalogModelPatch(match),
+          ...catalogProjectionPatch(match),
         };
       }));
     }
@@ -1086,10 +1088,10 @@ export function Models({ onChange }: { onChange: () => void }) {
                             type="button"
                             className={model.compatibilityMode === "auto" ? "on" : ""}
                             onClick={() => {
-                              const match = suggestedCatalogMatch(exactMatches, model.id);
+                              const match = suggestedCatalogProjection(exactMatches, model.id);
                               updateProviderModel(model.rowId, {
                                 compatibilityMode: "auto",
-                                ...catalogModelPatch(match),
+                                ...catalogProjectionPatch(match),
                               });
                               setTemplateMenuRowId(null);
                             }}
@@ -1128,7 +1130,7 @@ export function Models({ onChange }: { onChange: () => void }) {
                                 onClick={() => {
                                   updateProviderModel(model.rowId, {
                                     compatibilityMode: "catalog",
-                                    ...catalogModelPatch(match),
+                                    ...catalogProjectionPatch(match),
                                   });
                                   setTemplateMenuRowId(null);
                                 }}
