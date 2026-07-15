@@ -156,6 +156,58 @@ test.describe("settings e2e", () => {
     expect(savedProvider?.modelConfigs?.[0]?.baseUrl).toBe("https://mixed-openai.example/v1");
   });
 
+  test("编辑自定义模型商时保留模型连接字段的独立继承", async ({ page, openApp }) => {
+    let savedProvider: {
+      modelConfigs?: Array<{ id: string; api?: string; baseUrl?: string }>;
+    } | undefined;
+    const provider = {
+      id: "partial-provider",
+      kind: "openai-compatible",
+      api: "openai-completions",
+      baseUrl: "https://default.example/v1",
+      models: ["api-only", "url-only"],
+      modelConfigs: [
+        {
+          id: "api-only",
+          api: "anthropic-messages",
+          inputModalities: ["text"],
+          contextWindow: 32768,
+          compatibilityMode: "generic",
+        },
+        {
+          id: "url-only",
+          baseUrl: "https://special.example/v1",
+          inputModalities: ["text"],
+          contextWindow: 32768,
+          compatibilityMode: "generic",
+        },
+      ],
+    };
+    await page.route("**/providers", async (route) => {
+      if (route.request().method() === "POST") {
+        savedProvider = route.request().postDataJSON() as typeof savedProvider;
+        return route.fulfill({ json: { ok: true } });
+      }
+      if (route.request().method() !== "GET") return route.continue();
+      await route.fulfill({ json: { providers: [provider] } });
+    });
+
+    await openApp();
+    await page.getByTestId("sidebar-settings").click();
+    await page.getByTestId("settings-nav-models").click();
+    await page.getByTestId("models-tab-cloud").click();
+    await page.locator(".provider-card-compact").filter({ hasText: "partial-provider" }).getByTitle("编辑").click();
+    await page.getByRole("button", { name: "保存配置" }).click();
+
+    await expect.poll(() => savedProvider?.modelConfigs?.length).toBe(2);
+    const apiOnly = savedProvider?.modelConfigs?.find((model) => model.id === "api-only");
+    const urlOnly = savedProvider?.modelConfigs?.find((model) => model.id === "url-only");
+    expect(apiOnly).toMatchObject({ api: "anthropic-messages" });
+    expect(apiOnly).not.toHaveProperty("baseUrl");
+    expect(urlOnly).toMatchObject({ baseUrl: "https://special.example/v1" });
+    expect(urlOnly).not.toHaveProperty("api");
+  });
+
   test("渠道页可打开并记住上次分区", async ({ page, openApp }) => {
     await openApp();
 

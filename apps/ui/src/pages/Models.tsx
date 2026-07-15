@@ -73,11 +73,22 @@ interface ProviderFormModel {
 
 interface ProviderConnectionDraft {
   id: string;
-  api: string;
-  baseUrl: string;
+  api?: string;
+  baseUrl?: string;
 }
 
 const DEFAULT_PROVIDER_CONNECTION_ID = "default";
+
+function effectiveProviderConnection(
+  connection: ProviderConnectionDraft,
+  defaultApi: string,
+  defaultBaseUrl: string,
+): { api: string; baseUrl: string } {
+  return {
+    api: connection.api ?? defaultApi,
+    baseUrl: connection.baseUrl ?? defaultBaseUrl,
+  };
+}
 
 interface CatalogModelMatch {
   provider: ProviderCatalogItem;
@@ -206,21 +217,21 @@ function modelConfigsToForm(
   models: ProviderModelConfig[],
   catalog: ProviderCatalogItem[] = [],
   inheritCatalogMetadata = false,
-  defaultApi = "openai-completions",
-  defaultBaseUrl = "",
 ): { models: ProviderFormModel[]; connections: ProviderConnectionDraft[] } {
   const connections: ProviderConnectionDraft[] = [];
   const connectionIds = new Map<string, string>();
   const connectionFor = (model: ProviderModelConfig): string => {
     if (!model.api && !model.baseUrl) return DEFAULT_PROVIDER_CONNECTION_ID;
-    const api = model.api ?? defaultApi;
-    const baseUrl = model.baseUrl ?? defaultBaseUrl;
-    const key = `${api}\n${baseUrl}`;
+    const key = `${model.api ?? "<inherit>"}\n${model.baseUrl ?? "<inherit>"}`;
     const existing = connectionIds.get(key);
     if (existing) return existing;
     const id = crypto.randomUUID();
     connectionIds.set(key, id);
-    connections.push({ id, api, baseUrl });
+    connections.push({
+      id,
+      ...(model.api ? { api: model.api } : {}),
+      ...(model.baseUrl ? { baseUrl: model.baseUrl } : {}),
+    });
     return id;
   };
   const rows = models.map((model) => {
@@ -262,8 +273,8 @@ function formModelsToConfig(
     const connection = connectionById.get(model.connectionId);
     out.set(id, {
       id,
-      ...(connection?.api.trim() ? { api: connection.api.trim() } : {}),
-      ...(connection?.baseUrl.trim() ? { baseUrl: connection.baseUrl.trim() } : {}),
+      ...(connection?.api?.trim() ? { api: connection.api.trim() } : {}),
+      ...(connection?.baseUrl?.trim() ? { baseUrl: connection.baseUrl.trim() } : {}),
       inputModalities,
       contextWindow: Number.isFinite(ctx) && ctx > 0 ? Math.floor(ctx) : 32768,
       compatibilityMode: model.compatibilityMode,
@@ -711,8 +722,10 @@ export function Models({ onChange }: { onChange: () => void }) {
     if (!prov.id.trim()) return setProvNote("请填写 Provider ID");
     if (prov.kind === "openai-compatible" && !prov.baseUrl.trim()) return setProvNote("OpenAI-compatible provider 需要 baseUrl");
     const usedConnectionIds = new Set(providerModels.map((model) => model.connectionId));
-    const incompleteConnection = providerConnections.find((connection) =>
-      usedConnectionIds.has(connection.id) && (!connection.api.trim() || !connection.baseUrl.trim()));
+    const incompleteConnection = providerConnections.find((connection) => {
+      const effective = effectiveProviderConnection(connection, prov.api, prov.baseUrl);
+      return usedConnectionIds.has(connection.id) && (!effective.api.trim() || !effective.baseUrl.trim());
+    });
     if (incompleteConnection) return setProvNote("请补全模型正在使用的连接方式");
     const modelConfigs = formModelsToConfig(providerModels, providerConnections);
     if (modelConfigs.length === 0) return setProvNote("请至少添加一个模型");
@@ -800,8 +813,6 @@ export function Models({ onChange }: { onChange: () => void }) {
       p.modelConfigs,
       kind === "openai-compatible" ? providerCatalog : [],
       false,
-      p.api ?? "openai-completions",
-      p.baseUrl ?? "",
     );
     setProviderModels(formState.models);
     setProviderConnections(formState.connections);
@@ -815,10 +826,11 @@ export function Models({ onChange }: { onChange: () => void }) {
     { id: DEFAULT_PROVIDER_CONNECTION_ID, api: prov.api || "openai-completions", baseUrl: prov.baseUrl },
     ...providerConnections,
   ];
-  const providerConnectionLabel = (connection: ProviderConnectionDraft, index: number): string =>
-    connection.id === DEFAULT_PROVIDER_CONNECTION_ID
-      ? "默认"
-      : `连接 ${index + 1} · ${compactApiLabel(connection.api)}`;
+  const providerConnectionLabel = (connection: ProviderConnectionDraft, index: number): string => {
+    if (connection.id === DEFAULT_PROVIDER_CONNECTION_ID) return "默认";
+    const effective = effectiveProviderConnection(connection, prov.api, prov.baseUrl);
+    return `连接 ${index + 1} · ${compactApiLabel(effective.api)}`;
+  };
   const allProviderModelsSelected = providerModels.length > 0
     && providerModels.every((model) => selectedProviderModelRows.includes(model.rowId));
   const addProviderModelRow = () => {
@@ -849,7 +861,6 @@ export function Models({ onChange }: { onChange: () => void }) {
     setProviderConnections((current) => [...current, {
       id: crypto.randomUUID(),
       api: fallbackApi,
-      baseUrl: "",
     }]);
   };
   const updateProviderConnection = (id: string, patch: Partial<Omit<ProviderConnectionDraft, "id">>) => {
@@ -909,8 +920,6 @@ export function Models({ onChange }: { onChange: () => void }) {
           result.modelConfigs,
           providerCatalog,
           true,
-          prov.api || "openai-completions",
-          prov.baseUrl,
         );
         setProviderModels(formState.models);
         setProviderConnections(formState.connections);
@@ -1103,19 +1112,22 @@ export function Models({ onChange }: { onChange: () => void }) {
                         </button>
                         <code className="provider-connection-preview">请求 → {connectionEndpointPreview(prov.api, prov.baseUrl)}</code>
                       </div>
-                      {providerConnections.map((connection, index) => (
+                      {providerConnections.map((connection, index) => {
+                        const effective = effectiveProviderConnection(connection, prov.api, prov.baseUrl);
+                        return (
                         <div className="provider-connection-card" key={connection.id} data-testid="provider-connection-override">
                           <div className="provider-connection-kind">
                             <span className="set-pill ghost">连接 {index + 2}</span>
-                            <small>用于协议例外</small>
+                            <small>用于连接例外</small>
                           </div>
                           <label>
                             <span>API 协议</span>
                             <select
                               title={`连接 ${index + 2} API 协议`}
-                              value={connection.api}
-                              onChange={(event) => updateProviderConnection(connection.id, { api: event.target.value })}
+                              value={connection.api ?? ""}
+                              onChange={(event) => updateProviderConnection(connection.id, { api: event.target.value || undefined })}
                             >
+                              <option value="">默认 · {apiLabel(prov.api, apiProtocolOptions)}</option>
                               {apiProtocolIds.map((api) => (
                                 <option value={api} key={api}>{apiLabel(api, apiProtocolOptions)}</option>
                               ))}
@@ -1125,17 +1137,18 @@ export function Models({ onChange }: { onChange: () => void }) {
                             <span>Base URL</span>
                             <input
                               title={`连接 ${index + 2} Base URL`}
-                              placeholder="https://..."
-                              value={connection.baseUrl}
-                              onChange={(event) => updateProviderConnection(connection.id, { baseUrl: event.target.value })}
+                              placeholder={`默认 · ${prov.baseUrl || "Provider Base URL"}`}
+                              value={connection.baseUrl ?? ""}
+                              onChange={(event) => updateProviderConnection(connection.id, { baseUrl: event.target.value || undefined })}
                             />
                           </label>
                           <button type="button" className="mcp-icon-btn danger" title="删除连接方式" onClick={() => removeProviderConnection(connection.id)}>
                             <TrashIcon size={13} />
                           </button>
-                          <code className="provider-connection-preview">请求 → {connectionEndpointPreview(connection.api, connection.baseUrl)}</code>
+                          <code className="provider-connection-preview">请求 → {connectionEndpointPreview(effective.api, effective.baseUrl)}</code>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ) : (
