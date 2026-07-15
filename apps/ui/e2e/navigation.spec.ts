@@ -259,6 +259,11 @@ test.describe("navigation e2e", () => {
     await expect(dockTitlebar).toHaveCSS("border-left-width", "1px");
     await expect(page.getByTestId("side-dock-tab-preview")).toHaveCount(0);
 
+    await page.getByTestId("sidebar-settings").click();
+    await expect(dockTitlebar).toBeHidden();
+    await page.getByTestId("settings-back").click();
+    await expect(page.getByTestId("side-dock-tab-files")).toBeVisible();
+
     await page.getByTestId("side-dock-add-view").click();
     const menu = page.getByTestId("side-dock-view-menu");
     await expect(menu).toBeVisible();

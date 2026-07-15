@@ -403,6 +403,7 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .ad-tb-pill .mono { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ad-tb-pill svg { flex: none; }
 .ad-tb-dock-area { flex: none; min-width: 0; height: 100%; display: flex; align-items: center; gap: 4px; }
+.ad-tb-dock-area.hidden { display: none; }
 .ad-tb-dock-area.open { position: fixed; z-index: 36; top: 0; right: 0; width: var(--side-dock-titlebar-width, 420px); height: var(--ad-titlebar-height); box-sizing: border-box; padding: 0 12px 0 10px; border-left: 1px solid var(--border-soft); background: var(--bg); }
 .ad-tb-dock-host { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: flex-start; }
 /* 工作台开关（标题栏段B 右端，动态图标 + 开启高亮） */

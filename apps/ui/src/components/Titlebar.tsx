@@ -75,18 +75,18 @@ export function Titlebar({
           </span>
         )}
         <span className="ad-spacer" data-tauri-drag-region />
-        {showDock && (
+        <div
+          className={`ad-tb-dock-area ${dockOpen && showDock ? "open" : ""} ${showDock ? "" : "hidden"}`}
+          data-testid="side-dock-titlebar-area"
+          data-tauri-drag-region
+        >
           <div
-            className={`ad-tb-dock-area ${dockOpen ? "open" : ""}`}
-            data-testid="side-dock-titlebar-area"
+            id="side-dock-titlebar-host"
+            className="ad-tb-dock-host"
+            data-testid="side-dock-titlebar-host"
             data-tauri-drag-region
-          >
-            <div
-              id="side-dock-titlebar-host"
-              className="ad-tb-dock-host"
-              data-testid="side-dock-titlebar-host"
-              data-tauri-drag-region
-            />
+          />
+          {showDock && (
             <button
               className={`ad-tb-dock ${dockOpen ? "on" : ""}`}
               title={dockOpen ? "关闭工作台" : "打开工作台"}
@@ -94,8 +94,8 @@ export function Titlebar({
             >
               {dockOpen ? <PanelRightCloseIcon size={17} /> : <PanelRightIcon size={17} />}
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
