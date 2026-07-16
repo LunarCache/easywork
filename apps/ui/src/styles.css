@@ -750,8 +750,8 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .model-sel-btn { display: flex; align-items: center; gap: 5px; border: 0; background: transparent; font-family: var(--font-head); font-weight: 550; font-size: 13px; color: var(--text-2); padding: 4px 7px; border-radius: var(--r); cursor: pointer; max-width: 160px; }
 .model-sel-btn:hover:not(:disabled) { background: var(--surface-2); }
 .model-sel-btn:disabled { color: var(--muted); cursor: default; font-weight: 500; font-size: 13px; }
-.model-sel-btn.strip { height: 31px; max-width: 240px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--text); font: 600 12px var(--font); }
-.model-sel-btn.strip:hover:not(:disabled) { background: var(--surface); }
+.model-sel-btn.strip { height: 31px; max-width: 240px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--text); font: 600 12px var(--font); }
+.model-sel-btn.strip:hover:not(:disabled), .model-sel-btn.strip:focus-visible { background: var(--surface-2); outline: none; }
 .model-sel-btn.strip .model-sel-chev { color: var(--text-2); }
 .model-sel-label { min-width: 0; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-sel-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

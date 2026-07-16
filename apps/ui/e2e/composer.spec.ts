@@ -43,25 +43,41 @@ test.describe("composer e2e", () => {
     await expect(page.getByTestId("workspace-mascot")).toBeVisible();
   });
 
-  test("聊天与工作区 composer 内的控件均为无边框", async ({ page, openApp, client, workspaceDir, sampleImagePath }) => {
+  test("聊天与工作区 composer 内的控件均为无边框", async ({ page, openApp, client, info, workspaceDir, sampleImagePath }) => {
     const project = await client.createProject({ name: "Borderless Workspace", workspaceDir });
+    await page.route(`${info.baseUrl}/models`, async (route) => {
+      await route.fulfill({
+        json: {
+          routed: ["test-model"],
+          modelSources: [{ id: "test-model", kind: "engine", label: "Test", modelId: "test-model" }],
+          context: { "test-model": 32_768 },
+          engines: [],
+        },
+      });
+    });
 
     await openApp();
 
     const chatBox = page.getByTestId("chat-composer-input").locator("..");
+    const chatModelButton = chatBox.locator(".model-sel-btn.strip");
     await expectBorderless(page.getByTestId("chat-think-pill"));
     await expectBorderless(page.getByTestId("chat-web-pill"));
-    await expectBorderless(chatBox.locator(".model-sel-btn.strip"));
+    await expectBorderless(chatModelButton);
+    await expect.poll(() => chatModelButton.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+    await chatModelButton.hover();
+    await expect.poll(() => chatModelButton.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(238, 242, 243)");
     await page.getByTestId("chat-upload-input").setInputFiles(sampleImagePath);
     await expectBorderless(page.getByTestId("chat-image-chip"));
     await expectBorderless(page.getByTestId("chat-image-strip").locator("img"));
 
     await page.getByTestId(`sidebar-project-${project.id}`).click();
     const workspaceBox = page.getByTestId("workspace-composer-input").locator("..");
+    const workspaceModelButton = workspaceBox.locator(".model-sel-btn.strip");
     await expectBorderless(page.getByTestId("workspace-project-pill"));
     await expectBorderless(page.getByTestId("workspace-think-pill"));
     await expectBorderless(page.getByTestId("workspace-approval-pill"));
-    await expectBorderless(workspaceBox.locator(".model-sel-btn.strip"));
+    await expectBorderless(workspaceModelButton);
+    await expect.poll(() => workspaceModelButton.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
     await page.getByTestId("workspace-upload-input").setInputFiles(sampleImagePath);
     await expectBorderless(page.getByTestId("workspace-image-chip"));
     await expectBorderless(page.getByTestId("workspace-image-strip").locator("img"));
