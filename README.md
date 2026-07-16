@@ -4,160 +4,50 @@
 
 # EasyWork
 
-### 本地优先的 AI 工作台，把模型、记忆、工具和外部渠道收进同一个大脑。
+**本地优先、可扩展的桌面 AI 工作台**
+
+在一个应用里连接本地与云端模型，并为 Agent 提供工作区、记忆、Skills、MCP、终端和外部消息渠道。
 
 [![CI](https://github.com/LunarCache/easywork/actions/workflows/ci.yml/badge.svg)](https://github.com/LunarCache/easywork/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/LunarCache/easywork?sort=semver)](https://github.com/LunarCache/easywork/releases)
+[![Release](https://img.shields.io/github/v/release/LunarCache/easywork?sort=semver)](https://github.com/LunarCache/easywork/releases/latest)
 [![License](https://img.shields.io/github/license/LunarCache/easywork)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D24-3c873a)](package.json)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)](tsconfig.base.json)
-[![Tauri](https://img.shields.io/badge/Tauri-2.x-24c8db)](apps/desktop/src-tauri/tauri.conf.json)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-339933?logo=nodedotjs&logoColor=white)](package.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.base.json)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](apps/desktop/src-tauri/tauri.conf.json)
 
-**本地 GGUF / 云端模型** · **pi Agent 内核** · **Skills / MCP / 内置工具** · **作用域化记忆** · **桌面 + CLI + `/v1` 网关** · **Telegram / Feishu / Lark / WeChat 渠道**
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh | sh
-```
+[下载安装](#安装) · [快速开始](#快速开始) · [功能概览](#功能概览) · [开发指南](#从源码开发) · [项目文档](#项目文档)
 
 </div>
 
----
+![EasyWork 首页：Ewo、快捷任务、模型选择与对话输入区](docs/assets/easywork-home.png)
 
-## 为什么是 EasyWork
+## EasyWork 是什么
 
-EasyWork 不是一个只包了聊天框的客户端。它的核心是一个本地守护进程：同一个 daemon 托管 agent 会话、模型路由、工具审批、记忆、外部渠道连接器和 OpenAI/Anthropic 兼容网关。桌面和命令行通过 HTTP/SSE 作为瘦客户端接入；渠道 adapter/host 运行在 core 进程内，把外部消息交给同一个 Core Agent Turn 生命周期，再由它调用 `SessionHost`。`/v1` 客户端则走兼容网关，仅复用 daemon 的模型/provider runtime，不进入 `AgentSession`，也不附带记忆和工具。
+EasyWork 不是单纯的模型聊天客户端。它以本地 daemon 为核心，统一管理 Agent 会话、模型路由、工具审批、长期记忆、外部渠道与 OpenAI/Anthropic 兼容 API；Tauri 桌面端和 CLI 都是它的轻量入口。
 
-| 能力 | 说明 |
-|---|---|
-| **本地优先** | 本地 GGUF 通过统一 `llama serve --models-dir` router 运行，按需加载、多模型路由、LRU 淘汰；云端既可直接使用 pi-ai 内置 provider，也可接 OpenAI / Anthropic 等多协议兼容端点。 |
-| **真正的 Agent** | 托管 [`pi-coding-agent`](https://github.com/earendil-works/pi) 的 `AgentSession`，自带 read/bash/edit/write/grep/ls/find、上下文压缩、会话管理。 |
-| **可审计工具流** | 4 档审批策略、工作区路径硬隔离、行内工具调用、git 改动审阅与文件预览集中在右侧工作台；Desktop 真终端从标题栏独立打开，Agent 命令与用户 shell 明确分离。 |
-| **记得住，也查得到** | 作用域化记忆 + sqlite-vec 语义召回 + 词法兜底；会话历史通过 FTS5 检索。 |
-| **多入口一个宿主** | Tauri 桌面、CLI 与 Telegram / Feishu / Lark / WeChat 渠道复用同一套 Agent 宿主能力，渠道生命周期由 core 侧 Channel Operations 统一管理。OpenAI `/v1` 与 Anthropic `/v1/messages` 只共享模型/provider runtime，不经过 AgentSession、记忆或工具。 |
+适合这些场景：
 
----
+- 在本机运行 GGUF 模型，同时保留连接云端模型的能力。
+- 让 Agent 在明确的审批策略下读取项目、修改文件、运行命令并审阅 git diff。
+- 在对话之间复用作用域化记忆、Skills 和 MCP 工具。
+- 从 Telegram、飞书/Lark 或微信接入同一个 Agent 宿主。
+- 为现有工具提供 OpenAI 或 Anthropic 兼容的本地模型网关。
 
-## 架构一览
+> 当前项目处于 Beta 阶段。核心功能和 macOS/Windows 构建链已可用，但安装包尚未签名，部分渠道仍需要真实平台凭证联调。
 
-```mermaid
-flowchart TB
-  subgraph Entry["Entry points and desktop host"]
-    direction LR
-    Desktop["Tauri 2 Rust host<br/>window + bundled SEA child"]
-    UI["React UI<br/>Agent Turn · Workbench View · Terminal Panel"]
-    CLI["easywork CLI"]
-    IM["Telegram · Feishu/Lark · WeChat"]
-    V1Clients["OpenAI / Anthropic clients"]
-  end
+## 功能概览
 
-  Native["Desktop-only resources<br/>PTY sessions · native Browser sub-WebViews"]
+| 能力           | 说明                                                                                                           |
+| -------------- | -------------------------------------------------------------------------------------------------------------- |
+| 本地与云端模型 | 本地 GGUF 使用 llama.app 的单进程 router 按需加载；云端支持 pi-ai 内置 Provider 与 OpenAI/Anthropic 兼容端点。 |
+| Agent 工作区   | 托管 `pi-coding-agent` 的 `AgentSession`，支持文件读写、命令执行、上下文压缩、工具调用与会话恢复。             |
+| 安全与审批     | 4 档审批策略、工作区路径约束、工具调用可视化；Desktop 用户终端与 Agent 命令相互独立。                          |
+| 记忆与检索     | Core Memory 与 Workspace Memory 分层保存，支持 sqlite-vec 语义召回、词法降级与 FTS5 会话全文检索。             |
+| Skills 与 MCP  | 支持全局/工作区 Skills、候选审核与版本回滚；MCP 支持 HTTP 和受控的 stdio 接入。                                |
+| 多入口         | Tauri 桌面端、CLI、Telegram、飞书/Lark、微信共享同一套 Agent 宿主能力。                                        |
+| API 网关       | 提供 OpenAI `/v1/chat/completions`、`/v1/embeddings`、`/v1/models` 与 Anthropic `/v1/messages`。               |
 
-  subgraph Daemon["Core daemon process — apps/daemon composes @ew/core"]
-    direction TB
-    Host["Daemon host<br/>Fastify assembly · lifecycle · shutdown"]
-
-    subgraph Ingress["Ingress"]
-      direction LR
-      AgentAPI["Agent / workspace APIs<br/>HTTP + SSE"]
-      ChannelOps["Channel Operations<br/>Gateway + ConnectorHost"]
-      Compat["/v1 compatibility gateway<br/>OpenAI + Anthropic"]
-      GuardedStream["Guarded Stream<br/>disconnect · safe write · cleanup"]
-    end
-
-    subgraph AgentPath["Agent path"]
-      direction LR
-      AgentTurnCore["Core Agent Turn<br/>claim · canonical trajectory · commit"]
-      SessionHost["SessionHost<br/>pi AgentSession<br/>per-thread serialization"]
-      Extensions["EasyWork extensions<br/>permissions · tool bridge · memory hooks"]
-      Capabilities["Built-in Tools · Skills · MCP"]
-      Memory["Scoped Memory<br/>core · workspace · extracted facts"]
-    end
-
-    ModelConfig["Provider Model Configuration<br/>route identity · protocol · capabilities"]
-    Runtime["Inference runtime<br/>LocalBackend + cloud engines"]
-    Lifecycles["Deep lifecycle modules<br/>Source Conversation · Skill Candidate"]
-    State["Persistent state<br/>SQLite · FTS5 · sqlite-vec<br/>pi sessions · markdown memory"]
-
-    Host --- AgentAPI
-    Host --- ChannelOps
-    Host --- Compat
-    AgentAPI --- GuardedStream
-    ChannelOps --- GuardedStream
-    Compat --- GuardedStream
-    AgentAPI --> AgentTurnCore
-    ChannelOps --> AgentTurnCore
-    AgentTurnCore --> SessionHost
-    SessionHost --> Extensions
-    Extensions --> Capabilities
-    Extensions --> Memory
-    SessionHost --> ModelConfig
-    AgentTurnCore --> Lifecycles
-    AgentTurnCore --> State
-    Lifecycles --> State
-    SessionHost --> State
-    ChannelOps --> State
-    Memory --> State
-    Compat -. "bypasses AgentSession, tools and memory" .-> ModelConfig
-    ModelConfig --> Runtime
-  end
-
-  subgraph Backends["Model backends"]
-    direction LR
-    Router["llama serve router<br/>local GGUF · on-demand · LRU"]
-    Embedding["llama serve --embedding<br/>memory vectors"]
-    Cloud["Cloud providers<br/>OpenAI · Anthropic · compatible APIs"]
-  end
-
-  Desktop ---|"hosts main webview + IPC"| UI
-  Desktop --- Native
-  UI <-->|"PTY / browser IPC"| Native
-  Desktop -->|"owns daemon child"| Host
-  UI -->|"HTTP + SSE"| AgentAPI
-  CLI -->|"HTTP + SSE · auto-start if absent"| AgentAPI
-  IM -->|"WebSocket · long-poll · webhook"| ChannelOps
-  V1Clients -->|"OpenAI / Anthropic protocol"| Compat
-  Runtime --> Router
-  Runtime --> Cloud
-  Memory --> Embedding
-```
-
-核心原则很简单：**daemon 拥有全部状态和能力，所有界面都是薄壳**。桌面聊天、工作区 agent、外部渠道消息和命令行自动化先复用同一个 Core Agent Turn，再进入 `SessionHost`、权限、记忆和模型配置；`/v1` 兼容网关只复用同一 daemon 内的模型与 provider runtime。客户端 Agent Turn 负责交互状态，Core Agent Turn 负责 Source Conversation claim、canonical trajectory、成功提交、artifacts 与 Skill Candidate 调度；Guarded Stream 统一所有流式 HTTP 入口的断连取消、安全写入和清理；Workbench View Session、Terminal Panel Session、Skill Candidate 和 Provider Model Configuration 也各自通过深模块集中生命周期与正确性规则。
-
----
-
-## 功能地图
-
-### Agent 工作台
-
-- 品牌与主题：默认使用冷灰画布 + 青绿色强调色，保留黑灰 + 青绿色深色主题和跟随系统；Ewo 机器人头像是 Desktop 应用图标，全身形象用于 Chat / Workspace 空状态，字体仍为 IBM Plex Sans + JetBrains Mono。
-- 对话模式：适合问答、总结、联网搜索和多模态输入。
-- 工作区模式：在本地项目目录内读写文件、运行 Agent 工具、查看 git diff，并预览文件。
-- Chat 与 Workspace 共用同一 Agent Turn 生命周期，发送、重试、停止、审批、用量、工件和完成语义不会在两个页面各自演化。
-- 右侧工作台坞：空态先显示新任务、浏览器与 Desktop 终端快捷入口，不自动创建“文件”标签；按需打开改动、文件、浏览器视图，关闭最后标签后回到空态。Desktop 远程网页使用原生子 WebView，能打开拒绝 iframe 嵌入的网站；Web 运行时保留 sandbox iframe。Desktop 专属的多标签真终端仍使用独立生命周期，在对话区底部打开并跟随主题。用户 shell 由 Tauri PTY 托管，不与 Agent 工具命令混用。
-- 行内工具调用：思考、探索、编辑、运行、web search 等过程结构化展示。
-
-### 模型与网关
-
-- 本地模型：HuggingFace 搜索、断点续传下载、GGUF 元数据解析、统一 llama router 运行；国内网络可在「设置 → 通用」持久化启用 `hf-mirror.com`，搜索失败会显示明确错误提示；模型页还可按模型配置默认运行采样参数。
-- 云端 provider：内置 pi-ai 支持的 provider 目录；自定义端点可保存多组 API 协议 / Base URL 连接方式（即使暂未分配模型也不会丢失），支持从 `/models` 获取模型列表，并逐模型选择连接方式、配置上下文、模态与推理能力；同一聚合服务商可同时承载 OpenAI 与 Anthropic-only 模型。
-- 模型目录继承：Core 的 Provider Model Configuration 从保存配置统一解析 route identity、上游 identity 与最终 runtime model；UI 只编辑 / 展示投影。运行时可跨 API 协议继承模板的名称、`reasoning`、`thinkingLevelMap` 和 `maxTokens`；Anthropic Messages 会把用户态 `/v1` Base URL 转为 SDK 所需根地址，避免真实请求出现重复 `/v1/v1/messages`。上下文窗口与输入模态只在 UI 选定模板时复制并保存到模型配置，不会在运行时覆盖既有配置。报文级 `compat` 仅在模板 API 与当前 API 一致时应用；同名模型始终以 `provider:<providerId>:<modelId>` 隔离。
-- 思考默认值：`/models.modelSources[].reasoning` 将运行时推理能力同步给 Chat / Workspace；推理模型首次使用默认「中」，显式选择「关」后按模型持久化。
-- 多协议 API：OpenAI `/v1/chat/completions`、`/v1/embeddings`、`/v1/models`，以及 Anthropic `/v1/messages`。
-
-### 记忆、Skills、MCP
-
-- Core Memory 只保存 User Profile / Agent Notes；Source Conversation 生命周期在同一删除屏障内处理来源事实、候选证据、消息 / FTS、pi session 与合格 scratch 工件，绝不删除用户工作区目录。工作区记忆隔离，支持语义/词法召回和 markdown 回灌。外部 Deep Memory 当前只是宿主注入 seam：Desktop / CLI 没有用户配置入口，Mem0 适配器仍是非用户态骨架；宿主实际注入后也只能追加受限召回，不能替换本地真相源，记忆页才显示其状态与启停开关。记忆页把搜索和添加保持为主操作，向量状态常驻；旧版 Skill 迁移审计在无歧义项时折叠为次级信息，有待判断项时自动展开并突出数量。
-- Skills 页面以“已启用 / 待审核 / 已归档”分开全局来源与 learned Skills；Skill Candidate 生命周期统一拥有审核资格、验证、来源、批准、遥测、快照、归档、恢复和回滚。Chat 的 `/learn`、Skills 设置里的“学习 Skill”和受限后台复盘都只生成 Candidate，明确批准后才会激活。
-- MCP 支持 stdio 与 HTTP，工具清单探测、启停、导入和审批一体化。
-
-### 外部渠道
-
-- Channel Gateway 把不同平台统一成 adapter；core 侧 Channel Operations 统一管理连接器生命周期、扫码连接会话、收件箱读模型和 SSE 失效事件。
-- Telegram long-poll、Feishu/Lark WebSocket 与 webhook、WeChat iLink QR + long-poll 已落地。
-- 渠道 secret 不再写入 SQLite：macOS 使用 Keychain、Linux 使用 Secret Service、Windows 使用当前用户 DPAPI；旧版明文配置会在启动时自动迁移，管理 API 只返回已配置字段名而不回显密钥。
-- 收件箱按外部联系人聚合消息，使用 SSE invalidation 实时刷新；顶层标题保持唯一，列表只保留“外部渠道”分区标识与紧凑刷新动作，微信 / Telegram / Discord 等渠道复用统一品牌图标。
-
----
+更多功能与边界说明见 [功能文档](docs/FEATURES.md)。
 
 ## 安装
 
@@ -167,11 +57,13 @@ flowchart TB
 curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh | sh
 ```
 
-也可以从 [Releases](https://github.com/LunarCache/easywork/releases) 下载 dmg 装到 `/Applications`。
+也可以从 [GitHub Releases](https://github.com/LunarCache/easywork/releases/latest) 下载 DMG 并拖入 `/Applications`。
 
-安装包内置单文件 daemon（Node SEA），运行无需系统 Node。首次启动会检测本地推理运行时；缺失时可在模型页点击安装，通过 [llama.app](https://llama.app) 获取统一 `llama`。上面的 `install.sh` 则会在安装应用后自动尝试补齐该运行时。
+当前 macOS 包使用 ad-hoc 签名。若 Gatekeeper 阻止启动，可在“系统设置 → 隐私与安全性”中选择仍要打开，或执行：
 
-> 当前 macOS 包为 ad-hoc 未签名版本。若手动下载 dmg 遇到 Gatekeeper 提示，可在「系统设置 -> 隐私与安全性」选择仍要打开，或执行 `xattr -dr com.apple.quarantine /Applications/EasyWork.app`。
+```bash
+xattr -dr com.apple.quarantine /Applications/EasyWork.app
+```
 
 ### Windows x64
 
@@ -179,120 +71,165 @@ curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh
 irm https://raw.githubusercontent.com/LunarCache/easywork/main/install.ps1 | iex
 ```
 
-也可以从 Releases 下载 NSIS `.exe` 或 MSI 安装包。安装包内置 Windows SEA daemon 与 `vec0.dll`，运行无需系统 Node；当前未做 Authenticode 签名。
+发布流程会生成 NSIS `.exe` 与 MSI 安装包。当前尚未配置 Authenticode 签名，系统可能显示未知发布者提示。
 
-Intel Mac、Windows ARM64、Linux 安装包仍在后续发布计划中。源码开发时 Windows 需要额外安装 Git for Windows。
+安装包内置单文件 daemon，无需额外安装 Node.js。首次使用本地模型时，EasyWork 会引导安装 [llama.app](https://llama.app) 运行时。
 
----
+> Intel Mac、Windows ARM64 与 Linux 桌面安装包仍在规划中。
+
+## 快速开始
+
+1. 启动 EasyWork，进入“设置 → 模型”。
+2. 下载本地 GGUF 模型，或添加云端 Provider 和 API Key。
+3. 回到新任务页选择模型，直接开始对话。
+4. 需要操作项目时创建工作区，并按风险选择审批策略。
+5. 按需在设置中启用记忆、Skills、MCP 或外部渠道。
+
+本地模型统一由 `llama serve --models-dir` router 管理，可按请求自动加载多个模型并通过 LRU 控制常驻数量；记忆嵌入模型使用独立进程，缺失时自动降级为词法召回。
 
 ## CLI
 
-当前 DMG 与 `install.sh` 只安装 `EasyWork.app`，**不会**在 `PATH` 中创建 `easywork` 命令；独立 CLI 安装入口尚待提供。CLI 既是 daemon 入口也是终端客户端，运行时会自动发现或拉起本机 daemon；当前可从源码树使用：
+桌面安装包目前不会把 `easywork` 命令写入 `PATH`。从源码构建后可使用完整 CLI：
 
 ```bash
 npm install
 npm run build
 
-npm exec --workspace @ew/daemon -- easywork                                      # 交互式 REPL
-npm exec --workspace @ew/daemon -- easywork run "总结这个仓库"                    # 一次性问答
-cat error.log | npm exec --workspace @ew/daemon -- easywork run                   # stdin 全部作为提问
-npm exec --workspace @ew/daemon -- easywork run "重构 utils.ts" -w . -y          # 在当前目录运行 agent 并自动批准
-npm exec --workspace @ew/daemon -- easywork run "继续" -t <threadId>             # 续接已有会话
+# 交互式会话
+npm exec --workspace @ew/daemon -- easywork
 
-npm exec --workspace @ew/daemon -- easywork models                              # 列出已路由和本地模型
-npm exec --workspace @ew/daemon -- easywork models pull <hf-repo>               # 下载 GGUF
-npm exec --workspace @ew/daemon -- easywork models rm <name>                    # 删除本地模型
-npm exec --workspace @ew/daemon -- easywork thread ls / show <id> / rm <id>     # 会话历史
-npm exec --workspace @ew/daemon -- easywork mem ls / search <query> / rm <id>   # 记忆
-npm exec --workspace @ew/daemon -- easywork status / stop                       # daemon 状态 / 停止
+# 一次性任务
+npm exec --workspace @ew/daemon -- easywork run "总结这个仓库"
+
+# 在当前目录运行 Agent，并自动批准工具调用
+npm exec --workspace @ew/daemon -- easywork run "检查并修复测试" -w . -y
+
+# 管理模型、会话与记忆
+npm exec --workspace @ew/daemon -- easywork models
+npm exec --workspace @ew/daemon -- easywork thread ls
+npm exec --workspace @ew/daemon -- easywork mem ls
 ```
 
-常用选项：`-m/--model`、`-w/--workspace <dir>`、`-t/--thread <id>`、`-y/--yes`。
+常用选项包括 `--model`、`--workspace`、`--thread` 和 `--yes`；远程连接可使用 `EW_BASEURL`、`EW_TOKEN` 与 `EW_MODEL`。
 
-常用环境变量：`EW_BASEURL`、`EW_TOKEN`、`EW_MODEL`。
+## 架构
 
----
+```mermaid
+flowchart LR
+  Desktop["Tauri Desktop"] --> Daemon
+  CLI["easywork CLI"] --> Daemon
+  Channels["Telegram · Feishu/Lark · WeChat"] --> Daemon
+  Clients["OpenAI / Anthropic clients"] --> Gateway["/v1 Gateway"]
+
+  subgraph Daemon["EasyWork daemon"]
+    AgentTurn["Core Agent Turn"] --> SessionHost["pi AgentSession"]
+    SessionHost --> Tools["Built-in Tools · Skills · MCP"]
+    SessionHost --> Memory["Scoped Memory"]
+    SessionHost --> Models["Provider & Model Runtime"]
+  end
+
+  Gateway --> Models
+  Models --> Local["llama router · local GGUF"]
+  Models --> Cloud["Cloud providers"]
+```
+
+架构遵循三个原则：
+
+- **daemon 拥有状态**：会话、记忆、模型和渠道生命周期都在核心进程中完成。
+- **客户端保持轻量**：桌面 UI 与 CLI 通过 HTTP/SSE 使用同一套能力。
+- **兼容网关保持隔离**：`/v1` 只复用模型运行时，不隐式携带 Agent 工具或记忆。
+
+完整模块图、数据流和正确性约束见 [架构文档](docs/ARCHITECTURE.md) 与 [设计文档](docs/DESIGN.md)。
 
 ## 从源码开发
 
 ### 环境要求
 
-| 依赖 | 说明 |
-|---|---|
-| Node.js | `>=24`，推荐 Node 26；依赖内置 `node:sqlite`。 |
-| npm | 项目统一使用 npm，不使用 pnpm。 |
-| Rust | 构建 Tauri 桌面壳需要 `cargo`。 |
-| llama | 本地推理统一使用 llama.app 的 `llama`，router 模式必需。 |
-| Git | Windows 平台建议安装 Git for Windows（同时提供 pi `bash` 工具需要的 Git Bash）。 |
-
-安装 llama：
+- Node.js `>=24`
+- npm（项目不使用 pnpm）
+- Rust stable 与 Cargo（仅 Desktop 构建需要）
+- Git；Windows 推荐安装 Git for Windows
+- llama.app 的 `llama`（仅本地推理与真机 smoke 需要）
 
 ```bash
-curl -LsSf https://llama.app/install.sh | sh
-```
-
-### 常用命令
-
-```bash
+git clone https://github.com/LunarCache/easywork.git
+cd easywork
 npm install
-npm run build
+
+# 开发服务
+npm run dev:daemon
+npm run dev:ui
+npm run dev:desktop
+
+# 质量检查
 npm run lint
 npm run typecheck
-npm test               # vitest: 416 passed / 1 skipped
-npm run test:coverage
-
-npm run e2e:install
-npm run test:e2e       # Playwright UI e2e: 48 条，真 daemon + 真 Vite + 隔离 data dir
-
-npm run dev:daemon     # 仅启动 daemon，首行输出 {baseUrl, token, pid}
-npm run dev:ui         # 仅启动 Vite
-npm run dev:desktop    # Tauri dev: Rust 壳 + Vite + daemon sidecar
+npm test
+npm run test:e2e
+npm run build
 ```
 
-> Windows 提示：`@ew/desktop` 的 `dev` 脚本当前使用 `EW_DAEMON_ENTRY="$PWD/…"` 这类 POSIX 环境变量赋值语法，默认 PowerShell/cmd 下的 npm script shell 无法直接执行。需先为 npm 配置 POSIX `script-shell`，或将该脚本改为跨平台写法，再运行 `npm run dev:desktop`。
+### Monorepo
 
-构建发布产物：
-
-```bash
-node scripts/build-daemon-sea.mjs
-npm run app:build --workspace @ew/desktop
-npm run smoke:daemon-sea
-npm run release:check-artifacts -- windows
+```text
+apps/
+  daemon/          daemon 与 easywork CLI 入口
+  desktop/         Tauri 2 桌面宿主
+  ui/              React 19 + Vite 前端
+packages/
+  core/            Agent、server、模型及生命周期编排
+  shared/          Zod 契约与共享类型
+  providers/       本地与云端推理引擎
+  memory/          作用域化记忆与混合召回
+  tools/           内置工具与网络安全边界
+  skills/          Skills 发现与执行
+  mcp/             MCP 客户端
+  im-connectors/   外部消息渠道 adapters
+  sdk/             daemon 类型化 HTTP 客户端
 ```
 
-Desktop 图标的矢量真相源是 `apps/desktop/src-tauri/icons/icon.svg`。修改后用 Tauri CLI 重生成 PNG / ICNS / ICO；`build.rs` 显式跟踪整个 `icons/` 目录，避免 `tauri dev` 仅重启旧二进制。macOS 若要验证 Dock / Finder 实际图标，应构建并启动 debug `.app`，不要只观察裸 `cargo run` 进程：
+改动 `@ew/core` 或 `@ew/sdk` 后，请先运行 `npm run build`，再验证依赖其 `dist` 的 daemon 与桌面端。
 
-```bash
-npm run tauri --workspace @ew/desktop -- icon src-tauri/icons/icon.svg
-npm run tauri --workspace @ew/desktop -- build --debug --bundles app
-open apps/desktop/src-tauri/target/debug/bundle/macos/EasyWork.app
-```
+## 项目状态
 
-发布流程：推送 `v*` tag 触发 [`release.yml`](.github/workflows/release.yml)，先运行 `npm run release:check-version` 校验 npm / Tauri / Cargo 版本与 tag 一致；每次 Tauri bundle 都会在 `beforeBuildCommand` 中重建 SEA daemon，避免新 UI 携带旧 sidecar。macOS Apple Silicon runner 构建 dmg，Windows x64 runner 构建 NSIS + MSI，两端都先对 SEA daemon `/health` 做真实冒烟，Windows 还会检查 sidecar、`vec0.dll` 与安装包完整性后再上传 Releases。普通 CI 也会执行 Windows NSIS 关键路径构建。Desktop 主 WebView 启用显式 CSP；capability 只授权本地 `main` WebView，承载任意远程网页的子 WebView 不继承 Tauri IPC 权限。
+已完成的主要能力包括 Core daemon、Agent 工作区、本地/云端模型、多协议网关、记忆、Skills/MCP、CLI、macOS/Windows 打包链以及 Telegram、飞书/Lark、微信连接器。
 
----
+当前重点：
 
-## 测试覆盖
+- Discord 与企业微信 adapters 及真实凭证联调。
+- Provider/MCP 密钥迁移到系统安全存储。
+- Python/Terminal 独立 OS 级沙箱。
+- 安装包签名、公证、自动更新及更多平台架构。
+- 可选的内嵌代码编辑器。
 
-- Vitest：416 passed / 1 skipped。
-- 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
-- Playwright UI e2e 共 48 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、Ewo 双空状态、`/learn` 对话学习入口、工作台无标签空态、动态标签与独立真终端、贯穿式布局拖拽边界、Desktop 原生网页 surface 生命周期、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
-- 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
+详细里程碑与最新测试状态见 [docs/PROGRESS.md](docs/PROGRESS.md)。
 
----
+## 项目文档
 
-## 文档入口
+| 文档                                    | 内容                             |
+| --------------------------------------- | -------------------------------- |
+| [FEATURES.md](docs/FEATURES.md)         | 功能、交互与产品边界             |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构、技术栈与环境变量       |
+| [DESIGN.md](docs/DESIGN.md)             | 子系统原理、关键数据流与设计取舍 |
+| [PROGRESS.md](docs/PROGRESS.md)         | 当前状态与倒序里程碑日志         |
+| [AGENTS.md](AGENTS.md)                  | Agent 开发约定与正确性约束       |
 
-| 文档 | 内容 |
-|---|---|
-| [docs/DESIGN.md](docs/DESIGN.md) | 系统设计与功能详解：架构、子系统原理、关键数据流和设计取舍。 |
-| [docs/FEATURES.md](docs/FEATURES.md) | 功能说明：模型、Agent、记忆、UI、`/v1` 端点。 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Core daemon、monorepo、技术栈、环境变量和平台说明。 |
-| [docs/PROGRESS.md](docs/PROGRESS.md) | 状态总览与倒序里程碑日志。 |
-| [AGENTS.md](AGENTS.md) | 开发约定、关键正确性约束和常用命令。 |
+## 贡献与反馈
 
----
+- 功能建议和普通缺陷请提交 [GitHub Issue](https://github.com/LunarCache/easywork/issues/new)。提交前请先搜索是否已有相关问题，并附上操作系统、EasyWork 版本、复现步骤和必要日志。
+- 代码改动建议先通过 Issue 对齐范围，再提交聚焦、可审阅的 Pull Request。
+- 提交 PR 前请至少运行 `npm run lint`、`npm run typecheck` 和 `npm test`；涉及 UI 行为时还应运行 `npm run test:e2e`。
+- 开发约束、架构入口和关键正确性规则见 [AGENTS.md](AGENTS.md)。
 
-## 许可证
+## 安全说明
+
+- 工作区文件工具会解析真实路径并阻止越界访问；shell 命令仍由审批策略把守。
+- 渠道密钥保存在系统安全存储中；Provider/MCP 密钥迁移仍在计划内。
+- stdio MCP 默认关闭，因为它可以执行本机命令。
+- 本项目尚未提供独立 OS 级代码执行沙箱，请仅在可信工作区使用高权限审批模式。
+
+如发现安全问题，请勿在公开 Issue 中披露密钥、个人数据、利用代码或完整漏洞细节。仓库目前尚未启用 GitHub 私密漏洞报告；请先提交一个不含敏感细节的 [安全联系请求](https://github.com/LunarCache/easywork/issues/new?title=%5BSecurity%5D%20Private%20contact%20request)，由维护者提供私密沟通方式。
+
+## License
 
 [MIT](LICENSE) © 2026 LunarCache
