@@ -1,6 +1,6 @@
 [package]
 name = "easywork-desktop"
-version = "0.4.6"
+version = "0.4.7"
 description = "EasyWork 本地 AI 工作台"
 edition = "2021"
 
