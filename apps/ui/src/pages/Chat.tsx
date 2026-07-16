@@ -8,9 +8,8 @@ import { ApprovalCard } from "../components/ApprovalCard.js";
 import { ComposerContextPill, ComposerContextStrip, ComposerUsagePill } from "../components/ComposerContextStrip.js";
 import { SideDock, type BrowserTarget } from "../components/SideDock.js";
 import { TerminalPanel } from "../components/TerminalPanel.js";
-import { ModelSelect } from "../components/ModelSelect.js";
+import { ModelThinkingSelect } from "../components/ModelThinkingSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
-import { THINK_LABEL, nextThink } from "../lib/slash.js";
 import { storedToUiMsgs, type StoredMsg, type UiImage } from "../lib/agent-stream.js";
 import {
   loadDisabledSkills,
@@ -35,7 +34,6 @@ import {
   SlidersIcon,
   SparkIcon,
   StopIcon,
-  ThinkIcon,
   XIcon,
 } from "../icons.js";
 
@@ -282,7 +280,6 @@ export function Chat({
     },
     [model],
   );
-  const cycleThink = () => changeThink(nextThink(thinkLevel));
 
   // /compact：手动压缩上下文。
   const doCompact = useCallback(() => {
@@ -396,15 +393,6 @@ export function Chat({
           <div className="composer-box">
             <ComposerContextStrip>
               <ComposerContextPill
-                tone={thinkLevel !== "off" ? "on" : "default"}
-                onClick={cycleThink}
-                title="思考档位（点击循环：低/中/高/关）"
-                testId="chat-think-pill"
-              >
-                <ThinkIcon size={14} />
-                <span>思考 {THINK_LABEL[thinkLevel]}</span>
-              </ComposerContextPill>
-              <ComposerContextPill
                 tone={web ? "on" : "default"}
                 onClick={() => setWeb((v) => !v)}
                 title="联网搜索"
@@ -473,7 +461,15 @@ export function Chat({
                 )}
               </div>
               <div className="composer-bar-right">
-                <ModelSelect models={models} sources={modelSources} value={model} onChange={setModel} up align="right" variant="strip" />
+                <ModelThinkingSelect
+                  models={models}
+                  sources={modelSources}
+                  model={model}
+                  thinkingLevel={thinkLevel}
+                  onModelChange={setModel}
+                  onThinkingLevelChange={changeThink}
+                  testId="chat-model-thinking"
+                />
                 {contextPct != null && (
                   <ComposerUsagePill
                     pct={contextPct}

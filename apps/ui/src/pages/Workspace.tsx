@@ -7,13 +7,12 @@ import { loadDisabledSkills, loadThink, saveThink } from "../lib/prefs.js";
 import { composerUsageState } from "../lib/context-usage.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
-import { ComposerContextPill, ComposerUsagePill } from "../components/ComposerContextStrip.js";
+import { ComposerUsagePill } from "../components/ComposerContextStrip.js";
 import { ContextBar } from "../components/ContextBar.js";
 import { SideDock, type BrowserTarget } from "../components/SideDock.js";
 import { TerminalPanel } from "../components/TerminalPanel.js";
-import { ModelSelect } from "../components/ModelSelect.js";
+import { ModelThinkingSelect } from "../components/ModelThinkingSelect.js";
 import { useSlashPalette } from "../components/SlashPalette.js";
-import { THINK_LABEL, nextThink } from "../lib/slash.js";
 import { useAvailableModel } from "../hooks/useAvailableModel.js";
 import { useComposerImages } from "../hooks/useComposerImages.js";
 import { useMessageScroll } from "../hooks/useMessageScroll.js";
@@ -26,7 +25,6 @@ import {
   CheckIcon,
   EasyWorkMascot,
   PlusBtnIcon,
-  ThinkIcon,
   SparkIcon,
   SearchIcon,
   WrenchIcon,
@@ -203,7 +201,6 @@ export function Workspace({
     },
     [model],
   );
-  const cycleThink = () => changeThink(nextThink(thinkLevel));
   const doCompact = useCallback(() => {
     setPageNotice("压缩上下文中…");
     void getClient()
@@ -361,17 +358,7 @@ export function Workspace({
         onOpenFolder={onOpenFolder}
         onSwitchBranch={switchBranch}
         onOpenGitGraph={() => setDockOpen(true)}
-      >
-        <ComposerContextPill
-          tone={thinkLevel !== "off" ? "on" : "default"}
-          onClick={cycleThink}
-          title="思考档位（点击循环：低/中/高/关）"
-          testId="workspace-think-pill"
-        >
-          <ThinkIcon size={14} />
-          <span>思考 {THINK_LABEL[thinkLevel]}</span>
-        </ComposerContextPill>
-      </ContextBar>
+      />
       <div className="composer-box">
             {images.length > 0 && (
               <div className="composer-images" data-testid="workspace-image-strip">
@@ -468,7 +455,15 @@ export function Workspace({
                 )}
               </div>
               <div className="composer-bar-right">
-                <ModelSelect models={models} sources={modelSources} value={model} onChange={setModel} up align="right" variant="strip" />
+                <ModelThinkingSelect
+                  models={models}
+                  sources={modelSources}
+                  model={model}
+                  thinkingLevel={thinkLevel}
+                  onModelChange={setModel}
+                  onThinkingLevelChange={changeThink}
+                  testId="workspace-model-thinking"
+                />
                 {contextPct != null && (
                   <ComposerUsagePill
                     pct={contextPct}

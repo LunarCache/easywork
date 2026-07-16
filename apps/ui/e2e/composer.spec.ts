@@ -43,6 +43,56 @@ test.describe("composer e2e", () => {
     await expect(page.getByTestId("workspace-mascot")).toBeVisible();
   });
 
+  test("模型与思考强度通过同一个 composer 组件调整", async ({ page, openApp, client, info, workspaceDir }) => {
+    const project = await client.createProject({ name: "Unified Model Controls", workspaceDir });
+    await page.route(`${info.baseUrl}/models`, async (route) => {
+      await route.fulfill({
+        json: {
+          routed: ["provider:custom:deepseek-v4-pro"],
+          modelSources: [{
+            id: "provider:custom:deepseek-v4-pro",
+            kind: "provider",
+            label: "Custom",
+            providerId: "custom",
+            providerKind: "openai-compatible",
+            modelId: "deepseek-v4-pro",
+            reasoning: true,
+          }],
+          context: { "provider:custom:deepseek-v4-pro": 1_000_000 },
+          engines: [],
+        },
+      });
+    });
+
+    await openApp();
+
+    const chatControl = page.getByTestId("chat-model-thinking-trigger");
+    await expect(chatControl).toContainText("deepseek-v4-pro");
+    await expect(chatControl).toContainText("中");
+    await expect(page.getByTestId("chat-think-pill")).toHaveCount(0);
+
+    await chatControl.click();
+    await expect(page.getByTestId("chat-model-thinking-menu")).toBeVisible();
+    await expect(page.getByTestId("chat-model-thinking-model-row")).toContainText("模型");
+    await expect(page.getByTestId("chat-model-thinking-level-row")).toContainText("推理强度");
+
+    await page.getByTestId("chat-model-thinking-level-row").click();
+    await page.getByTestId("chat-model-thinking-level-high").click();
+    await expect(chatControl).toContainText("高");
+
+    await chatControl.click();
+    await page.getByTestId("chat-model-thinking-model-row").click();
+    const currentModelOption = page.getByTestId("chat-model-thinking-model-provider:custom:deepseek-v4-pro");
+    await expect(currentModelOption).toBeVisible();
+    await currentModelOption.click();
+
+    await page.getByTestId(`sidebar-project-${project.id}`).click();
+    const workspaceControl = page.getByTestId("workspace-model-thinking-trigger");
+    await expect(workspaceControl).toContainText("deepseek-v4-pro");
+    await expect(workspaceControl).toContainText("高");
+    await expect(page.getByTestId("workspace-think-pill")).toHaveCount(0);
+  });
+
   test("聊天与工作区 composer 内的控件均为无边框", async ({ page, openApp, client, info, workspaceDir, sampleImagePath }) => {
     const project = await client.createProject({ name: "Borderless Workspace", workspaceDir });
     await page.route(`${info.baseUrl}/models`, async (route) => {
@@ -60,7 +110,6 @@ test.describe("composer e2e", () => {
 
     const chatBox = page.getByTestId("chat-composer-input").locator("..");
     const chatModelButton = chatBox.locator(".model-sel-btn.strip");
-    await expectBorderless(page.getByTestId("chat-think-pill"));
     await expectBorderless(page.getByTestId("chat-web-pill"));
     await expectBorderless(chatModelButton);
     await expect.poll(() => chatModelButton.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
@@ -74,7 +123,6 @@ test.describe("composer e2e", () => {
     const workspaceBox = page.getByTestId("workspace-composer-input").locator("..");
     const workspaceModelButton = workspaceBox.locator(".model-sel-btn.strip");
     await expectBorderless(page.getByTestId("workspace-project-pill"));
-    await expectBorderless(page.getByTestId("workspace-think-pill"));
     await expectBorderless(page.getByTestId("workspace-approval-pill"));
     await expectBorderless(workspaceModelButton);
     await expect.poll(() => workspaceModelButton.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
@@ -381,14 +429,16 @@ test.describe("composer e2e", () => {
     });
 
     await openApp();
-    await expect(page.getByTestId("chat-think-pill")).toContainText("思考 中");
+    const modelThinking = page.getByTestId("chat-model-thinking-trigger");
+    await expect(modelThinking).toContainText("中");
 
-    await page.getByTestId("chat-think-pill").click();
-    await page.getByTestId("chat-think-pill").click();
-    await expect(page.getByTestId("chat-think-pill")).toContainText("思考 关");
+    await modelThinking.click();
+    await page.getByTestId("chat-model-thinking-level-row").click();
+    await page.getByTestId("chat-model-thinking-level-off").click();
+    await expect(modelThinking).toContainText("关");
 
     await page.reload();
-    await expect(page.getByTestId("chat-think-pill")).toContainText("思考 关");
+    await expect(page.getByTestId("chat-model-thinking-trigger")).toContainText("关");
   });
 
   test("聊天与工作区的 + 入口都能上传图片，并显示已附加图片", async ({ page, openApp, client, workspaceDir, sampleImagePath }) => {
@@ -457,7 +507,7 @@ test.describe("composer e2e", () => {
 
     await expect(page.getByTestId("slash-palette")).toHaveCount(0);
     await expect(input).toHaveValue("");
-    await expect(page.getByTestId("chat-think-pill")).toContainText("思考 中");
+    await expect(page.getByTestId("chat-model-thinking-trigger")).toContainText("中");
   });
 
   test("普通对话通过 /learn 准备当前对话的 Skill 学习提示", async ({ page, openApp, client, info, workspaceDir }) => {
@@ -571,7 +621,7 @@ description: project scoped workflow
     await expect(page.getByTestId("slash-item-high")).toBeVisible();
     await input.press("Enter");
 
-    await expect(page.getByTestId("workspace-think-pill")).toContainText("思考 高");
+    await expect(page.getByTestId("workspace-model-thinking-trigger")).toContainText("高");
     await expect(input).toHaveValue("");
 
     await page.getByTestId("workspace-approval-pill").click();
