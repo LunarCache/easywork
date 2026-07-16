@@ -5,7 +5,7 @@ import { getClient } from "../lib/client.js";
 import { autoGrowComposer, focusComposerEnd, resetComposer } from "../lib/composer.js";
 import { MessageStream } from "../components/MessageStream.js";
 import { ApprovalCard } from "../components/ApprovalCard.js";
-import { ComposerContextPill, ComposerContextStrip, ComposerUsagePill } from "../components/ComposerContextStrip.js";
+import { ComposerUsagePill } from "../components/ComposerContextStrip.js";
 import { SideDock, type BrowserTarget } from "../components/SideDock.js";
 import { TerminalPanel } from "../components/TerminalPanel.js";
 import { ModelThinkingSelect } from "../components/ModelThinkingSelect.js";
@@ -95,7 +95,6 @@ export function Chat({
     return () => window.removeEventListener("ew:set-composer-prompt", setPrompt);
   }, []);
   const [thinkLevel, setThinkLevel] = useState<ThinkLevel>("off");
-  const [web, setWeb] = useState(true);
   const [pageNotice, setPageNotice] = useState<string | null>(null);
 
   const {
@@ -119,7 +118,6 @@ export function Chat({
         threadId,
         model,
         history,
-        excludeTools: web ? [] : ["explore_web", "http_get"],
         thinkingLevel: thinkLevel,
         ...(regenerate ? { regenerate: true } : {}),
         ...(excludeSkills.length ? { excludeSkills } : {}),
@@ -182,7 +180,6 @@ export function Chat({
 
   const openQuickAction = (action: "search" | "workspace" | "settings") => {
     if (action === "search") {
-      setWeb(true);
       setInput("帮我搜索并总结一下：");
       requestAnimationFrame(() => focusComposerEnd(taRef.current));
       return;
@@ -391,17 +388,6 @@ export function Chat({
             </button>
           )}
           <div className="composer-box">
-            <ComposerContextStrip>
-              <ComposerContextPill
-                tone={web ? "on" : "default"}
-                onClick={() => setWeb((v) => !v)}
-                title="联网搜索"
-                testId="chat-web-pill"
-              >
-                <GlobeIcon size={14} />
-                <span>{web ? "联网已开" : "联网已关"}</span>
-              </ComposerContextPill>
-            </ComposerContextStrip>
             {images.length > 0 && (
               <div className="composer-images" data-testid="chat-image-strip">
                 {images.map((im, j) => (

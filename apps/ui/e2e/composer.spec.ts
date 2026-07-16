@@ -110,8 +110,8 @@ test.describe("composer e2e", () => {
 
     const chatBox = page.getByTestId("chat-composer-input").locator("..");
     const chatModelButton = chatBox.locator(".model-sel-btn.strip");
-    await expectBorderless(page.getByTestId("chat-web-pill"));
     await expectBorderless(chatModelButton);
+    await expect.poll(async () => (await chatModelButton.boundingBox())?.height).toBeLessThanOrEqual(28);
     await expect.poll(() => chatModelButton.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
     await chatModelButton.hover();
     await expect.poll(() => chatModelButton.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(238, 242, 243)");
@@ -374,7 +374,7 @@ test.describe("composer e2e", () => {
     await expect(page.locator(".side-dock .wpv-frame")).toHaveAttribute("srcdoc", "<h1>上海天气</h1>");
   });
 
-  test("聊天页关闭联网后从请求中排除 explore_web 和 http_get", async ({ page, openApp, info }) => {
+  test("聊天页默认启用联网工具且不显示联网开关", async ({ page, openApp, info }) => {
     let requestBody: { excludeTools?: string[] } | null = null;
     await page.route(`${info.baseUrl}/models`, async (route) => {
       await route.fulfill({
@@ -396,16 +396,14 @@ test.describe("composer e2e", () => {
     });
 
     await openApp();
-    await expect(page.getByTestId("chat-web-pill")).toContainText("联网已开");
-    await page.getByTestId("chat-web-pill").click();
-    await expect(page.getByTestId("chat-web-pill")).toContainText("联网已关");
+    await expect(page.getByTestId("chat-web-pill")).toHaveCount(0);
 
     const input = page.getByTestId("chat-composer-input");
-    await input.fill("不要联网");
+    await input.fill("帮我联网搜索");
     await input.press("Enter");
 
     await expect.poll(() => requestBody).not.toBeNull();
-    expect(requestBody?.excludeTools).toEqual(["explore_web", "http_get"]);
+    expect(requestBody?.excludeTools).toBeUndefined();
   });
 
   test("推理模型在没有个人偏好时继承默认思考档位，并记住显式关闭", async ({ page, openApp, info }) => {
