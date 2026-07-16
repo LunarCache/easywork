@@ -27,6 +27,7 @@ import {
   BrainIcon,
   ChevronDownIcon,
   CodeIcon,
+  EasyWorkMascot,
   FileIcon,
   GlobeIcon,
   PlusBtnIcon,
@@ -329,9 +330,9 @@ export function Chat({
         <div className="messages" ref={scrollRef} onScroll={onMessagesScroll}>
           {msgs.length === 0 && (
             <div className="greeting">
-              <span className="greet-spark">
-                <SparkIcon size={30} />
-              </span>
+              <div className="greet-mascot" data-testid="chat-mascot">
+                <EasyWorkMascot size={96} />
+              </div>
               <h1>有什么可以帮你？</h1>
               <p className="greet-sub">
                 {model ? "直接输入，或从下面选一个起手式。" : "还没加载模型，先配置一下就能开始。"}

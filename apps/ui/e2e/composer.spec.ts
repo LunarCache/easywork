@@ -33,6 +33,16 @@ async function expectBorderless(locator: Locator): Promise<void> {
 }
 
 test.describe("composer e2e", () => {
+  test("聊天与工作区空状态展示 Ewo 形象", async ({ page, openApp, client, workspaceDir }) => {
+    const project = await client.createProject({ name: "Ewo Workspace", workspaceDir });
+
+    await openApp();
+    await expect(page.getByTestId("chat-mascot")).toBeVisible();
+
+    await page.getByTestId(`sidebar-project-${project.id}`).click();
+    await expect(page.getByTestId("workspace-mascot")).toBeVisible();
+  });
+
   test("聊天与工作区 composer 内的控件均为无边框", async ({ page, openApp, client, workspaceDir, sampleImagePath }) => {
     const project = await client.createProject({ name: "Borderless Workspace", workspaceDir });
 

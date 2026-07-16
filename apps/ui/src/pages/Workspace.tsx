@@ -24,6 +24,7 @@ import {
   ShieldIcon,
   ChevronDownIcon,
   CheckIcon,
+  EasyWorkMascot,
   PlusBtnIcon,
   ThinkIcon,
   SparkIcon,
@@ -502,6 +503,9 @@ export function Workspace({
       <div className={`ws-main ${empty ? "empty-state" : ""}`}>
         {empty ? (
           <div className="ws-hero">
+            <div className="ws-hero-mascot" data-testid="workspace-mascot">
+              <EasyWorkMascot size={82} />
+            </div>
             <h1 className="ws-hero-greet">{greeting}</h1>
             <p className="ws-hero-sub">当前工作区：{project.name}</p>
             <div className="greet-pills ws-starters">
