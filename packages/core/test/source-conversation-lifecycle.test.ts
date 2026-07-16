@@ -358,4 +358,50 @@ describe("SourceConversationLifecycle", () => {
     expect(core.repo.getProject(project.id)).toBeNull();
     expect(fs.readFileSync(marker, "utf8")).toBe("user-owned");
   });
+
+  it("lets channel deletion win over concurrent claims and permits a later new Source Conversation", async () => {
+    core = makeCore();
+    const original = core.repo.resolveThreadForChannel("wechat", "wxid-delete-race", { modelId: "test-model" });
+    const originalDeleteBySession = core.memory.deleteBySession.bind(core.memory);
+    let deletionStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      deletionStarted = resolve;
+    });
+    let releaseDeletion!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseDeletion = resolve;
+    });
+    core.memory.deleteBySession = async (threadId) => {
+      if (threadId === original.id) {
+        deletionStarted();
+        await gate;
+      }
+      return originalDeleteBySession(threadId);
+    };
+
+    const deletion = core.sourceConversations.delete(original.id);
+    await started;
+    const acceptDuringDeletion = vi.fn();
+    const concurrent = await core.sourceConversations.claimChannelRun({
+      kind: "wechat",
+      channelUserId: "wxid-delete-race",
+      defaultModelId: "test-model",
+    }, acceptDuringDeletion);
+
+    expect(concurrent).toBeNull();
+    expect(acceptDuringDeletion).not.toHaveBeenCalled();
+    releaseDeletion();
+    await deletion;
+
+    const acceptLater = vi.fn();
+    const later = await core.sourceConversations.claimChannelRun({
+      kind: "wechat",
+      channelUserId: "wxid-delete-race",
+      defaultModelId: "test-model",
+    }, acceptLater);
+
+    expect(later).not.toBeNull();
+    expect(later!.thread.id).not.toBe(original.id);
+    expect(acceptLater).toHaveBeenCalledOnce();
+  });
 });

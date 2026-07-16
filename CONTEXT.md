@@ -29,11 +29,11 @@ A fact explicitly added, confirmed, or promoted into long-term memory. It has an
 _Avoid_: extracted fact, permanent fact
 
 **Source Conversation**:
-The conversation recorded as provenance for an Extracted Fact or Skill Candidate. Deleting it removes artifacts it solely owns and removes its evidence from multi-source candidates.
+The conversation recorded as provenance for an Extracted Fact or Skill Candidate. Deleting it removes artifacts it solely owns and removes its evidence from multi-source candidates; once deletion starts, a concurrent Agent Turn cannot revive it, while a later submission may create a new Source Conversation.
 _Avoid_: memory scope, workspace
 
 **Agent Turn**:
-A bounded interaction that starts with one user submission and ends with a final result, cancellation, or error. It may include reasoning, tool activity, approvals, usage, and artifacts.
+A bounded interaction that starts with one user submission and ends with a final result, cancellation, or error. It has one canonical trajectory across entry surfaces and may include reasoning, tool activity, approvals, usage, and artifacts; an accepted external submission may remain durable when the turn fails, while agent-produced results require successful completion. Delivery of a completed result to an external channel is a separate outcome and does not change the turn's result.
 _Avoid_: conversation, message, agent session
 
 **Workbench View Session**:

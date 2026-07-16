@@ -34,6 +34,34 @@ describe("SqliteConversationRepo", () => {
     r.close();
   });
 
+  it("atomically appends a canonical trajectory", () => {
+    const r = repo();
+    const thread = r.createThread({ title: "atomic", modelId: "m1" });
+    const createdAt = new Date().toISOString();
+    expect(typeof r.appendMessages).toBe("function");
+    expect(() => r.appendMessages([
+      {
+        id: "duplicate",
+        threadId: thread.id,
+        role: "assistant",
+        seq: 0,
+        parts: [{ type: "text", text: "partial" }],
+        createdAt,
+      },
+      {
+        id: "duplicate",
+        threadId: thread.id,
+        role: "tool",
+        seq: 1,
+        parts: [{ type: "text", text: "must roll back" }],
+        createdAt,
+      },
+    ])).toThrow();
+    expect(r.history(thread.id)).toEqual([]);
+    expect(r.searchMessages("partial")).toEqual([]);
+    r.close();
+  });
+
   it("resolveThreadForChannel：同一 (kind, userId) 映射到同一 thread", () => {
     const r = repo();
     const t1 = r.resolveThreadForChannel("telegram", "user-42", { modelId: "m" });

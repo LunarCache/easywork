@@ -6,7 +6,6 @@ import { Readable } from "node:stream";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   messageText,
-  GLOBAL_SCOPE,
   ChannelConfigSchema,
   type ChannelConfig,
   type McpServerConfig,
@@ -31,6 +30,7 @@ import { LocalModelSettingsStore } from "../models/local-model-settings.js";
 import { ProviderManager, type CloudProviderConfig } from "../providers/manager.js";
 import { registerOpenAICompat } from "../openai-compat/router.js";
 import { SessionHost } from "../agent/session-host.js";
+import { AgentTurnLifecycle } from "../agent/turn-lifecycle.js";
 import { SqliteConversationRepo } from "../store/conversation.js";
 import { EmbeddingService } from "../memory/embedding-service.js";
 import { buildFactExtractor } from "../memory/fact-extractor.js";
@@ -60,7 +60,6 @@ import {
   dbPath as defaultDbPath,
   memoryDir as defaultMemoryDir,
   modelsDir as defaultModelsDir,
-  chatWorkspaceDir,
 } from "../config/paths.js";
 import { SkillCandidateLifecycle } from "../skill-learning/candidate-service.js";
 import {
@@ -84,6 +83,7 @@ export interface CoreServer {
   embeddings: EmbeddingService;
   repo: SqliteConversationRepo;
   sourceConversations: SourceConversationLifecycle;
+  agentTurns: AgentTurnLifecycle;
   token: string;
   start(opts?: { port?: number; host?: string }): Promise<{ port: number; host: string }>;
   stop(): Promise<void>;
@@ -313,6 +313,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     },
   });
   const sourceConversations = createSourceConversationLifecycle(sessionHost, memory, skillLifecycle, repo);
+  const agentTurns = new AgentTurnLifecycle({ repo, sourceConversations, sessionHost, skillLifecycle });
   skills.setOpenListener((skill) => skillLifecycle.recordUseByPath(skill.bodyPath));
   sessionHost.setSkillCandidateStager((input) => skillLifecycle.stage(input));
   // 一次性收口旧 global.skills：程序化条目进入待审核候选，事实进入 Agent Notes，歧义项只读保留。
@@ -424,73 +425,29 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     if (migrated) repo.setSetting(CHANNELS_KEY, JSON.stringify(hydrated.map(stripChannelSecrets)));
     return hydrated;
   };
-  const resolveChannelModel = (requested?: string): string => {
-    if (requested) return requested;
-    const first = registry.routedModels()[0];
-    if (first) return first;
-    throw new Error("no_model_available");
-  };
+  const resolveChannelModel = (): string | undefined => registry.routedModels()[0];
   const channelOps = new ChannelOperations({
     registry: channelRegistry,
     configs: loadChannelConfigs(),
     repo,
-    defaultModel: "",
-    run: (input) => {
-      const modelId = resolveChannelModel(input.model);
-      const last = input.history[input.history.length - 1];
-      const userText = last?.role === "user" ? messageText(last.content) : "";
+    run: (input, onMessagesCommitted) => {
       return (async function* () {
-        const toolCalls = new Map<string, { name: string; ok: boolean }>();
-        const usedLearnedSkills = new Set<string>();
-        const learnedSkillReads = new Map<string, string>();
-        let finalText = "";
-        let sawFinal = false;
-        for await (const event of sessionHost.run({
-          threadId: input.threadId,
-          modelId,
-          text: userText,
-          cwd: chatWorkspaceDir(input.threadId),
-          workspace: false,
-          memoryScope: GLOBAL_SCOPE,
-          approvalMode: "auto-edits",
-          ...(input.signal ? { signal: input.signal } : {}),
-          ...(input.sampling ? { sampling: input.sampling } : {}),
-        })) {
-          if (event.type === "tool-start") {
-            toolCalls.set(event.call.id, { name: event.call.name, ok: true });
-            const learnedId = skillLifecycle.learnedIdForToolCall(
-              event.call.name,
-              event.call.arguments,
-              chatWorkspaceDir(input.threadId),
-            );
-            if (learnedId) learnedSkillReads.set(event.call.id, learnedId);
-          }
-          if (event.type === "tool-end") {
-            toolCalls.set(event.call.id, { name: event.call.name, ok: !event.result.isError });
-            const learnedId = learnedSkillReads.get(event.call.id);
-            if (learnedId && !event.result.isError) usedLearnedSkills.add(learnedId);
-          }
-          if (event.type === "final") {
-            sawFinal = true;
-            finalText = messageText(event.message.content);
-          }
-          yield event;
+        const defaultModelId = resolveChannelModel();
+        const execution = await agentTurns.start({
+          source: {
+            type: "channel",
+            kind: input.channel,
+            channelUserId: input.channelUserId,
+            ...(defaultModelId ? { defaultModelId } : {}),
+          },
+          content: input.parts,
+          onMessagesCommitted,
+        });
+        if (!execution) {
+          yield { type: "error", message: "thread_deleted" };
+          return;
         }
-        if (sawFinal && !input.signal?.aborted) {
-          for (const learnedId of usedLearnedSkills) skillLifecycle.recordTelemetry(learnedId, "use");
-          const calls = [...toolCalls.values()];
-          skillLifecycle.schedule({
-            threadId: input.threadId,
-            memoryScope: GLOBAL_SCOPE,
-            model: modelId,
-            userText,
-            finalText,
-            toolCalls: calls,
-            corrected: /(?:不对|修正|应该|更正|wrong|correct)/i.test(userText),
-            recovered: calls.some((call) => !call.ok) && calls.some((call) => call.ok),
-            usedLearnedSkillIds: [...usedLearnedSkills],
-          });
-        }
+        yield* execution.events;
       })();
     },
     persistConfigs: (configs) => {
@@ -613,6 +570,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     embeddings,
     repo,
     sourceConversations,
+    agentTurns,
     fetchImpl: opts.fetch ?? fetch,
     persistProviders,
     persistMcp,
@@ -692,6 +650,7 @@ export function createCore(opts: CreateCoreOptions = {}): CoreServer {
     embeddings,
     repo,
     sourceConversations,
+    agentTurns,
     token,
     async start(startOpts = {}) {
       const host = startOpts.host ?? "127.0.0.1";

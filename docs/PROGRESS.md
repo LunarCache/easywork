@@ -7,6 +7,7 @@
 ### ✅ 已完成
 
 - **核心守护进程**（`@ew/core`）：Fastify HTTP + SSE，托管 pi-coding-agent 内核（`SessionHost`，按 threadId 串行化），无头可运行（`easywork serve`）。
+- **Core Agent Turn**：HTTP / CLI 与 Channel adapters 统一经 `AgentTurnLifecycle` 完成 Source Conversation claim、canonical trajectory、成功提交、artifacts、Learned Skill 遥测与 Skill Candidate 调度；渠道已接受的用户提交在模型失败后仍保留，平台投递失败不回滚 Agent Turn。
 - **本地推理（router 模式）**：统一 `llama`（llama.app）的 `llama serve --models-dir` **单路由进程**，按请求 `model`（= 模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰（文本 / 视觉）；嵌入模型走独立 `llama serve -m --embedding` 进程。经典每模型一进程的 `llama-server`（含 brew llama.cpp）**已完全移除**——只支持 llama.app 统一 `llama`。HF 搜索 / 断点续传下载 / GGUF 头解析。
 - **云端推理**：pi-ai 内置 provider + 自定义多协议兼容端点；provider 可持久化多组 API / Base URL 连接预设，模型可独立选择并以内联覆盖运行，从而支持聚合商内 OpenAI 与 Anthropic-only 模型并存；模型目录支持自动/手动模板绑定，运行时继承名称 / reasoning / thinking map / 输出上限，UI 选择模板时把上下文与模态复制进逐模型配置，报文 `compat` 保持协议隔离；云端流式/非流式统一经 pi-ai（含 OAuth）。
 - **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi；本地 proxy、云端 pi 与 engine fallback 的全部 SSE 写口均具备断流 error listener 和 ended/destroyed 守卫。
@@ -35,6 +36,17 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-15 — Core Agent Turn 跨入口生命周期收口
+
+- **单一深模块**：新增 `AgentTurnLifecycle`，HTTP / CLI 与 Channel adapters 只提交输入和消费 `AgentEvent`；Source Conversation claim、per-thread run、完整工具轨迹、final / artifacts 成功提交、Learned Skill 遥测与 Skill Candidate 调度不再散落在 route、daemon callback 与 `ConnectorHost`。
+- **渠道提交语义**：渠道用户消息在删除屏障内成为已接受提交，模型失败仍保留；agent-produced canonical trajectory 只在 final 成功后提交。平台投递发生在 Agent Turn 完成之后，失败只影响渠道状态，不回滚或重跑。
+- **提交后投递与 FIFO**：渠道输出在 canonical trajectory 提交成功前不会暴露给 transport；删除抢先导致提交被拒时只发 adapter 层错误。相同渠道身份的快速消息在 lifecycle seam 内预留 FIFO 顺序，保持独立 turn、不合并，也不依赖调用方消费顺序。
+- **原子提交与终态门控**：一轮 user / assistant reasoning 与 tool calls / tool results / final / artifacts 及其 FTS 投影通过同一 SQLite 事务提交；HTTP 仍实时发送过程事件，但 `final` 与 artifacts 只在提交成功后发布。提交后的 inbox invalidation、Learned Skill 遥测与 Candidate 调度均为非致命旁路。
+- **删除竞争**：`SourceConversationLifecycle` 新增渠道 identity claim；删除开始后拒绝并发入站，删除完成后的下一条消息才创建新的 Source Conversation，避免刚删除的会话被复活。
+- **adapter 变薄**：`ConnectorHost` 不再解析 thread、加载历史或落库，只负责 InboundMessage / OutboundChunk transport；`/agent/run` 只保留校验、审批 gate 与 SSE framing。
+- **决策记录**：`CONTEXT.md` 明确 Agent Turn canonical trajectory、外部提交与投递结果；ADR-0003 固化跨入口提交语义。
+- **全量验收**：Vitest **410 passed / 1 skipped**，`lint`、`typecheck`、`build` 与 `git diff --check` 全部通过；Standards / Spec 双轴终审无剩余问题。
 
 ## 2026-07-15 — Ewo 品牌形象与 Desktop 图标构建修复
 

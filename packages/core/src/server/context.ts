@@ -10,6 +10,7 @@ import type { ModelManager } from "../models/manager.js";
 import type { LocalModelSettingsStore } from "../models/local-model-settings.js";
 import type { ProviderManager } from "../providers/manager.js";
 import type { SessionHost } from "../agent/session-host.js";
+import type { AgentTurnLifecycle } from "../agent/turn-lifecycle.js";
 import type { SqliteConversationRepo } from "../store/conversation.js";
 import type { EmbeddingService } from "../memory/embedding-service.js";
 import type { SkillCandidateLifecycle } from "../skill-learning/candidate-service.js";
@@ -23,6 +24,7 @@ export interface CoreHttpContext {
   localModelSettings: LocalModelSettingsStore;
   providers: ProviderManager;
   sessionHost: SessionHost;
+  agentTurns: AgentTurnLifecycle;
   skills: SkillManager;
   skillsDir: string;
   skillLifecycle: SkillCandidateLifecycle;

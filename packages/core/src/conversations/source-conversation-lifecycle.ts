@@ -1,10 +1,11 @@
 import fs from "node:fs";
-import { workspaceScope } from "@ew/shared";
+import { workspaceScope, type ChannelKind, type Thread } from "@ew/shared";
 import { chatWorkspaceDir } from "../config/paths.js";
 import type { SessionHost } from "../agent/session-host.js";
 import type { LocalMemoryProvider } from "@ew/memory";
 import type { SkillCandidateLifecycle } from "../skill-learning/candidate-service.js";
 import type { SqliteConversationRepo } from "../store/conversation.js";
+import { ThreadRunQueue } from "../agent/thread-run-queue.js";
 
 export interface SourceConversationDeleteResult {
   factsRemoved: number;
@@ -27,8 +28,22 @@ export interface ClaimedSourceConversationRun extends SourceConversationRunClaim
   created: boolean;
 }
 
+export interface ChannelSourceConversationRunInput {
+  kind: ChannelKind;
+  channelUserId: string;
+  defaultModelId?: string;
+}
+
+export interface ClaimedChannelSourceConversationRun extends ClaimedSourceConversationRun {
+  thread: Thread;
+}
+
 export interface SourceConversationLifecycle {
   claimRun(input: SourceConversationRunInput): Promise<ClaimedSourceConversationRun | null>;
+  claimChannelRun(
+    input: ChannelSourceConversationRunInput,
+    accept: (thread: Thread) => void,
+  ): Promise<ClaimedChannelSourceConversationRun | null>;
   delete(threadId: string): Promise<SourceConversationDeleteResult>;
   discardEmpty(threadId: string, claim: SourceConversationRunClaim): Promise<void>;
   deleteProject(projectId: string): Promise<void>;
@@ -37,6 +52,8 @@ export interface SourceConversationLifecycle {
 /** Owns source-provenance cleanup behind the same barrier as the Agent runtime. */
 class DefaultSourceConversationLifecycle implements SourceConversationLifecycle {
   private readonly projectDeletions = new Map<string, Promise<void>>();
+  private readonly channelDeletions = new Set<string>();
+  private readonly channelClaims = new ThreadRunQueue();
 
   constructor(
     private readonly sessionHost: SessionHost,
@@ -70,12 +87,66 @@ class DefaultSourceConversationLifecycle implements SourceConversationLifecycle 
     return claim ? { ...claim, created } : null;
   }
 
+  async claimChannelRun(
+    input: ChannelSourceConversationRunInput,
+    accept: (thread: Thread) => void,
+  ): Promise<ClaimedChannelSourceConversationRun | null> {
+    const key = channelKey(input.kind, input.channelUserId);
+    if (this.channelDeletions.has(key)) return null;
+    const release = await this.channelClaims.acquire(key);
+    try {
+      if (this.channelDeletions.has(key)) return null;
+      const existing = this.repo.findThreadForChannel(input.kind, input.channelUserId);
+      const threadId = existing?.id ?? crypto.randomUUID();
+      let thread = existing;
+      let created = false;
+      const claim = await this.sessionHost.claimThreadRun(threadId, () => {
+        if (this.channelDeletions.has(key)) return false;
+        if (!thread) {
+          const current = this.repo.findThreadForChannel(input.kind, input.channelUserId);
+          if (current) {
+            thread = current;
+            return false;
+          }
+          const runWorkspaceDir = chatWorkspaceDir(threadId);
+          try {
+            fs.mkdirSync(runWorkspaceDir, { recursive: true });
+          } catch {
+            // The first workspace tool reports an unusable cwd.
+          }
+          thread = this.repo.createThread({
+            id: threadId,
+            title: `${input.kind}:${input.channelUserId}`,
+            channel: { kind: input.kind, channelId: input.channelUserId },
+            ...(input.defaultModelId ? { modelId: input.defaultModelId } : {}),
+          });
+          this.repo.bindThreadToChannel(input.kind, input.channelUserId, threadId);
+          created = true;
+        }
+        accept(thread);
+        return true;
+      });
+      return claim && thread ? { ...claim, created, thread } : null;
+    } finally {
+      release();
+    }
+  }
+
   async delete(threadId: string): Promise<SourceConversationDeleteResult> {
-    const projectId = this.repo.getThread(threadId)?.projectId;
+    const source = this.repo.getThread(threadId);
+    const projectId = source?.projectId;
+    const key = source?.channel ? channelKey(source.channel.kind, source.channel.channelId) : undefined;
+    if (key) this.channelDeletions.add(key);
+    const releaseChannel = key ? await this.channelClaims.acquire(key) : undefined;
     let factsRemoved = 0;
-    await this.sessionHost.deleteThread(threadId, async () => {
-      factsRemoved = await this.removeOwnedState(threadId);
-    });
+    try {
+      await this.sessionHost.deleteThread(threadId, async () => {
+        factsRemoved = await this.removeOwnedState(threadId);
+      });
+    } finally {
+      releaseChannel?.();
+      if (key) this.channelDeletions.delete(key);
+    }
 
     if (!projectId) this.removeScratchArtifacts(threadId);
     return { factsRemoved };
@@ -125,6 +196,10 @@ class DefaultSourceConversationLifecycle implements SourceConversationLifecycle 
       // Scratch artifacts are derived convenience files; ownership cleanup already succeeded.
     }
   }
+}
+
+function channelKey(kind: ChannelKind, channelUserId: string): string {
+  return `${kind}:${channelUserId}`;
 }
 
 export function createSourceConversationLifecycle(

@@ -1,31 +1,14 @@
-import { randomUUID } from "node:crypto";
 import {
-  messageText,
   type AgentEvent,
-  type AgentRunInput,
   type ChannelConnector,
   type ChannelTarget,
-  type ChatMessage,
-  type ConversationRepo,
   type InboundMessage,
   type OutboundChunk,
-  type StoredMessage,
 } from "@ew/shared";
 
 export interface ConnectorHostDeps {
-  repo: ConversationRepo & { nextSeq?(threadId: string): number };
-  /** 运行 agent，返回 AgentEvent 流。 */
-  run(input: AgentRunInput): AsyncIterable<AgentEvent>;
-  /** 渠道会话默认模型。 */
-  defaultModel: string;
-  /** 是否持久化消息（默认 true）。 */
-  persist?: boolean;
-  /** 消息落库后通知宿主刷新 read model（例如桌面收件箱）。 */
-  onMessagePersisted?(info: {
-    threadId: string;
-    channel: { kind: InboundMessage["channel"]; channelId: string };
-    role: "user" | "assistant";
-  }): void;
+  /** 把原始入站提交交给宿主的 Agent Turn interface，返回已完成生命周期管理的事件流。 */
+  run(input: InboundMessage): AsyncIterable<AgentEvent>;
 }
 
 export interface ReplyAdapter {
@@ -34,8 +17,8 @@ export interface ReplyAdapter {
 }
 
 /**
- * 连接器宿主：把任意 ChannelConnector 接到"同一个大脑"。
- * inbound → resolveThreadForChannel → 取历史 → runAgent → 把文本批量回复 → 持久化。
+ * 连接器宿主：把任意 ChannelConnector 接到同一个 Agent Turn interface。
+ * thread 映射、持久化与学习均由宿主拥有；这里仅做 inbound / outbound transport adapter。
  */
 export class ConnectorHost {
   private readonly connectors: ChannelConnector[] = [];
@@ -55,47 +38,13 @@ export class ConnectorHost {
     await Promise.all(this.connectors.map((c) => c.stop()));
   }
 
-  private seq(threadId: string): number {
-    return this.deps.repo.nextSeq ? this.deps.repo.nextSeq(threadId) : 0;
-  }
-
   async handleInbound(connector: ReplyAdapter, msg: InboundMessage): Promise<void> {
-    const persist = this.deps.persist !== false;
-    const thread = this.deps.repo.resolveThreadForChannel(msg.channel, msg.channelUserId, {
-      modelId: this.deps.defaultModel,
-    });
-    const model = thread.modelId || this.deps.defaultModel;
-
-    // 取历史并拼上本轮用户消息。
-    const prior = this.deps.repo.history(thread.id);
-    const history: ChatMessage[] = prior.map((m) => ({ role: m.role, content: m.parts }));
-    history.push({ role: "user", content: msg.parts });
-
-    if (persist) {
-      const userMsg: StoredMessage = {
-        id: randomUUID(),
-        threadId: thread.id,
-        role: "user",
-        seq: this.seq(thread.id),
-        parts: msg.parts,
-        createdAt: new Date().toISOString(),
-      };
-      this.deps.repo.appendMessage(userMsg);
-      this.deps.onMessagePersisted?.({
-        threadId: thread.id,
-        channel: thread.channel ?? { kind: msg.channel, channelId: msg.channelUserId },
-        role: "user",
-      });
-    }
-
-    // 运行 agent，把事件转成出站分块。
-    let finalText = "";
+    // 消费完整 Agent Turn 后，reply adapter 才执行外部投递；投递失败不回滚已完成的 turn。
     const deps = this.deps;
     async function* toChunks(): AsyncIterable<OutboundChunk> {
-      for await (const ev of deps.run({ threadId: thread.id, model, history })) {
+      for await (const ev of deps.run(msg)) {
         if (ev.type === "text") yield { text: ev.text };
         else if (ev.type === "final") {
-          finalText = messageText(ev.message.content);
           yield { final: true };
         } else if (ev.type === "error") {
           yield { text: `\n[错误] ${ev.message}`, final: true };
@@ -111,22 +60,5 @@ export class ConnectorHost {
       },
       toChunks(),
     );
-
-    if (persist && finalText) {
-      const asstMsg: StoredMessage = {
-        id: randomUUID(),
-        threadId: thread.id,
-        role: "assistant",
-        seq: this.seq(thread.id),
-        parts: [{ type: "text", text: finalText }],
-        createdAt: new Date().toISOString(),
-      };
-      this.deps.repo.appendMessage(asstMsg);
-      this.deps.onMessagePersisted?.({
-        threadId: thread.id,
-        channel: thread.channel ?? { kind: msg.channel, channelId: msg.channelUserId },
-        role: "assistant",
-      });
-    }
   }
 }

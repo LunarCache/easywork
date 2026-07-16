@@ -6,7 +6,7 @@
 
 ## 架构速览
 
-无头 Node **核心由 `apps/daemon` 组装 `@ew/core`，拥有全部 Agent "大脑"**：托管 pi 内核（`SessionHost`）+ 统一 `llama serve` router 进程管理 + 云端 provider + 工具/Skills/MCP + 记忆 + SQLite。对外提供 **Fastify HTTP + SSE + `/v1` 网关**。Tauri webview 与 CLI 是它的瘦客户端；IM adapter/gateway/host 运行在 core 进程内，直接调用同一个 `SessionHost`。`/v1` 客户端只复用 daemon 的模型/provider runtime，不经过 AgentSession、记忆或工具。
+无头 Node **核心由 `apps/daemon` 组装 `@ew/core`，拥有全部 Agent "大脑"**：Core Agent Turn 生命周期 + 托管 pi 内核（`SessionHost`）+ 统一 `llama serve` router 进程管理 + 云端 provider + 工具/Skills/MCP + 记忆 + SQLite。对外提供 **Fastify HTTP + SSE + `/v1` 网关**。Tauri webview 与 CLI 是它的瘦客户端；IM adapter/gateway/host 运行在 core 进程内，与 HTTP 入口一起调用同一个 Core Agent Turn，再由它进入 `SessionHost`。`/v1` 客户端只复用 daemon 的模型/provider runtime，不经过 AgentSession、记忆或工具。
 
 - `core` 是**库**，由 `apps/daemon`（CLI `easywork serve`）直接依赖并组装；`apps/desktop` 不直接依赖 `@ew/core`，而是打包/启动 daemon 单文件 sidecar，webview 再通过 HTTP/SSE 连接它。
 - **包**：`shared`(zod 契约，所有包依赖它) · `core`(daemon) · `providers`(llama/openai 引擎) · `memory` · `tools` · `skills` · `mcp` · `im-connectors` · `sdk`；`apps/{desktop,ui,daemon}`。
@@ -15,6 +15,7 @@
 ## 关键文件（改宿主层从这里找）
 
 - `packages/core/src/agent/session-host.ts` — pi `createAgentSession` 封装；按 threadId 复用 `AgentSession` + **串行化 run**；`mapSessionEvent`(pi→SSE)；`resolveModel` + 本地模型默认采样注入；SessionManager 落盘 resume；`lastUsage`（上下文用量）。
+- `packages/core/src/agent/turn-lifecycle.ts` — core 侧 **Agent Turn** 深模块：统一 HTTP / Channel 的 Source Conversation claim、canonical trajectory、成功提交、artifacts、Learned Skill 遥测与 Skill Candidate 调度；渠道已接受的用户提交可在失败后保留，外部投递结果不回滚 Agent Turn。
 - `apps/ui/src/lib/agent-turn.ts` + `hooks/useAgentTurn.ts` — 客户端 **Agent Turn** 深模块：统一发送 / 重试 / 停止 / 审批 / SSE 消费 / usage / artifacts / final；Chat / Workspace 只提供请求与刷新 policy。
 - `apps/ui/src/lib/workbench-view-session.ts` + `hooks/useWorkbenchViewSession.ts` — **Workbench View Session** 深模块：统一工作台零视图初态、视图打开 / 激活 / 关闭回退与文件、URL 导航；`SideDock` 只负责布局、空态动作和渲染。
 - `apps/ui/src/lib/native-browser-runtime.ts` + `apps/desktop/src-tauri/src/browser_surface.rs` — Desktop Browser surface adapter：远程 http(s) 页面由无 IPC 权限的 Tauri 子 WebView 承载并同步 SideDock 边界；关闭 / dispose 仍由 Workbench View Session 统一拥有，Web 运行时仍使用 sandbox iframe，HTML 工件仍用受控 `srcDoc`。
@@ -29,7 +30,7 @@
 - `packages/core/src/channels/secret-store.ts` — 渠道密钥安全存储 seam：macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI；旧 SQLite 明文配置由 `app.ts` 启动时迁移，API 只返回 `secretKeys` 元数据。
 - `packages/core/src/engine/{router-server-manager,resolve-llama,net,local-backend}.ts` — `RouterServerManager`（起 1 个 `llama serve --models-dir` router，按 model 路由 + 按需加载 + `--models-max` LRU，实现 `LocalBackend`）+ 统一 `llama` 运行时解析（只定位 llama.app 的 `llama` 可执行文件，不再接受经典 `llama-server`）。模型 id = 子目录名（routerId）。嵌入模型不走 router（独立 `LlamaServeEngine`，启动 `llama serve -m <gguf> --embedding`）。
 - `packages/core/src/openai-compat/router.ts` + `pi-adapt.ts` — `/v1` 网关与 pi↔OpenAI/Anthropic 边界翻译。
-- `packages/im-connectors/src/{adapter,registry,gateway,host,telegram,feishu,wechat}.ts` — Channel Gateway：adapter seam + 内置 adapter registry + 连接器配置/状态/allowlist/webhook/target 透传；`ConnectorHost` 把外部消息接到同一个 `SessionHost.run`；Telegram long-poll 支持 abort 停止；Feishu/Lark 默认走官方 SDK WebSocket 长连接（无需公网 webhook），高级模式保留 webhook token/signature、加密回调解密与文本收发；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；webhook 入口在非 webhook transport 或缺少验证 secret 时拒绝。
+- `packages/im-connectors/src/{adapter,registry,gateway,host,telegram,feishu,wechat}.ts` — Channel Gateway：adapter seam + 内置 adapter registry + 连接器配置/状态/allowlist/webhook/target 透传；`ConnectorHost` 只把原始 `InboundMessage` 交给 core Agent Turn 并在其事件流完成后投递回复，不拥有 thread 映射、历史或持久化；Telegram long-poll 支持 abort 停止；Feishu/Lark 默认走官方 SDK WebSocket 长连接（无需公网 webhook），高级模式保留 webhook token/signature、加密回调解密与文本收发；WeChat 对齐 Hermes 的腾讯 iLink Bot API 扫码登录 + long-poll，保存 sync/context token；webhook 入口在非 webhook transport 或缺少验证 secret 时拒绝。
 - `apps/ui/src/settings/SettingsHost.tsx` — 设置页 page-host module：section registry、上次分区持久化、`ew:open-settings` 定向打开、visited keep-alive 与整页布局契约。`apps/ui/src/pages/Settings.tsx` 只是兼容 re-export。
 - `apps/daemon/src/cli.ts` + `cli/*` — `easywork` CLI（既是 `serve` daemon 入口，也是终端瘦客户端 `repl`/`run`/`models`/`thread`/`mem`/`status`/`stop`）。`cli/daemon.ts` 自启/发现本机 daemon；`cli/agent.ts` 渲染 SSE 事件流（助手文本→stdout、装饰→stderr）。复用 `@ew/sdk` 打 HTTP，**后端零改动**（唯一例外：`models rm` 的 `POST /models/local/delete` + `ModelManager.deleteLocal`，含受管目录硬校验）。
 - `packages/shared/src/*` — 核心契约（见下）。
@@ -41,8 +42,8 @@
 - `Tool` / `ToolProvider`：内置工具、MCP 工具统一成 `Tool`，再经 `toPiTool` 桥成 pi customTool（含 `ApprovalGate`）。**自研 `ToolRegistry`/agent loop 已删除**，agent 内核 = pi `AgentSession`。
 - `MemoryProvider`：`recall/write/edit/list/delete/deleteBySession/deleteByScope/observe`（均带 `scope`）。本地 Core Memory = 全局 User Profile / Agent Notes（markdown 投影）+ 工作区 conventions / decisions / pitfalls（DB-only）+ source-owned derived facts；sqlite-vec 语义 ⊕ 词法混合召回。外部 provider 只能通过 `CreateCoreOptions.deepMemoryProvider` 由宿主注入，再由 `AdditiveMemoryProvider` 追加受限、不可信召回，永不接管写入；Desktop / CLI 当前没有配置入口，`Mem0MemoryProvider` 仍是非用户态适配骨架。
 - `SkillCandidate` / `LearnedSkill`：foreground Learn、restricted background review、HTTP routes、Agent tools 与旧层迁移都只通过 `SkillCandidateLifecycle`；批准前验证 package/路径/symlink/工具/secret/injection/content hash，批准才原子写入全局或工作区 Skill source 并失效会话。learned Skills 可记录反馈、固定、快照、可恢复归档和回滚。
-- `AgentEvent`（SSE 对外）：`text/reasoning/tool-start/tool-end/tool-progress/approval-request/memory-recall/usage/retry/compaction/artifacts/final/error`。`mapSessionEvent` 把 pi 事件映射到它；`artifacts` 由 `SessionHost.run` 在普通对话的 thread 串行边界内生成，并在成功持久化后由 `/agent/run` 发出。
-- `ChannelAdapter` / `ChannelGateway` / `ChannelOperations`：平台 adapter 实现 `start/stop/send/handleWebhook?`，gateway 负责配置/状态/allowlist/webhook/出站 target；core 侧只通过 `ChannelOperations` 管理 gateway/host 生命周期、扫码 setup session、inbox read model 与失效事件。`ConnectorHost` 经 `resolveThreadForChannel(kind, channelUserId)` 映射渠道身份到 thread。渠道 secret 由 `ChannelSecretStore` 保存，SQLite 的 `im.connectors` 只保留非敏感配置；读取 API 的 `secrets` 恒为空，并以独立 read view 返回 `secretKeys`，空白编辑保留已存密钥，删除连接器同步删密钥。管理 API 走 daemon Bearer；外部 webhook 入口不要求内部 Bearer，需由平台 adapter 校验平台签名/secret；core 只为 webhook 捕获 raw body 供签名计算，并在读取前/读取中执行 32MiB 上限。Feishu/Lark 另有 `/im/feishu/register` 管理面扫码注册 helper，成功后自动保存 websocket connector；WeChat 另有 `/im/wechat/register`，对齐 Hermes 的腾讯 iLink QR 注册并保存 `accountId/token/baseUrl`；取消或 core stop 会 abort 未完成扫码会话。`/inbox/threads` 是基于现有 channel thread/message history 的只读 UI 聚合视图，不是第二套消息真相源；`/inbox/events` 只发 ready/changed 失效事件，前端收到后重新读取 read model，不做 4 秒轮询。旧 `ChannelConnector` 仍保留兼容测试和 Telegram long-poll 基础实现。
+- `AgentEvent`（SSE 对外）：`text/reasoning/tool-start/tool-end/tool-progress/approval-request/memory-recall/usage/retry/compaction/artifacts/final/error`。`mapSessionEvent` 把 pi 事件映射到它；`artifacts` 由 `SessionHost.run` 在 thread 串行边界内生成，由 Core Agent Turn 缓冲到 canonical trajectory 成功提交后再向 HTTP / Channel adapter 发布。
+- `ChannelAdapter` / `ChannelGateway` / `ChannelOperations`：平台 adapter 实现 `start/stop/send/handleWebhook?`，gateway 负责配置/状态/allowlist/webhook/出站 target；core 侧只通过 `ChannelOperations` 管理 gateway/host 生命周期、扫码 setup session、inbox read model 与失效事件。渠道 identity → thread、已接受提交与 Agent 结果持久化均由 Core Agent Turn + `SourceConversationLifecycle` 拥有。渠道 secret 由 `ChannelSecretStore` 保存，SQLite 的 `im.connectors` 只保留非敏感配置；读取 API 的 `secrets` 恒为空，并以独立 read view 返回 `secretKeys`，空白编辑保留已存密钥，删除连接器同步删密钥。管理 API 走 daemon Bearer；外部 webhook 入口不要求内部 Bearer，需由平台 adapter 校验平台签名/secret；core 只为 webhook 捕获 raw body 供签名计算，并在读取前/读取中执行 32MiB 上限。Feishu/Lark 另有 `/im/feishu/register` 管理面扫码注册 helper，成功后自动保存 websocket connector；WeChat 另有 `/im/wechat/register`，对齐 Hermes 的腾讯 iLink QR 注册并保存 `accountId/token/baseUrl`；取消或 core stop 会 abort 未完成扫码会话。`/inbox/threads` 是基于现有 channel thread/message history 的只读 UI 聚合视图，不是第二套消息真相源；`/inbox/events` 只发 ready/changed 失效事件，前端收到后重新读取 read model，不做 4 秒轮询。旧 `ChannelConnector` 仍保留兼容测试和 Telegram long-poll 基础实现。
 
 ## 关键正确性约束（务必遵守）
 
@@ -62,11 +63,12 @@
 12. **Workbench 与 Terminal 生命周期分离**：SideDock 不持有工作台视图打开 / 关闭 / 导航规则，也不承载 terminal；Desktop PTY 只能由 `TerminalPanelSession` 恢复 / 创建 / 激活 / 关闭，并在对话区底部独立渲染。普通文件 / 浏览器 / diff 不跨应用重启持久化，只有 Desktop runtime 仍存在的 terminal 可重新附着。
 13. **Source Conversation 删除屏障**：thread / Project 删除、空 shell 回滚与 run claim 必须经 `SourceConversationLifecycle`；所有 source-owned 清理同序完成，scratch 失败非致命，用户 workspace 永不删除。
 14. **Skill Candidate 生命周期**：routes / tools / coordinator / migration 不得直接访问 candidate store；后台学习只生成 pending Candidate，只有显式批准可激活 Skill。
+15. **Agent Turn 单一 core 生命周期**：HTTP / Channel adapters 不得自行 claim、持久化工具轨迹、提交 artifacts 或调度 Skill Candidate；这些只能经 `AgentTurnLifecycle`。渠道用户提交在通过 Source Conversation 删除屏障后立即持久化，失败仍保留；agent-produced canonical trajectory 只在 final 成功后提交。外部渠道投递是提交后的独立结果，失败不得回滚或重跑 Agent Turn。
 
 ## 约定
 
 - **统一 npm**（环境无 pnpm）。
-- **测试 400 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 48 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
+- **测试 410 通过**（vitest；另 1 个真机 e2e 默认 skip）。另有 **Playwright UI e2e 48 条** 作为 CI 主跑层（真 daemon + 真 Vite + 隔离 data dir），以及 Windows NSIS 构建 + SEA `/health` 冒烟作为发布关键路径。`npm run lint` 当前 0 warning / 0 error。改 `@ew/core` / `@ew/sdk` 源码后，依赖其 `dist` 的下游（daemon 打包内联 dist）需 `npm run build` 才生效。
 - **已移除 node-llama-cpp + 经典 `llama-server`**：本地推理走外部统一 `llama`（llama.app）的 router 模式（`resolveLlamaBin` 只解析 `llama`；嵌入子进程也跑 `llama serve`）。**勿重新引入** node-llama-cpp，也**勿回退每模型一进程的经典 `llama-server`**（含 brew llama.cpp，已完全移除）。
 - **打包**：daemon → Node SEA **单文件二进制**（`scripts/build-daemon-sea.mjs`，运行免 Node；必须用参数化子进程调用，兼容 Windows 路径）；Tauri 的 `beforeBuildCommand` 会无条件重建 SEA，禁止把新 UI 与旧 sidecar 打进同一应用；Desktop 图标以 `apps/desktop/src-tauri/icons/icon.svg` 为真相源并由 Tauri CLI 生成平台资源，`build.rs` 必须持续跟踪 `icons/`，macOS 图标验证要检查 `.app/Contents/Resources/icon.icns` 而不是只重启裸 dev 二进制；llama 运行时缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime` + `install.sh` / `install.ps1`）；Tauri WebView 启用显式 CSP；`v*` tag 先经 `release:check-version` 校验 npm/Tauri/Cargo 版本一致，再由 GitHub Actions 出 macOS dmg 与 Windows x64 NSIS/MSI。两端发布前必须跑 `smoke:daemon-sea`，Windows 还须跑 `release:check-artifacts`。
 - **改 Tauri Rust（`apps/desktop/src-tauri`）**：本环境有 `cargo`，可 `cargo check` 验证。
@@ -76,7 +78,7 @@
 ```bash
 npm install            # 装依赖
 npm run build          # turbo 构建全部包（含 ui/daemon dist）
-npm test               # vitest（400 通过；另 1 个真机 e2e 默认 skip）
+npm test               # vitest（410 通过；另 1 个真机 e2e 默认 skip）
 npm run test:coverage  # vitest coverage（line / branch / function / statement）
 npm run e2e:install    # 安装 Playwright Chromium（首次一次）
 npm run test:e2e       # Playwright UI e2e（隔离 data dir + 真 daemon + 真 Vite，CI 主跑这层；当前 48 条）

@@ -48,6 +48,13 @@ export {
 
 // Agent（pi-coding-agent 托管内核）
 export { SessionHost, type SessionHostDeps, type EwAgentRunInput } from "./agent/session-host.js";
+export {
+  AgentTurnLifecycle,
+  type AgentTurnExecution,
+  type AgentTurnLifecycleInput,
+  type ChannelAgentTurnSource,
+  type ThreadAgentTurnSource,
+} from "./agent/turn-lifecycle.js";
 
 // 会话存储 + 记忆 embedding
 export { SqliteConversationRepo } from "./store/conversation.js";
@@ -57,5 +64,7 @@ export type {
   SourceConversationRunClaim,
   SourceConversationRunInput,
   ClaimedSourceConversationRun,
+  ChannelSourceConversationRunInput,
+  ClaimedChannelSourceConversationRun,
 } from "./conversations/source-conversation-lifecycle.js";
 export { EmbeddingService, type EmbeddingServiceDeps } from "./memory/embedding-service.js";

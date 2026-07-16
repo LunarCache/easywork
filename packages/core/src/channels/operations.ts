@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type {
   AgentEvent,
-  AgentRunInput,
   ChannelConfig,
   ChannelConnectorView,
   ChannelStatus,
   ConversationRepo,
   InboxEvent,
+  InboundMessage,
   StoredMessage,
   Thread,
 } from "@ew/shared";
@@ -89,8 +89,10 @@ export interface ChannelOperationsDeps {
   registry: ChannelAdapterRegistry;
   configs: ChannelConfig[];
   repo: ConversationRepo & { nextSeq?(threadId: string): number };
-  defaultModel?: string;
-  run(input: AgentRunInput): AsyncIterable<AgentEvent>;
+  run(
+    input: InboundMessage,
+    onMessagesCommitted: (phase: "submission" | "result", threadId: string) => void,
+  ): AsyncIterable<AgentEvent>;
   persistConfigs(configs: ChannelConfig[]): void;
   secretStore: ChannelSecretStore;
   feishuRegister: typeof registerFeishuApp;
@@ -106,16 +108,13 @@ export class ChannelOperations {
 
   constructor(private readonly deps: ChannelOperationsDeps) {
     this.host = new ConnectorHost({
-      repo: deps.repo,
-      defaultModel: deps.defaultModel ?? "",
-      run: deps.run,
-      onMessagePersisted: (info) => {
+      run: (message) => deps.run(message, (_phase, threadId) => {
         this.emitInboxChanged({
           reason: "message",
-          threadId: info.threadId,
-          channel: info.channel,
+          threadId,
+          channel: { kind: message.channel, channelId: message.channelUserId },
         });
-      },
+      }),
     });
     this.gateway = new ChannelGateway({
       registry: deps.registry,

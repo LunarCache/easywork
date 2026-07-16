@@ -320,6 +320,23 @@ export class SqliteConversationRepo implements ConversationRepo {
     }
   }
 
+  /** Canonical Agent trajectory commit: messages and their FTS projections succeed or roll back together. */
+  appendMessages(messages: StoredMessage[]): void {
+    if (messages.length === 0) return;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const message of messages) this.appendMessage(message);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // Preserve the original insertion error.
+      }
+      throw error;
+    }
+  }
+
   searchMessages(query: string, opts?: { limit?: number; threadId?: string }): MessageSearchHit[] {
     const q = query.trim();
     if (!q) return [];
@@ -400,6 +417,19 @@ export class SqliteConversationRepo implements ConversationRepo {
     channelUserId: string,
     opts?: { projectId?: string; modelId?: string },
   ): Thread {
+    const existing = this.findThreadForChannel(kind, channelUserId);
+    if (existing) return existing;
+    const thread = this.createThread({
+      title: `${kind}:${channelUserId}`,
+      channel: { kind, channelId: channelUserId },
+      ...(opts?.projectId ? { projectId: opts.projectId } : {}),
+      ...(opts?.modelId ? { modelId: opts.modelId } : {}),
+    });
+    this.bindThreadToChannel(kind, channelUserId, thread.id);
+    return thread;
+  }
+
+  findThreadForChannel(kind: ChannelKind, channelUserId: string): Thread | null {
     const map = this.db
       .prepare(`SELECT thread_id FROM channel_sessions WHERE channel_kind = ? AND channel_user_id = ?`)
       .get(kind, channelUserId) as unknown as { thread_id: string } | undefined;
@@ -407,16 +437,13 @@ export class SqliteConversationRepo implements ConversationRepo {
       const t = this.getThread(map.thread_id);
       if (t) return t;
     }
-    const thread = this.createThread({
-      title: `${kind}:${channelUserId}`,
-      channel: { kind, channelId: channelUserId },
-      ...(opts?.projectId ? { projectId: opts.projectId } : {}),
-      ...(opts?.modelId ? { modelId: opts.modelId } : {}),
-    });
+    return null;
+  }
+
+  bindThreadToChannel(kind: ChannelKind, channelUserId: string, threadId: string): void {
     this.db
       .prepare(`INSERT OR REPLACE INTO channel_sessions (channel_kind, channel_user_id, thread_id) VALUES (?, ?, ?)`)
-      .run(kind, channelUserId, thread.id);
-    return thread;
+      .run(kind, channelUserId, threadId);
   }
 
   deleteThread(id: string): void {

@@ -4,19 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  messageText,
   type AgentEvent,
-  type AgentRunInput,
-  type ChannelKind,
   type ChannelOutbound,
   type ChannelConnector,
-  type ConversationRepo,
   type InboundMessage,
-  type MessageSearchHit,
   type OutboundChunk,
-  type Project,
-  type StoredMessage,
-  type Thread,
 } from "@ew/shared";
 import { ConnectorHost } from "../src/host.js";
 import { ChannelGateway } from "../src/gateway.js";
@@ -63,70 +55,6 @@ function textFromPart(part: InboundMessage["parts"][number] | undefined): string
   return part?.type === "text" ? part.text : undefined;
 }
 
-/** 内存版会话仓库（测试用）。 */
-class FakeRepo implements ConversationRepo {
-  private threads = new Map<string, Thread>();
-  private msgs = new Map<string, StoredMessage[]>();
-  private channelMap = new Map<string, string>();
-  private projects = new Map<string, Project>();
-  private n = 0;
-  createProject(p: Partial<Project> & { name: string }): Project {
-    const id = p.id ?? `p${++this.n}`;
-    const proj: Project = { id, name: p.name, createdAt: new Date().toISOString() };
-    this.projects.set(id, proj);
-    return proj;
-  }
-  getProject(id: string): Project | null {
-    return this.projects.get(id) ?? null;
-  }
-  listProjects(): Project[] {
-    return [...this.projects.values()];
-  }
-  updateProject(id: string, patch: Partial<Project>): Project {
-    const cur = this.projects.get(id)!;
-    const next = { ...cur, ...patch };
-    this.projects.set(id, next);
-    return next;
-  }
-  deleteProject(id: string): void {
-    this.projects.delete(id);
-  }
-  searchMessages(): MessageSearchHit[] {
-    return [];
-  }
-  createThread(t: Partial<Thread>): Thread {
-    const id = t.id ?? `t${++this.n}`;
-    const now = new Date().toISOString();
-    const thread: Thread = { id, title: t.title ?? "", modelId: t.modelId ?? "", createdAt: now, updatedAt: now, ...(t.channel ? { channel: t.channel } : {}) };
-    this.threads.set(id, thread);
-    this.msgs.set(id, []);
-    return thread;
-  }
-  getThread(id: string): Thread | null {
-    return this.threads.get(id) ?? null;
-  }
-  listThreads(): Thread[] {
-    return [...this.threads.values()];
-  }
-  nextSeq(threadId: string): number {
-    return (this.msgs.get(threadId)?.length ?? 0);
-  }
-  appendMessage(m: StoredMessage): void {
-    this.msgs.get(m.threadId)?.push(m);
-  }
-  history(threadId: string): StoredMessage[] {
-    return this.msgs.get(threadId) ?? [];
-  }
-  resolveThreadForChannel(kind: ChannelKind, userId: string): Thread {
-    const key = `${kind}:${userId}`;
-    const existing = this.channelMap.get(key);
-    if (existing) return this.threads.get(existing)!;
-    const t = this.createThread({ channel: { kind, channelId: userId } });
-    this.channelMap.set(key, t.id);
-    return t;
-  }
-}
-
 /** 假连接器：记录回复，可手动触发入站。 */
 class FakeConnector implements ChannelConnector {
   readonly kind = "inapp" as const;
@@ -148,21 +76,17 @@ class FakeConnector implements ChannelConnector {
 }
 
 describe("ConnectorHost", () => {
-  it("inbound → 路由到同一大脑 → 回复 → 持久化", async () => {
-    const repo = new FakeRepo();
-    const persisted: { threadId: string; role: "user" | "assistant" }[] = [];
-    const run = async function* (input: AgentRunInput): AsyncIterable<AgentEvent> {
-      const last = input.history[input.history.length - 1];
-      const text = `echo: ${last ? messageText(last.content) : ""}`;
+  it("passes the inbound submission to the Agent Turn interface before delivering its result", async () => {
+    const received: InboundMessage[] = [];
+    const order: string[] = [];
+    const run = async function* (input: InboundMessage): AsyncIterable<AgentEvent> {
+      received.push(input);
+      const text = `echo: ${input.parts[0]?.type === "text" ? input.parts[0].text : ""}`;
       yield { type: "text", text };
       yield { type: "final", message: { role: "assistant", content: text } };
+      order.push("turn-complete");
     };
-    const host = new ConnectorHost({
-      repo,
-      run,
-      defaultModel: "m",
-      onMessagePersisted: (info) => persisted.push({ threadId: info.threadId, role: info.role }),
-    });
+    const host = new ConnectorHost({ run });
     const conn = new FakeConnector();
     host.attach(conn);
 
@@ -174,14 +98,9 @@ describe("ConnectorHost", () => {
     });
 
     expect(conn.replies).toEqual(["echo: 你好"]);
-    // 同一渠道用户映射到同一 thread，且消息已持久化（user + assistant）。
-    const threads = repo.listThreads();
-    expect(threads).toHaveLength(1);
-    expect(repo.history(threads[0]!.id).map((m) => m.role)).toEqual(["user", "assistant"]);
-    expect(persisted).toEqual([
-      { threadId: threads[0]!.id, role: "user" },
-      { threadId: threads[0]!.id, role: "assistant" },
-    ]);
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({ channel: "inapp", channelUserId: "u1" });
+    expect(order).toEqual(["turn-complete"]);
   });
 });
 

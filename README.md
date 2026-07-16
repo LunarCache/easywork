@@ -25,7 +25,7 @@ curl -LsSf https://raw.githubusercontent.com/LunarCache/easywork/main/install.sh
 
 ## 为什么是 EasyWork
 
-EasyWork 不是一个只包了聊天框的客户端。它的核心是一个本地守护进程：同一个 daemon 托管 agent 会话、模型路由、工具审批、记忆、外部渠道连接器和 OpenAI/Anthropic 兼容网关。桌面和命令行通过 HTTP/SSE 作为瘦客户端接入；渠道 adapter/host 运行在 core 进程内，直接把外部消息交给同一个 `SessionHost`。`/v1` 客户端则走兼容网关，仅复用 daemon 的模型/provider runtime，不进入 `AgentSession`，也不附带记忆和工具。
+EasyWork 不是一个只包了聊天框的客户端。它的核心是一个本地守护进程：同一个 daemon 托管 agent 会话、模型路由、工具审批、记忆、外部渠道连接器和 OpenAI/Anthropic 兼容网关。桌面和命令行通过 HTTP/SSE 作为瘦客户端接入；渠道 adapter/host 运行在 core 进程内，把外部消息交给同一个 Core Agent Turn 生命周期，再由它调用 `SessionHost`。`/v1` 客户端则走兼容网关，仅复用 daemon 的模型/provider runtime，不进入 `AgentSession`，也不附带记忆和工具。
 
 | 能力 | 说明 |
 |---|---|
@@ -65,6 +65,7 @@ flowchart TB
 
     subgraph AgentPath["Agent path"]
       direction LR
+      AgentTurnCore["Core Agent Turn<br/>claim · canonical trajectory · commit"]
       SessionHost["SessionHost<br/>pi AgentSession<br/>per-thread serialization"]
       Extensions["EasyWork extensions<br/>permissions · tool bridge · memory hooks"]
       Capabilities["Built-in Tools · Skills · MCP"]
@@ -79,13 +80,15 @@ flowchart TB
     Host --- AgentAPI
     Host --- ChannelOps
     Host --- Compat
-    AgentAPI --> SessionHost
-    ChannelOps --> SessionHost
+    AgentAPI --> AgentTurnCore
+    ChannelOps --> AgentTurnCore
+    AgentTurnCore --> SessionHost
     SessionHost --> Extensions
     Extensions --> Capabilities
     Extensions --> Memory
     SessionHost --> ModelConfig
-    AgentAPI --> Lifecycles
+    AgentTurnCore --> Lifecycles
+    AgentTurnCore --> State
     Lifecycles --> State
     SessionHost --> State
     ChannelOps --> State
@@ -114,7 +117,7 @@ flowchart TB
   Memory --> Embedding
 ```
 
-核心原则很简单：**daemon 拥有全部状态和能力，所有界面都是薄壳**。桌面聊天、工作区 agent、外部渠道消息和命令行自动化复用同一套 `SessionHost`、权限、记忆和模型配置；`/v1` 兼容网关只复用同一 daemon 内的模型与 provider runtime。客户端的 Agent Turn、Workbench View Session 与 Terminal Panel Session，core 的 Source Conversation、Skill Candidate 和 Provider Model Configuration 各自通过一个深模块集中生命周期与正确性规则，页面和 HTTP 路由只提供策略、展示或传输适配。
+核心原则很简单：**daemon 拥有全部状态和能力，所有界面都是薄壳**。桌面聊天、工作区 agent、外部渠道消息和命令行自动化先复用同一个 Core Agent Turn，再进入 `SessionHost`、权限、记忆和模型配置；`/v1` 兼容网关只复用同一 daemon 内的模型与 provider runtime。客户端 Agent Turn 负责交互状态，Core Agent Turn 负责 Source Conversation claim、canonical trajectory、成功提交、artifacts 与 Skill Candidate 调度；Workbench View Session、Terminal Panel Session、Skill Candidate 和 Provider Model Configuration 也各自通过深模块集中生命周期与正确性规则。
 
 ---
 
@@ -231,7 +234,7 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 400 passed / 1 skipped
+npm test               # vitest: 410 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
@@ -267,7 +270,7 @@ open apps/desktop/src-tauri/target/debug/bundle/macos/EasyWork.app
 
 ## 测试覆盖
 
-- Vitest：400 passed / 1 skipped。
+- Vitest：410 passed / 1 skipped。
 - 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
 - Playwright UI e2e 共 48 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、Ewo 双空状态、`/learn` 对话学习入口、工作台无标签空态、动态标签与独立真终端、贯穿式布局拖拽边界、Desktop 原生网页 surface 生命周期、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。

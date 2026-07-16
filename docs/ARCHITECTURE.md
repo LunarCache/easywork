@@ -4,11 +4,12 @@
 
 ## Core Daemon 模型
 
-一个无头的 Node **核心守护进程（`apps/daemon` 组装 `@ew/core`）拥有全部“大脑”**：托管 pi-coding-agent 内核（`SessionHost`）、推理（统一 `llama serve` router 进程管理 + 云端 provider）、工具 / Skills / MCP、记忆、SQLite 存储，以及 `ChannelOperations` / `ChannelGateway` / `ConnectorHost`。Core 对外暴露**本地 HTTP API + SSE**（Fastify），并由进程内的渠道模块主动连接或接收 Telegram、Feishu/Lark、WeChat 等平台流量。应用内聊天与 IM 渠道复用同一个 `SessionHost`；OpenAI/Anthropic 兼容 `/v1` 则是直接推理入口，复用本地 router / 云端 provider runtime，但不调用 `SessionHost.run`、不创建带记忆和工具的 `AgentSession`。
+一个无头的 Node **核心守护进程（`apps/daemon` 组装 `@ew/core`）拥有全部“大脑”**：Core Agent Turn 生命周期、托管 pi-coding-agent 内核（`SessionHost`）、推理（统一 `llama serve` router 进程管理 + 云端 provider）、工具 / Skills / MCP、记忆、SQLite 存储，以及 `ChannelOperations` / `ChannelGateway` / `ConnectorHost`。Core 对外暴露**本地 HTTP API + SSE**（Fastify），并由进程内的渠道模块主动连接或接收 Telegram、Feishu/Lark、WeChat 等平台流量。应用内聊天与 IM 渠道先复用同一个 `AgentTurnLifecycle`，再进入 `SessionHost`；OpenAI/Anthropic 兼容 `/v1` 则是直接推理入口，复用本地 router / 云端 provider runtime，但不调用 Core Agent Turn 或 `SessionHost.run`，也不创建带记忆和工具的 `AgentSession`。
 
 ```
                  ┌─────────────────────────────────────────────┐
                  │       CORE DAEMON (apps/daemon + @ew/core)    │
+                 │  AgentTurnLifecycle（claim / commit / learn） │
                  │  pi-coding-agent 内核（SessionHost 托管）     │
                  │  ew-extensions（记忆 / 权限 / 工具桥接）      │
                  │  ChannelOperations · Gateway · ConnectorHost │
@@ -27,10 +28,11 @@
 - **Core daemon 的三种进程形态**：显式 `easywork serve` 在前台运行；需要 daemon 且启用自动启动的 CLI 命令探测不到服务时，会 detached spawn 自身的 `serve` 并 `unref()`（`status` / `stop` 只检查现有服务，不自启）；Tauri 启动的是由桌面主进程持有、随应用退出回收的 child，不是 detached 自启进程。
 - **本地推理**：统一 `llama`（llama.app）的 **router 模式** —— 1 个 `llama serve --models-dir` 进程，按请求 `model`（即模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰。嵌入模型走独立 `llama serve -m --embedding` 进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，供记忆向量召回；缺失则降级纯词法）。
 
-五个高扇出生命周期以深模块集中，调用者只跨越各自的小接口：
+七个高扇出生命周期以深模块集中，调用者只跨越各自的小接口：
 
 | 深模块 | 所有权 | 外部 adapter / caller |
 |---|---|---|
+| Agent Turn（core） | Source Conversation claim、canonical trajectory、成功提交、artifacts、Learned Skill 遥测与 Skill Candidate 调度 | HTTP SSE / Channel reply adapters；SessionHost runtime |
 | Agent Turn（UI） | 发送、重试、停止、审批、AgentEvent 消费、usage、artifacts、错误与完成 | SDK transport；Chat / Workspace policy；React hook |
 | Workbench View Session（UI） | 工作台视图打开 / 激活 / 关闭回退、文件与 URL 导航 | filesystem / browser adapter；SideDock renderer |
 | Terminal Panel Session（UI） | Desktop PTY 恢复 / 创建 / 激活 / 关闭回退与前台任务确认 | PTY adapter；conversation-bottom TerminalPanel renderer |
@@ -45,7 +47,7 @@
 ```
 packages/
   shared/         @ew/shared        Zod schema、类型与少量运行时 helper（契约层；运行时依赖 zod）
-  core/           @ew/core          daemon 库：server / routes / SessionHost(托管 pi) / ew-extensions / ChannelOperations / /v1 网关 / store
+  core/           @ew/core          daemon 库：server / routes / AgentTurnLifecycle / SessionHost(托管 pi) / ew-extensions / ChannelOperations / /v1 网关 / store
   providers/      @ew/providers     LlamaServeEngine（--host/--api-key）/ OpenAICompatibleEngine / harmony 解析
   memory/         @ew/memory        local Core Memory + additive external recall + SqliteVecIndex 语义 ⊕ 词法召回
   tools/          @ew/tools         内置工具 + SSRF 防护
@@ -80,7 +82,7 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 - `ChannelAdapter`：平台实现的 seam，负责 `start/stop/send/handleWebhook?`，并把平台消息归一成 `InboundMessage`。
 - `ChannelAdapterRegistry`：注册平台 adapter；当前内置 Telegram、Feishu/Lark 与 WeChat iLink，后续 Discord gateway、WeCom callback 都挂这里。
 - `ChannelGateway`：托管配置、状态、生命周期、allowlist 鉴权、webhook 分发和出站 `ChannelTarget` 透传。
-- `ConnectorHost`：唯一把入站消息接到同一个大脑的宿主层，负责 `resolveThreadForChannel`、载历史、调用 `SessionHost.run`、把 `AgentEvent` 聚合为 IM 回复并落库。
+- `ConnectorHost`：Channel transport adapter，把原始 `InboundMessage` 交给 core Agent Turn，并在事件流完成后把文本聚合成 IM 回复；不解析 thread、不读取历史、不落库。
 - `ChannelOperations`（`@ew/core`）：core 侧应用层模块，包住 gateway/host，把连接器 CRUD/启停、Feishu/WeChat 扫码 setup session、inbox read model 与 `/inbox/events` SSE invalidation 收成一个边界；HTTP route 只做鉴权后的参数校验和响应映射。
 
 `@ew/core` 暴露以下管理面：`GET /im/adapters`，`GET/POST /im/connectors`，`POST /im/connectors/:id/start`，`POST /im/connectors/:id/stop`，以及 `DELETE /im/connectors/:id`。这些路由都走 daemon Bearer 鉴权，并由 `ChannelOperations` 调用 gateway 完成实际变更。Feishu/Lark 扫码注册 helper 是 `POST /im/feishu/register` 与 `GET/DELETE /im/feishu/register/:id`：core 启动 SDK registerApp 短会话，二维码确认成功后自动保存 `transport:websocket` 连接器并按需启动；取消或 core stop 会 abort 未完成扫码会话，避免取消后落库。WeChat 对应 `POST /im/wechat/register` 与 `GET/DELETE /im/wechat/register/:id`，通过同一 setup session 模式完成 iLink QR 登录和 connector 保存。渠道配置的非敏感部分落 SQLite settings；secret 由 `ChannelSecretStore` 保存到 macOS Keychain、Linux Secret Service 或 Windows 当前用户 DPAPI。旧 SQLite 明文在启动时先写安全存储、成功后立即去敏；GET 只返回 `secretKeys`，空白编辑保留旧值，删除 connector 同步删除 secret。`GET /inbox/threads` 是给桌面收件箱的只读读模型：从 `ConversationRepo` 里筛选 `thread.channel`，聚合最后一条文本消息和消息数，不引入第二套 IM 消息表；`GET /inbox/events` 是 Bearer 鉴权的 SSE 失效通知，只发 `ready/changed`，消息正文仍通过 read model 读取。`ALL /im/:id/webhook` 是平台回调入口，不要求 EasyWork 内部 Bearer；平台签名、secret token 或事件来源校验应在对应 adapter 里完成。Core 只针对 webhook 捕获 raw body 供签名校验，并在读取前/读取中执行 32MiB 上限。Feishu/Lark adapter 的高级 webhook 模式负责 URL verification、Verification Token、`X-Lark-Signature`、加密回调解密、文本消息归一化和文本回复；非 `transport:webhook` 或未配置 `verificationToken`/`encryptKey` 时拒绝 public webhook。
@@ -88,8 +90,8 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 ### 记忆与 Skill 学习边界
 
 - `LocalMemoryProvider` 是唯一可写真相源：全局 Core Memory 只有 User Profile / Agent Notes，工作区只有 conventions / decisions / pitfalls；Extracted Fact 在提升前带 Source Conversation 所有权。`AdditiveMemoryProvider` 只在 Agent/IM 的 recall 上叠加受扫描、限长、带来源与 untrusted fence 的外部结果，失败/禁用/移除不影响本地。外部 provider 当前只能由宿主经 `CreateCoreOptions.deepMemoryProvider` 注入；Desktop / CLI 没有创建、修改或删除配置的入口，`GET/PATCH /memory/provider` 仅在已注入后查询和启停。`Mem0MemoryProvider` 仍是适配骨架，不作为现成用户功能。HTTP 记忆管理面继续只编辑本地记忆。
-- `SessionHost` 同时服务 Chat、Workspace、CLI agent 和 IM，因此这些入口都获得相同记忆、`stage_skill_candidate` 与 pi Skill 发现；`/v1` 只调用模型 runtime helper，不进入上述链路。
-- `SourceConversationLifecycle` 是来源所有权与删除顺序的唯一 seam：thread / Project route 只请求 claim / discard / delete；模块在同一 SessionHost barrier 内清理 Extracted Facts、Candidate 证据、Conversation / FTS、pi session 和合格 chat scratch。用户 workspace 永不删除，scratch 删除失败非致命，其余所有权清理失败会让删除失败可见。
+- `AgentTurnLifecycle` 同时服务 Chat、Workspace、CLI agent 和 IM：统一 Source Conversation claim、per-thread run、canonical trajectory、成功提交、artifacts 与 Skill Candidate scheduling。渠道入站提交在删除屏障内先持久化，模型失败仍保留；agent-produced 结果只在 final 成功后提交。外部平台投递由 Channel adapter 在 turn 完成后执行，失败不回滚、不重跑。
+- `SourceConversationLifecycle` 是来源所有权与删除顺序的唯一 seam：thread / Project route 与 Core Agent Turn 只请求 claim / discard / delete；渠道 identity 的 claim 与删除也在同一屏障内排序。模块清理 Extracted Facts、Candidate 证据、Conversation / FTS、pi session 和合格 chat scratch。用户 workspace 永不删除，scratch 删除失败非致命，其余所有权清理失败会让删除失败可见。
 - `SkillCandidateLifecycle` 位于 core：foreground Learn、background reviewer、routes、Agent tools 与旧层迁移只通过其接口。SQLite/filesystem store 和 reviewer 是内部 adapters；只有用户批准会经过 package/工具/secret/injection/path/symlink/hash 验证并原子写入 Skill source。learned Skills 的遥测、patch、pin、stale/archive、snapshot/restore/rollback 也由该模块拥有。
 
 ## 技术栈
