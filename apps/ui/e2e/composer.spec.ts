@@ -72,8 +72,13 @@ test.describe("composer e2e", () => {
     await expect(page.getByTestId("chat-think-pill")).toHaveCount(0);
 
     await chatControl.click();
-    await expect(page.getByTestId("chat-model-thinking-menu")).toBeVisible();
-    await expect(page.getByTestId("chat-model-thinking-model-row")).toContainText("模型");
+    const menu = page.getByTestId("chat-model-thinking-menu");
+    const modelRow = page.getByTestId("chat-model-thinking-model-row");
+    await expect(menu).toBeVisible();
+    await expect.poll(async () => (await menu.boundingBox())?.width).toBeLessThanOrEqual(250);
+    await expect.poll(async () => (await modelRow.boundingBox())?.height).toBeLessThanOrEqual(36);
+    await expect.poll(() => modelRow.locator(".model-thinking-row-label").evaluate((element) => getComputedStyle(element).fontSize)).toBe("12.5px");
+    await expect(modelRow).toContainText("模型");
     await expect(page.getByTestId("chat-model-thinking-level-row")).toContainText("推理强度");
 
     await page.getByTestId("chat-model-thinking-level-row").click();
@@ -397,10 +402,11 @@ test.describe("composer e2e", () => {
 
     await openApp();
     await expect(page.getByTestId("chat-web-pill")).toHaveCount(0);
+    await expect(page.getByTestId("chat-model-thinking-trigger")).toContainText("test-model");
 
     const input = page.getByTestId("chat-composer-input");
     await input.fill("帮我联网搜索");
-    await input.press("Enter");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
 
     await expect.poll(() => requestBody).not.toBeNull();
     expect(requestBody?.excludeTools).toBeUndefined();
