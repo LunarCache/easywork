@@ -114,24 +114,7 @@ npm exec --workspace @ew/daemon -- easywork mem ls
 
 ## 架构
 
-```mermaid
-flowchart LR
-  Desktop["Tauri Desktop"] --> Daemon
-  CLI["easywork CLI"] --> Daemon
-  Channels["Telegram · Feishu/Lark · WeChat"] --> Daemon
-  Clients["OpenAI / Anthropic clients"] --> Gateway["/v1 Gateway"]
-
-  subgraph Daemon["EasyWork daemon"]
-    AgentTurn["Core Agent Turn"] --> SessionHost["pi AgentSession"]
-    SessionHost --> Tools["Built-in Tools · Skills · MCP"]
-    SessionHost --> Memory["Scoped Memory"]
-    SessionHost --> Models["Provider & Model Runtime"]
-  end
-
-  Gateway --> Models
-  Models --> Local["llama router · local GGUF"]
-  Models --> Cloud["Cloud providers"]
-```
+![EasyWork 架构：桌面端、CLI 与消息渠道共享 Agent 宿主，兼容 API 网关独立复用模型运行时](docs/assets/easywork-architecture.png)
 
 架构遵循三个原则：
 
