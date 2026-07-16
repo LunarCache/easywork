@@ -344,7 +344,8 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 ### 12.1 设计语言 + 主题 token
 
 - 字体：IBM Plex Sans（UI/prose）+ JetBrains Mono（机器数据：分支/时间戳/token/diff 统计/CWD/模型名），`@fontsource` 内置离线。
-- **Tailwind v4 `@theme` + 别名层**（最重要的样式架构）：`@theme` 定义深色默认 `--color-*` token（取自设计稿）；**单一强调色固定蓝**（accent 切换已移除，只留明暗）；**别名层**把新旧两代命名（`--bg-elev/--tx-0/--prose`、legacy `--bg/--surface/--text/--accent/--ok/--err`）重映射到 `--color-*`。因 `var()` 在使用点解析，**一处 `[data-theme="light"]` 覆盖 `--color-*` 就级联到所有别名**，存量组件自动换肤；独立终端面板与 xterm 同样消费当前主题 token，ANSI 前景色由 shell 自身控制。
+- **Tailwind v4 `@theme` + 别名层**（最重要的样式架构）：`@theme` 定义黑灰深色基础 `--color-*` token；`[data-theme="light"]` 覆盖为默认的冷灰画布 / 白色卡片。明暗主题统一使用青绿色 `--acc`，不再提供用户态 accent 切换；**别名层**把新旧两代命名（`--bg-elev/--tx-0/--prose`、legacy `--bg/--surface/--text/--accent/--ok/--err`）重映射到 `--color-*`。因 `var()` 在使用点解析，一处主题覆盖会级联到所有别名，存量组件、独立终端面板与 xterm 自动换肤，ANSI 前景色由 shell 自身控制。
+- **Ewo 品牌形象**：应用图标是冷灰 / 白色机器人头像，深色面屏内含青绿色 `E` 与白色命令箭头，顶部用青绿色星芒天线形成识别点；同源全身 Ewo 用于 Chat 与 Workspace 空状态。`EasyWorkLogo` / `EasyWorkMascot` 是可缩放 SVG，实例级渐变 ID 避免同页串色；Desktop 的 SVG、PNG、ICNS、ICO 与 Windows 方形资源保持同源。
 - `applyTheme()` 设 `<html>` `data-theme`，`system` 读 `prefers-color-scheme` 并实时订阅；`main.tsx` 在 render 前应用避免首屏闪烁；prefs 存 localStorage。
 
 ### 12.2 外壳（App.tsx）
@@ -364,8 +365,8 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 
 共用 MessageStream / SideDock / ModelSelect / composer / 审批卡 / **斜杠命令面板** / **运行态上下文圆环**。两侧 composer 的 pill、模型、审批与附件状态统一无边框，以填充色、图标和文字表达状态；输入卡外框仍负责聚合整个输入区域。
 - **Agent Turn**：`AgentTurnController` + `useAgentTurn` 统一拥有发送 / 重试 / 编辑重试 / 停止、审批、`AgentEvent` 消费、usage、notice、artifacts、error 与 final completion。Chat / Workspace 只提供 `AgentTurnPolicy`（请求构造、审批档位 flush、tool-end / complete 刷新），不再各自实现 `runAgent` 事件循环。
-- **Chat**：composer 输入卡顶部用 `ComposerContextStrip` 前置本轮能力开关 **思考 / 联网**；**模型 / 上下文压力**移到底栏发送按钮左侧，作为发送前确认区。上下文压力默认只呈现环形进度，不常驻显示数字；悬停或键盘聚焦后通过自绘 tooltip 展示百分比与 `prompt/context` token 明细。模型下拉消费 `/models.modelSources`，按 **本地模型 / provider id** 分组展示；provider 分组已经表达来源，条目只显示模型名，避免重复铺开 raw id。底栏左侧 `+` 仅做**上传图片**，右侧保留模型 / 上下文 / 发送或停止。默认采样参数从输入框移出，统一在模型页按本地模型配置。普通对话运行前后对专属工件目录做有界快照，成功提交时把最终仍存在的新增/修改文件作为 `StoredMessage.artifacts` 挂到对应助手轮次，并发送 `artifacts` 事件即时更新；消息下方「本轮交付」卡显示文件类型、状态与大小，点击复用 SideDock 文件预览。该快照不扫描工作区仓库，工作区改动继续由 Git 汇总卡与 diff 视图承担。
-- **Workspace**：`ContextBar` 显示项目 / 分支 / 思考；composer 底栏与 Chat 对齐——左侧 `+` 后紧跟**审批策略 pill**（中文档位 只读/逐项确认/自动编辑/完全访问，full-auto 橙色警示；改档 PATCH `project.approvalMode`，`send()` 前 await 在途 PATCH 防"切档即发"）与附件状态，右侧是**模型 / 上下文圆环 / 发送或停止**，复用同一悬停详情。**空态居中**（`msgs.length===0` 渲染 `.ws-hero`：品牌标 + 时段问候语 + 居中限宽 composer，否则消息流在上、composer 在底）。SideDock 带 git 上下文；mutating 工具后刷 git + ws 文件 + 上报分支给标题栏。
+- **Chat**：无消息时先显示全身 Ewo、问候语与快捷起手式；composer 输入卡顶部用 `ComposerContextStrip` 前置本轮能力开关 **思考 / 联网**；**模型 / 上下文压力**移到底栏发送按钮左侧，作为发送前确认区。上下文压力默认只呈现环形进度，不常驻显示数字；悬停或键盘聚焦后通过自绘 tooltip 展示百分比与 `prompt/context` token 明细。模型下拉消费 `/models.modelSources`，按 **本地模型 / provider id** 分组展示；provider 分组已经表达来源，条目只显示模型名，避免重复铺开 raw id。底栏左侧 `+` 仅做**上传图片**，右侧保留模型 / 上下文 / 发送或停止。默认采样参数从输入框移出，统一在模型页按本地模型配置。普通对话运行前后对专属工件目录做有界快照，成功提交时把最终仍存在的新增/修改文件作为 `StoredMessage.artifacts` 挂到对应助手轮次，并发送 `artifacts` 事件即时更新；消息下方「本轮交付」卡显示文件类型、状态与大小，点击复用 SideDock 文件预览。该快照不扫描工作区仓库，工作区改动继续由 Git 汇总卡与 diff 视图承担。
+- **Workspace**：`ContextBar` 显示项目 / 分支 / 思考；composer 底栏与 Chat 对齐——左侧 `+` 后紧跟**审批策略 pill**（中文档位 只读/逐项确认/自动编辑/完全访问，full-auto 橙色警示；改档 PATCH `project.approvalMode`，`send()` 前 await 在途 PATCH 防"切档即发"）与附件状态，右侧是**模型 / 上下文圆环 / 发送或停止**，复用同一悬停详情。**空态居中**（`msgs.length===0` 渲染 `.ws-hero`：全身 Ewo + 时段问候语 + 居中限宽 composer，否则消息流在上、composer 在底）。SideDock 带 git 上下文；mutating 工具后刷 git + ws 文件 + 上报分支给标题栏。
 - **审批卡**（`.approval-wrap`）：危险工具挂起时在 **composer 正上方内嵌弹出**（与输入框同宽、从下滑入），非遮罩弹层——不挡对话；含工具名 + 命令 JSON + 拒绝/本会话总是允许/允许。Chat 与 Workspace 一致。
 - **斜杠命令**（`lib/slash.ts` + `components/SlashPalette.tsx` 的 `useSlashPalette` hook，两 composer 共用）：输入「/」弹两阶段自动补全（命令名→参数），面板头显示当前阶段，列表右侧直接带**当前值 / 当前项**；`/compact` 还会显示当前上下文占比。`onKeyDown` 优先消费 ↑↓/Enter/Tab/Esc。支持 `/think <档位>` 设思考、`/model` 先选本地/provider 来源再选该来源下模型（下一轮 run 带 provider-scoped modelId，复用 getOrCreate 重建保上下文）、`/skill` 调用已启用 Skill、`/compact` 调 `POST /threads/:id/compact`；Chat 额外注入 `/learn` handler，从当前 Source Conversation 调 `POST /skill-learning/prepare` 回填学习提示，底栏不再保留独立学习图标。
 - **思考分级**：思考状态统一以前置 pill 呈现（关/低/中/高，点击循环）+ `/think`；`thinkingLevel` **按 provider-scoped route id 持久化**。无偏好时，`modelSources.reasoning=true` 的模型默认「中」，其它模型默认「关」；显式关闭同样保存，run 时随 `runAgent` 下发。
@@ -416,6 +417,7 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 - **daemon → Node SEA 单文件二进制**（`scripts/build-daemon-sea.mjs`）：turbo build（SEA 内联各包 dist）→ tsup 全内联 CJS → `--experimental-sea-config` 生成 blob → 复制 node + postject 注入（macOS 必须先去签名、注入后 ad-hoc 重签）→ 捆 `sqlite-vec` 各平台 `vec0.{dylib|dll|so}`。所有 CLI 都通过 Node + 参数数组调用，避免 Windows `.cmd` 与带空格路径的 shell 转义问题；SEA 参数解析兼容 Node 24/26 的 argv 形态。**运行免 Node**。
 - **llama runtime**：缺失时经 [llama.app](https://llama.app) 自动安装（`resolve-llama.ts` + `/local/install-runtime`）。
 - **关键路径门禁**：`scripts/smoke-daemon-sea.mjs` 启动注入后的真实 sidecar 并请求 `/health`；`scripts/check-release-artifacts.mjs windows` 要求 `easywork.exe`、`vec0.dll` 与当前版本、x64 架构的所选 NSIS/MSI 安装包同时存在，构建前清除 Cargo 缓存内可能残留的旧 bundle。普通 CI 在 `windows-latest` 实际构建并验证 NSIS。
+- **应用图标链路**：`apps/desktop/src-tauri/icons/icon.svg` 是矢量真相源，Tauri CLI 由它生成平台 PNG、macOS ICNS、Windows ICO 与方形资源。`build.rs` 输出 `cargo:rerun-if-changed=icons`，让图标变化真正触发 Rust context 重新生成；macOS Dock / Finder 验证必须构建 `.app` bundle，并对比 `Contents/Resources/icon.icns`，不能用裸 `cargo run` 的重启代替 bundle 验证。
 - **发布**：`v*` tag 触发 `.github/workflows/release.yml`，先用 `scripts/check-release-version.mjs` 校验 root npm、desktop npm、Tauri config、Cargo.toml/Cargo.lock 与 tag 一致；macOS-14（Apple Silicon）runner出 dmg，`windows-latest` 出 Windows x64 NSIS + MSI，均通过 SEA smoke 后发到公开 Releases（当前未做 Apple/Windows 正式签名；Intel/ARM64 Windows/Linux 后续）。
 
 ---

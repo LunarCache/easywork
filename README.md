@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="apps/desktop/src-tauri/icons/128x128@2x.png" width="96" alt="EasyWork" />
+<img src="apps/desktop/src-tauri/icons/128x128@2x.png" width="96" alt="EasyWork Ewo 图标" />
 
 # EasyWork
 
@@ -79,6 +79,7 @@ flowchart LR
 
 ### Agent 工作台
 
+- 品牌与主题：默认使用冷灰画布 + 青绿色强调色，保留黑灰 + 青绿色深色主题和跟随系统；Ewo 机器人头像是 Desktop 应用图标，全身形象用于 Chat / Workspace 空状态，字体仍为 IBM Plex Sans + JetBrains Mono。
 - 对话模式：适合问答、总结、联网搜索和多模态输入。
 - 工作区模式：在本地项目目录内读写文件、运行 Agent 工具、查看 git diff，并预览文件。
 - Chat 与 Workspace 共用同一 Agent Turn 生命周期，发送、重试、停止、审批、用量、工件和完成语义不会在两个页面各自演化。
@@ -187,11 +188,11 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 399 passed / 1 skipped
+npm test               # vitest: 400 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
-npm run test:e2e       # Playwright UI e2e: 46 条，真 daemon + 真 Vite + 隔离 data dir
+npm run test:e2e       # Playwright UI e2e: 48 条，真 daemon + 真 Vite + 隔离 data dir
 
 npm run dev:daemon     # 仅启动 daemon，首行输出 {baseUrl, token, pid}
 npm run dev:ui         # 仅启动 Vite
@@ -209,15 +210,23 @@ npm run smoke:daemon-sea
 npm run release:check-artifacts -- windows
 ```
 
+Desktop 图标的矢量真相源是 `apps/desktop/src-tauri/icons/icon.svg`。修改后用 Tauri CLI 重生成 PNG / ICNS / ICO；`build.rs` 显式跟踪整个 `icons/` 目录，避免 `tauri dev` 仅重启旧二进制。macOS 若要验证 Dock / Finder 实际图标，应构建并启动 debug `.app`，不要只观察裸 `cargo run` 进程：
+
+```bash
+npm run tauri --workspace @ew/desktop -- icon src-tauri/icons/icon.svg
+npm run tauri --workspace @ew/desktop -- build --debug --bundles app
+open apps/desktop/src-tauri/target/debug/bundle/macos/EasyWork.app
+```
+
 发布流程：推送 `v*` tag 触发 [`release.yml`](.github/workflows/release.yml)，先运行 `npm run release:check-version` 校验 npm / Tauri / Cargo 版本与 tag 一致；每次 Tauri bundle 都会在 `beforeBuildCommand` 中重建 SEA daemon，避免新 UI 携带旧 sidecar。macOS Apple Silicon runner 构建 dmg，Windows x64 runner 构建 NSIS + MSI，两端都先对 SEA daemon `/health` 做真实冒烟，Windows 还会检查 sidecar、`vec0.dll` 与安装包完整性后再上传 Releases。普通 CI 也会执行 Windows NSIS 关键路径构建。Desktop 主 WebView 启用显式 CSP；capability 只授权本地 `main` WebView，承载任意远程网页的子 WebView 不继承 Tauri IPC 权限。
 
 ---
 
 ## 测试覆盖
 
-- Vitest：399 passed / 1 skipped。
+- Vitest：400 passed / 1 skipped。
 - 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
-- Playwright UI e2e 共 46 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、`/learn` 对话学习入口、工作台无标签空态、动态标签与独立真终端、贯穿式布局拖拽边界、Desktop 原生网页 surface 生命周期、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
+- Playwright UI e2e 共 48 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、Ewo 双空状态、`/learn` 对话学习入口、工作台无标签空态、动态标签与独立真终端、贯穿式布局拖拽边界、Desktop 原生网页 surface 生命周期、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。
 
 ---

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh" data-theme="dark">
+<html lang="zh" data-theme="light">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -11,16 +11,16 @@
     --bg:#0D0E12; --panel:#16181E; --hover:#1E212A; --inset:#0A0B0E; --page:#070809;
     --border:#23262F; --bsoft:#1A1D24;
     --t0:#E7E9ED; --t1:#9AA0AB; --t2:#5F656F; --prose:#C9CDD4;
-    --acc:#3B82F6; --acc-weak:rgba(59,130,246,.15); --acc-bd:rgba(59,130,246,.42);
-    --grn:#3FB950; --red:#F85149; --amber:#D29922; --iris:#7C84FF; --violet:#A06CF5;
+    --acc:#0E9F8A; --acc-weak:rgba(14,159,138,.15); --acc-bd:rgba(14,159,138,.42);
+    --grn:#3FB950; --red:#F85149; --amber:#D29922;
     --font:"IBM Plex Sans",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
     --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
   }
   [data-theme="light"]{
-    --bg:#F4F5F7; --panel:#FFFFFF; --hover:#EBEDF1; --inset:#0A0B0E; --page:#E6E8EC;
-    --border:#DDE1E6; --bsoft:#E8EBEF;
-    --t0:#15171C; --t1:#5A626E; --t2:#8A919C; --prose:#2A2E37;
-    --acc-weak:rgba(59,130,246,.12);
+    --bg:#F5F8F9; --panel:#FFFFFF; --hover:#E7EEEF; --inset:#EEF2F3; --page:#E6ECEE;
+    --border:#D7E0E3; --bsoft:#E9EFF1;
+    --t0:#172126; --t1:#5F6D73; --t2:#8B979D; --prose:#344348;
+    --acc-weak:#E2F4F0; --acc-bd:#8ACFC3;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
@@ -32,7 +32,7 @@
   /* topbar */
   .top{position:sticky;top:0;z-index:20;height:54px;display:flex;align-items:center;gap:12px;padding:0 18px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--bsoft);}
   .brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;white-space:nowrap}
-  .brand .logo{width:26px;height:26px;border-radius:7px;background:var(--acc-weak);color:var(--acc);display:grid;place-items:center;font-size:15px}
+  .brand .logo{width:26px;height:26px;border-radius:7px;display:block}
   .top .sub{font:400 12px/1 var(--mono);color:var(--t2);white-space:nowrap}
   .spacer{flex:1}
   .search{display:flex;align-items:center;gap:7px;height:34px;padding:0 11px;background:var(--panel);border:1px solid var(--border);border-radius:9px;color:var(--t2);min-width:180px}
@@ -93,7 +93,7 @@
 <body>
   <div class="top">
     <button class="iconbtn menu-btn" id="menuBtn" title="目录">☰</button>
-    <span class="brand"><span class="logo">⚙</span> EasyWork 设计详解</span>
+    <span class="brand"><img class="logo" src="../../apps/desktop/src-tauri/icons/32x32.png" alt="" /> EasyWork 设计详解</span>
     <span class="sub" id="meta">学习向 · 交互文档</span>
     <span class="spacer"></span>
     <label class="search"><span>🔍</span><input id="q" placeholder="搜索章节…" autocomplete="off" /></label>

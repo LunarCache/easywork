@@ -105,7 +105,7 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 | 渠道密钥 | `ChannelSecretStore`：macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI；SQLite 仅存去密配置 |
 | 记忆 | 本地 Core Memory + 可选 additive provider；独立 `llama serve --embedding`（默认 nomic）+ **sqlite-vec**；按 `0.75 × 语义 + 0.25 × 词法` 加权，向量或 provider 不可用时本地词法链路仍工作 |
 | UI | React 19 + Vite + react-markdown |
-| 桌面 | Tauri 2（Rust 外壳 + TS 前端；Rust 启动并持有 daemon child，以 `portable-pty` 托管窗口级真终端） |
+| 桌面 | Tauri 2（Rust 外壳 + TS 前端；Rust 启动并持有 daemon child，以 `portable-pty` 托管窗口级真终端；Ewo 平台图标由同一 SVG 生成） |
 | 打包 | daemon Node SEA 单文件二进制；Tauri macOS dmg + Windows x64 NSIS/MSI；版本、SEA `/health` 与平台产物契约通过后进入 GitHub Releases |
 | 库构建 / 测试 | tsup（esbuild）/ Vitest |
 | Monorepo | npm workspaces + Turborepo |
@@ -125,6 +125,8 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 > UI「设置 → 通用 → Hugging Face 镜像」经 `GET/POST /settings/huggingface` 保存到 SQLite `models.hf.useMirror`。切换立即更新 `HFClient` 的基址，因此模型搜索、变体树、普通 GGUF 下载和记忆 embedding 下载不会出现来源分叉；关闭时恢复官方源。
 
 ## 平台说明
+
+**Desktop 图标构建**：`apps/desktop/src-tauri/icons/icon.svg` 是 Ewo 图标真相源，Tauri CLI 生成 PNG / ICNS / ICO 与 Windows 方形资源。`src-tauri/build.rs` 必须跟踪整个 `icons/` 目录；否则 Tauri watcher 虽会重启，Cargo 仍可能复用旧的 `generate_context!()` 产物。macOS Dock / Finder 读取 `.app/Contents/Resources/icon.icns`，因此真机验证用 debug/release `.app`，并可用 `cmp` / SHA-256 与源 ICNS 对照。
 
 **Windows 工作区建议安装 Git for Windows**（[下载](https://git-scm.com/download/win)）：git 改动审阅需要 `git`，当前 Agent 命令执行则使用 pi-coding-agent 自带的 `bash` 工具。pi 会先探测 Git Bash 的标准安装路径，再查找 PATH 中的 `bash.exe`（也可来自 Cygwin / MSYS2 等）；没有 bash 时该工具会报出安装提示。旧的 EasyWork custom tool `run_command` 及其 `EW_GIT_BASH` 解析不再是 Agent 主执行路径。macOS / Linux 由 pi 优先使用 `/bin/bash`，再回退 PATH 中的 bash 或 `sh`。
 
