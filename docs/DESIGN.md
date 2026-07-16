@@ -447,7 +447,7 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 2. **事件映射唯一边界**——`mapSessionEvent`（pi→SSE）+ `pi-adapt.ts`（pi↔OpenAI/Anthropic）。协议翻译器必须处理 `error` 并正确终止（**不可伪装 end_turn**）。
 3. **工作区路径限定**——`escapesCwd` 经 realpath 解软链硬拦越界（所有审批档），bash 靠审批把守。
 4. **0.0.0.0 暴露强制 api-key**——切换重启 router；内部回环调用一并带 Bearer；自连接恒走 127.0.0.1。
-5. **SSE 健壮性**——所有写口 `raw.on("error")` + `writableEnded/destroyed` 守卫，避免客户端断开后 write-after-end 崩。
+5. **Guarded Stream 单一连接生命周期**——所有流式 HTTP 写口经 `createGuardedStream` 统一 hijack / headers、断连取消、安全写入、幂等结束、心跳和 cleanup；route / 协议翻译器只拥有 framing，不直接复制 `reply.raw` 守卫。
 6. **记忆召回**——相关度下限 + topK 上限防稀释；markdown 真相源、embedding 派生（变更才重嵌）。
 7. **sqlite-vec**——vec0 rowid `BigInt`；`cosine`；可选依赖，无二进制降级纯词法。
 8. **个人微信只走 iLink bot**：扫码登录的是腾讯 iLink bot 身份，不是可任意脚本化的普通个人号；不要引入 Web 微信逆向。群聊默认关闭，按 iLink 投递能力渐进打开；企业微信仍走 WeCom。
@@ -462,7 +462,7 @@ SEA 产物是单二进制，**既是守护（`serve`）也是瘦终端客户端*
 
 ## 附：源码导航锚点（按子系统）
 
-- **守护装配 / 路由 / SSE**：`packages/core/src/server/app.ts`
+- **守护装配 / 路由 / Guarded Stream**：`packages/core/src/server/app.ts` · `packages/core/src/server/guarded-stream.ts`
 - **Agent Turn / Agent 内核 / Source Conversation**：`packages/core/src/agent/{turn-lifecycle,session-host,ew-extensions,approval-sse,turn-recorder}.ts` · `packages/core/src/conversations/source-conversation-lifecycle.ts`
 - **推理引擎**：`packages/core/src/engine/{router-server-manager,resolve-llama,local-backend,net,registry}.ts` · `packages/providers/src/{openai-compatible,llama-serve,harmony,sse,openai-messages}.ts`
 - **模型管理 / Provider Model Configuration**：`packages/core/src/models/{manager,hf,download,gguf}.ts` · `packages/core/src/providers/{model-configuration,manager,catalog}.ts`

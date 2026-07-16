@@ -2,6 +2,7 @@ import { ChannelConfigSchema, type InboxEvent } from "@ew/shared";
 import type { WebhookRequest, WebhookResult } from "@ew/im-connectors";
 import { z } from "zod";
 import type { CoreHttpContext } from "../context.js";
+import { createGuardedStream } from "../guarded-stream.js";
 import type { RawBodyRequest } from "../http-utils.js";
 
 const FeishuSetupSchema = z.object({
@@ -139,29 +140,18 @@ export function registerChannelRoutes(ctx: CoreHttpContext): void {
   });
 
   app.get("/inbox/events", async (req, reply) => {
-    reply.hijack();
-    const raw = reply.raw;
-    raw.on("error", () => {});
-    raw.writeHead(200, {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-      "access-control-allow-origin": req.headers.origin ?? "*",
+    let unsubscribe = (): void => {};
+    const stream = createGuardedStream(reply, { onCleanup: () => unsubscribe() });
+    stream.open({
+      ...(req.headers.origin ? { origin: req.headers.origin } : {}),
+      heartbeat: { intervalMs: 25_000, chunk: ": keepalive\n\n" },
     });
 
     const send = (event: InboxEvent) => {
-      if (!raw.writableEnded && !raw.destroyed) raw.write(`data: ${JSON.stringify(event)}\n\n`);
+      stream.write(`data: ${JSON.stringify(event)}\n\n`);
     };
-    const unsubscribe = channelOps.subscribeInbox(send);
-    const heartbeat = setInterval(() => {
-      if (!raw.writableEnded && !raw.destroyed) raw.write(": keepalive\n\n");
-    }, 25_000);
-    heartbeat.unref?.();
-    const cleanup = () => {
-      clearInterval(heartbeat);
-      unsubscribe();
-    };
-    raw.on("close", cleanup);
+    unsubscribe = channelOps.subscribeInbox(send);
+    if (stream.signal.aborted) unsubscribe();
   });
 
   app.get("/inbox/threads", async () => ({ threads: channelOps.listInboxThreads() }));

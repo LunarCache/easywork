@@ -14,6 +14,7 @@ import {
 import { chatRequestToPiContext, piEventToChatStreamEvents, newPiAdaptState, piAssistantToChatResponse } from "./pi-adapt.js";
 import type { ChatRequest } from "@ew/shared";
 import type { Context as PiContext, AssistantMessageEventStream, AssistantMessage } from "@earendil-works/pi-ai";
+import { createGuardedStream, type GuardedStream } from "../server/guarded-stream.js";
 
 let counter = 0;
 function genId(): string {
@@ -23,22 +24,6 @@ function genId(): string {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-function createGuardedWriter(raw: FastifyReply["raw"]): (chunk: string) => void {
-  raw.on("error", () => {});
-  return (chunk) => {
-    if (chunk && !raw.writableEnded && !raw.destroyed) raw.write(chunk);
-  };
-}
-
-function endGuarded(raw: FastifyReply["raw"]): void {
-  if (raw.writableEnded || raw.destroyed) return;
-  try {
-    raw.end();
-  } catch {
-    /* 客户端可能恰在守卫后断开。 */
-  }
 }
 
 /** 网关依赖：本地已加载模型的 router baseUrl 解析器（用于本地透传）。 */
@@ -97,8 +82,7 @@ async function proxyToLocal(
   fetchImpl: typeof fetch,
   apiKey?: string,
 ): Promise<void> {
-  const ac = new AbortController();
-  reply.raw.on("close", () => ac.abort());
+  const stream = createGuardedStream(reply);
   let upstream: Response;
   try {
     upstream = await fetchImpl(`${base}${path}`, {
@@ -108,34 +92,29 @@ async function proxyToLocal(
         ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify(req.body ?? {}),
-      signal: ac.signal,
+      signal: stream.signal,
     });
   } catch (err) {
     if (!reply.sent) reply.code(502).send({ error: { message: `local upstream error: ${String(err)}` } });
     return;
   }
-  reply.hijack();
-  const raw = reply.raw;
-  raw.on("error", () => {}); // 客户端断开后写 socket 不致命
+  stream.open({
+    status: upstream.status,
+    contentType: upstream.headers.get("content-type") ?? "application/json",
+    ...(req.headers.origin ? { origin: req.headers.origin } : {}),
+  });
   try {
-    raw.writeHead(upstream.status, {
-      "content-type": upstream.headers.get("content-type") ?? "application/json",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-      "access-control-allow-origin": req.headers.origin ?? "*",
-    });
     if (upstream.body) {
       const reader = upstream.body.getReader();
       for (;;) {
         const { value, done } = await reader.read();
-        if (done || raw.writableEnded || raw.destroyed) break;
-        raw.write(Buffer.from(value));
+        if (done || !stream.write(Buffer.from(value))) break;
       }
     }
   } catch {
     /* 客户端断开/上游中断：直接收尾 */
   } finally {
-    endGuarded(raw);
+    stream.end();
   }
 }
 
@@ -168,14 +147,15 @@ export function registerOpenAICompat(
 
     const chatReq = openaiToChatRequest(body);
     if (!chatReq.model) return reply.code(400).send({ error: { message: "missing model" } });
+    let responseStream: GuardedStream | undefined;
 
     // 云端流式 → pi-ai（统一 ModelRegistry/AuthStorage，含 OAuth/Anthropic 原生）。非云端/出错 → 回退引擎。
     if (body.stream === true && deps.cloudStream) {
-      const ac = new AbortController();
+      responseStream = createGuardedStream(reply);
       let piStream: AssistantMessageEventStream | null = null;
       try {
         piStream = await deps.cloudStream(chatReq.model, chatRequestToPiContext(chatReq), {
-          signal: ac.signal,
+          signal: responseStream.signal,
           ...(chatReq.temperature != null ? { temperature: chatReq.temperature } : {}),
           ...(chatReq.maxTokens != null ? { maxTokens: chatReq.maxTokens } : {}),
         });
@@ -183,33 +163,23 @@ export function registerOpenAICompat(
         piStream = null; // cloudStream 抛错 → 回退引擎路径
       }
       if (piStream) {
-        reply.raw.on("close", () => ac.abort());
         const id = genId();
         const created = Math.floor(Date.now() / 1000);
-        reply.hijack();
-        const raw = reply.raw;
-        const write = createGuardedWriter(raw);
+        responseStream.open({ ...(req.headers.origin ? { origin: req.headers.origin } : {}) });
         const roleSent = { value: false };
         const state = newPiAdaptState();
         try {
-          raw.writeHead(200, {
-            "content-type": "text/event-stream",
-            "cache-control": "no-cache",
-            connection: "keep-alive",
-            "access-control-allow-origin": req.headers.origin ?? "*",
-          });
           for await (const pev of piStream) {
             for (const ce of piEventToChatStreamEvents(pev, state)) {
               for (const chunk of streamEventToOpenAIChunks(ce, { id, created, model: chatReq.model, roleSent })) {
-                write(`data: ${chunk}\n\n`);
+                responseStream.write(`data: ${chunk}\n\n`);
               }
             }
           }
         } catch (err) {
-          write(`data: ${JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
+          responseStream.write(`data: ${JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
         } finally {
-          write("data: [DONE]\n\n");
-          endGuarded(raw);
+          responseStream.end("data: [DONE]\n\n");
         }
         return;
       }
@@ -231,38 +201,28 @@ export function registerOpenAICompat(
 
     const id = genId();
     const created = Math.floor(Date.now() / 1000);
-    const stream = body.stream === true;
+    const streamRequested = body.stream === true;
 
-    if (!stream) {
+    if (!streamRequested) {
       const res = await engine.chat(chatReq);
       return chatResponseToOpenAI(res, id, created);
     }
 
-    const ac = new AbortController();
-    reply.raw.on("close", () => ac.abort());
-    reply.hijack();
-    const raw = reply.raw;
-    const write = createGuardedWriter(raw);
-    raw.writeHead(200, {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-      "access-control-allow-origin": req.headers.origin ?? "*",
-    });
+    responseStream ??= createGuardedStream(reply);
+    responseStream.open({ ...(req.headers.origin ? { origin: req.headers.origin } : {}) });
     const roleSent = { value: false };
     try {
-      for await (const ev of engine.chatStream({ ...chatReq, signal: ac.signal })) {
+      for await (const ev of engine.chatStream({ ...chatReq, signal: responseStream.signal })) {
         for (const chunk of streamEventToOpenAIChunks(ev, { id, created, model: chatReq.model, roleSent })) {
-          write(`data: ${chunk}\n\n`);
+          responseStream.write(`data: ${chunk}\n\n`);
         }
       }
     } catch (err) {
-      write(
+      responseStream.write(
         `data: ${JSON.stringify({ error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`,
       );
     } finally {
-      write("data: [DONE]\n\n");
-      endGuarded(raw);
+      responseStream.end("data: [DONE]\n\n");
     }
   });
 
@@ -275,14 +235,15 @@ export function registerOpenAICompat(
 
     const chatReq = anthropicToChatRequest(body);
     if (!chatReq.model) return reply.code(400).send({ type: "error", error: { message: "missing model" } });
+    let responseStream: GuardedStream | undefined;
 
     // 云端流式 → pi-ai；非云端/出错 → 回退引擎。
     if (body.stream === true && deps.cloudStream) {
-      const ac = new AbortController();
+      responseStream = createGuardedStream(reply);
       let piStream: AssistantMessageEventStream | null = null;
       try {
         piStream = await deps.cloudStream(chatReq.model, chatRequestToPiContext(chatReq), {
-          signal: ac.signal,
+          signal: responseStream.signal,
           ...(chatReq.temperature != null ? { temperature: chatReq.temperature } : {}),
           ...(chatReq.maxTokens != null ? { maxTokens: chatReq.maxTokens } : {}),
         });
@@ -290,29 +251,20 @@ export function registerOpenAICompat(
         piStream = null;
       }
       if (piStream) {
-        reply.raw.on("close", () => ac.abort());
         const id = `msg_${Date.now().toString(36)}${(counter += 1).toString(36)}`;
-        reply.hijack();
-        const raw = reply.raw;
-        const write = createGuardedWriter(raw);
+        responseStream.open({ ...(req.headers.origin ? { origin: req.headers.origin } : {}) });
         const tr = new AnthropicStreamTranslator(id, chatReq.model);
         const state = newPiAdaptState();
         try {
-          raw.writeHead(200, {
-            "content-type": "text/event-stream",
-            "cache-control": "no-cache",
-            connection: "keep-alive",
-            "access-control-allow-origin": req.headers.origin ?? "*",
-          });
-          write(tr.start());
+          responseStream.write(tr.start());
           for await (const pev of piStream) {
-            for (const ce of piEventToChatStreamEvents(pev, state)) write(tr.event(ce));
+            for (const ce of piEventToChatStreamEvents(pev, state)) responseStream.write(tr.event(ce));
           }
-          write(tr.end());
+          responseStream.write(tr.end());
         } catch (err) {
-          write(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
+          responseStream.write(`event: error\ndata: ${JSON.stringify({ type: "error", error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`);
         } finally {
-          endGuarded(raw);
+          responseStream.end();
         }
         return;
       }
@@ -341,31 +293,22 @@ export function registerOpenAICompat(
       return chatResponseToAnthropic(res, id, chatReq.model);
     }
 
-    const ac = new AbortController();
-    reply.raw.on("close", () => ac.abort());
-    reply.hijack();
-    const raw = reply.raw;
-    const write = createGuardedWriter(raw);
-    raw.writeHead(200, {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-      "access-control-allow-origin": req.headers.origin ?? "*",
-    });
+    responseStream ??= createGuardedStream(reply);
+    responseStream.open({ ...(req.headers.origin ? { origin: req.headers.origin } : {}) });
     const tr = new AnthropicStreamTranslator(id, chatReq.model);
-    write(tr.start());
+    responseStream.write(tr.start());
     try {
-      for await (const ev of engine.chatStream({ ...chatReq, signal: ac.signal })) {
+      for await (const ev of engine.chatStream({ ...chatReq, signal: responseStream.signal })) {
         const frame = tr.event(ev);
-        if (frame) write(frame);
+        if (frame) responseStream.write(frame);
       }
-      write(tr.end());
+      responseStream.write(tr.end());
     } catch (err) {
-      write(
+      responseStream.write(
         `event: error\ndata: ${JSON.stringify({ type: "error", error: { message: err instanceof Error ? err.message : String(err) } })}\n\n`,
       );
     } finally {
-      endGuarded(raw);
+      responseStream.end();
     }
   });
 

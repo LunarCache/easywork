@@ -14,6 +14,7 @@
 - **真实工具审批流（4 档）**：`read-only` / `approve-each` / `auto-edits` / `full-auto`，经 pi `tool_call` 钩子映射；危险工具经 SSE 挂起，UI 在**对话栏上方弹出审批卡**（内嵌、非遮罩弹层；简洁单头行 = 盾牌 + 工具名 accent 胶囊 + 右侧紧凑按钮，下方单行参数预览〔命令/路径/紧凑 JSON，悬停看全〕，Chat/Workspace 共用 `ApprovalCard`）「允许 / 总是允许 / 拒绝」。
 - **Agent Turn 客户端生命周期**：Chat 与 Workspace 共用 `AgentTurnController`，由它统一发送 / 重试 / 编辑重试 / 停止、审批、SSE 事件消费、用量、瞬态提示、工件、错误和完成；页面只提供请求、审批档位同步和工具完成后的刷新 policy。
 - **Agent Turn core 生命周期**：HTTP / CLI 与外部渠道统一经 `AgentTurnLifecycle` 完成 Source Conversation claim、canonical trajectory、成功提交、artifacts 和 Skill Candidate 调度，再进入 `SessionHost`。渠道已接受的用户提交在模型失败后仍保留；agent-produced 结果只在 final 成功后提交，平台投递失败不会回滚或重跑。
+- **Guarded Stream 连接生命周期**：Agent SSE、模型下载、Inbox invalidation 与 OpenAI / Anthropic 流式网关共用断连取消、安全写入、幂等结束、心跳和 cleanup；各入口仍独立负责自己的协议帧。
 - **工作区路径限定**：fs 工具路径经 realpath 解析后硬拦越界（含软链接），bash 由审批把守。
 - **内置工具**（桥成 pi customTool）：`get_time` / `calculator` / `http_get`（带 SSRF 防护）/ `explore_web`（DuckDuckGo 摘要搜索 + 安全取页，`max_results` 可设 1–10，默认 5）。聊天页关闭联网时会从 pi customTools 中同时移除 `explore_web` / `http_get`，工具集变化会触发会话资源重建。
 - **记忆 / 会话检索**：记忆经 pi 扩展接入——**渐进式披露**（记忆「清单」注入系统提示词 + `recall_memory` 工具按需取全文，借鉴 Skill）+ **批量事实抽取**（空闲 / 关闭时，非每轮）。每条记忆显式记录 `origin/state/sourceThreadId`：被动抽取是由来源对话拥有的 Extracted Fact；Source Conversation 生命周期在同一 run / delete 屏障内删除其事实、候选证据、消息 / FTS 与 pi 会话状态，并只尽力清理 EasyWork 管理的 scratch 工件，永不删除用户工作区目录。用户可在记忆页「确认并保留」（固定）为独立 Curated Fact，编辑来源事实也会先提升。会话检索通过 customTool 接入。外部 Provider 目前只能由宿主注入，Desktop / CLI 没有配置入口；未注入时记忆页不显示空状态，注入后才显示启停状态。

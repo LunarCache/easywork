@@ -61,6 +61,7 @@ flowchart TB
       AgentAPI["Agent / workspace APIs<br/>HTTP + SSE"]
       ChannelOps["Channel Operations<br/>Gateway + ConnectorHost"]
       Compat["/v1 compatibility gateway<br/>OpenAI + Anthropic"]
+      GuardedStream["Guarded Stream<br/>disconnect · safe write · cleanup"]
     end
 
     subgraph AgentPath["Agent path"]
@@ -80,6 +81,9 @@ flowchart TB
     Host --- AgentAPI
     Host --- ChannelOps
     Host --- Compat
+    AgentAPI --- GuardedStream
+    ChannelOps --- GuardedStream
+    Compat --- GuardedStream
     AgentAPI --> AgentTurnCore
     ChannelOps --> AgentTurnCore
     AgentTurnCore --> SessionHost
@@ -117,7 +121,7 @@ flowchart TB
   Memory --> Embedding
 ```
 
-核心原则很简单：**daemon 拥有全部状态和能力，所有界面都是薄壳**。桌面聊天、工作区 agent、外部渠道消息和命令行自动化先复用同一个 Core Agent Turn，再进入 `SessionHost`、权限、记忆和模型配置；`/v1` 兼容网关只复用同一 daemon 内的模型与 provider runtime。客户端 Agent Turn 负责交互状态，Core Agent Turn 负责 Source Conversation claim、canonical trajectory、成功提交、artifacts 与 Skill Candidate 调度；Workbench View Session、Terminal Panel Session、Skill Candidate 和 Provider Model Configuration 也各自通过深模块集中生命周期与正确性规则。
+核心原则很简单：**daemon 拥有全部状态和能力，所有界面都是薄壳**。桌面聊天、工作区 agent、外部渠道消息和命令行自动化先复用同一个 Core Agent Turn，再进入 `SessionHost`、权限、记忆和模型配置；`/v1` 兼容网关只复用同一 daemon 内的模型与 provider runtime。客户端 Agent Turn 负责交互状态，Core Agent Turn 负责 Source Conversation claim、canonical trajectory、成功提交、artifacts 与 Skill Candidate 调度；Guarded Stream 统一所有流式 HTTP 入口的断连取消、安全写入和清理；Workbench View Session、Terminal Panel Session、Skill Candidate 和 Provider Model Configuration 也各自通过深模块集中生命周期与正确性规则。
 
 ---
 
@@ -234,7 +238,7 @@ npm install
 npm run build
 npm run lint
 npm run typecheck
-npm test               # vitest: 410 passed / 1 skipped
+npm test               # vitest: 416 passed / 1 skipped
 npm run test:coverage
 
 npm run e2e:install
@@ -270,7 +274,7 @@ open apps/desktop/src-tauri/target/debug/bundle/macos/EasyWork.app
 
 ## 测试覆盖
 
-- Vitest：410 passed / 1 skipped。
+- Vitest：416 passed / 1 skipped。
 - 发布关键路径：Windows workflow/产物契约测试 + 打包 SEA daemon 启动和 `/health` 冒烟；普通 CI 实际构建 NSIS，tag 流程构建 NSIS + MSI。
 - Playwright UI e2e 共 48 条，覆盖 Agent Turn、设置页、Provider 模型投影、推理默认档位、渠道/Skills/记忆、Chat / Workspace composer、Ewo 双空状态、`/learn` 对话学习入口、工作台无标签空态、动态标签与独立真终端、贯穿式布局拖拽边界、Desktop 原生网页 surface 生命周期、HTML 直达浏览器、自定义地址、文件导航、来源事实和候选审批等关键路径。
 - 真机 runtime smoke：`EW_E2E=1 npx vitest run packages/core/test/session-host.e2e.test.ts`，依赖本地 `llama` 与真实 GGUF，默认不进 CI。

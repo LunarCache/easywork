@@ -10,7 +10,8 @@
 - **Core Agent Turn**：HTTP / CLI 与 Channel adapters 统一经 `AgentTurnLifecycle` 完成 Source Conversation claim、canonical trajectory、成功提交、artifacts、Learned Skill 遥测与 Skill Candidate 调度；渠道已接受的用户提交在模型失败后仍保留，平台投递失败不回滚 Agent Turn。
 - **本地推理（router 模式）**：统一 `llama`（llama.app）的 `llama serve --models-dir` **单路由进程**，按请求 `model`（= 模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰（文本 / 视觉）；嵌入模型走独立 `llama serve -m --embedding` 进程。经典每模型一进程的 `llama-server`（含 brew llama.cpp）**已完全移除**——只支持 llama.app 统一 `llama`。HF 搜索 / 断点续传下载 / GGUF 头解析。
 - **云端推理**：pi-ai 内置 provider + 自定义多协议兼容端点；provider 可持久化多组 API / Base URL 连接预设，模型可独立选择并以内联覆盖运行，从而支持聚合商内 OpenAI 与 Anthropic-only 模型并存；模型目录支持自动/手动模板绑定，运行时继承名称 / reasoning / thinking map / 输出上限，UI 选择模板时把上下文与模态复制进逐模型配置，报文 `compat` 保持协议隔离；云端流式/非流式统一经 pi-ai（含 OAuth）。
-- **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi；本地 proxy、云端 pi 与 engine fallback 的全部 SSE 写口均具备断流 error listener 和 ended/destroyed 守卫。
+- **多协议网关**：`/v1/chat/completions`（+stream）/ `/v1/embeddings` / `/v1/models`（OpenAI）+ `/v1/messages`（Anthropic）；本地透传、云端经 pi；本地 proxy、云端 pi 与 engine fallback 全部经 Guarded Stream 管理断连取消、安全写入与结束。
+- **Guarded Stream**：Agent SSE、模型下载、Inbox invalidation、`/v1` 本地透传 / 云端 / fallback 统一经 `createGuardedStream` 管理 hijack、响应头、断连取消、安全写入、幂等结束、心跳与 cleanup；OpenAI / Anthropic / AgentEvent framing 仍由 adapter 拥有。
 - **Agent 工具**：内置工具（time/calculator/http_get+SSRF/explore_web）、MCP（stdio+HTTP）、Skills，全桥成 pi customTools；审批 4 档 + 工作区路径限定。
 - **工作区模式**：本地项目目录读写文件 / 跑命令 + git 改动审阅面板；聊天模式工件目录。对话区与工作区共用右侧「工作台坞」（改动 / 文件 / 浏览器）；Desktop 多实例真终端由标题栏独立入口在对话区底部打开，并独立于 Agent 工具命令。
 - **记忆（作用域化）**：Core Memory = User Profile / Agent Notes；每工作区私有 conventions / decisions / pitfalls；derived facts 保留来源所有权，manifest 有界；sqlite-vec ⊕ 词法召回，markdown 可手改回灌。外部 provider 当前仅为宿主注入 seam，Desktop / CLI 无配置入口，Mem0 仍是骨架；注入后也只做 additive、受限且可关闭的召回。
@@ -36,6 +37,14 @@
 ## 里程碑日志
 
 > 以下条目按当时实现原样记录；其中出现的旧类名、进程模型或测试数量仅代表对应日期的快照。当前状态以上方“当前状态”与最新里程碑为准。
+
+## 2026-07-16 — Guarded Stream 流式连接生命周期收口
+
+- **深模块落地**：新增 `packages/core/src/server/guarded-stream.ts`，以 `signal / open / write / end` 小接口隐藏 Fastify raw response 生命周期；断连与写入竞态会 abort 上游工作，正常结束不会误触取消，cleanup 与 end 均幂等。
+- **入口迁移**：`/agent/run`、模型下载、`/inbox/events`、OpenAI / Anthropic `/v1` 的本地 proxy、云端 pi 与 engine fallback 全部改用同一 Guarded Stream；协议帧与错误帧翻译保持在原 adapter。
+- **心跳归属**：Inbox SSE 的定时心跳由模块创建并随断连 / 结束自动回收，不再由 route 手工协调 timer 与 socket cleanup。
+- **接口测试**：覆盖断连取消、正常幂等结束、心跳回收、socket 写入竞态与 cleanup observer 异常。
+- **全量验收**：Vitest **416 passed / 1 skipped**，`lint`、`typecheck`、`build` 与 `git diff --check` 全部通过。
 
 ## 2026-07-15 — Core Agent Turn 跨入口生命周期收口
 

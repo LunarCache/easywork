@@ -14,6 +14,7 @@ import type { ProviderManager } from "../../providers/manager.js";
 import { chatWorkspaceDir } from "../../config/paths.js";
 import { ApprovalRegistry, SseApprovalGate } from "../../agent/approval-sse.js";
 import type { CoreHttpContext } from "../context.js";
+import { createGuardedStream } from "../guarded-stream.js";
 
 export function agentModelUnavailableError(
   modelId: string,
@@ -76,17 +77,15 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     const runWorkspaceDir = project?.workspaceDir ?? chatWorkspaceDir(threadId);
     const lastUser = parsed.data.history[parsed.data.history.length - 1];
     const title = lastUser ? messageText(lastUser.content).slice(0, 40) || "新会话" : "新会话";
-    const ac = new AbortController();
-    reply.raw.on("close", () => ac.abort());
-    const raw = reply.raw;
+    const stream = createGuardedStream(reply);
     const send = (ev: AgentEvent) => {
-      if (!raw.writableEnded && !raw.destroyed) raw.write(`data: ${JSON.stringify(ev)}\n\n`);
+      stream.write(`data: ${JSON.stringify(ev)}\n\n`);
     };
     // 交互式审批门：危险工具经 SSE approval-request 事件挂起，等 /agent/approve 解析。
     const runApproval = new SseApprovalGate({
       registry: approvalRegistry,
       emit: (ev) => send(ev),
-      signal: ac.signal,
+      signal: stream.signal,
     });
     const execution = await agentTurns.start({
       source: {
@@ -102,7 +101,7 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
       },
       content: lastUser?.role === "user" ? normalizeContent(lastUser.content) : [],
       approval: runApproval,
-      signal: ac.signal,
+      signal: stream.signal,
       ...(parsed.data.sampling ? { sampling: parsed.data.sampling } : {}),
       ...(parsed.data.thinkingLevel !== undefined ? { thinkingLevel: parsed.data.thinkingLevel } : {}),
       ...(parsed.data.regenerate ? { regenerate: true } : {}),
@@ -112,25 +111,13 @@ export function registerAgentRoutes(ctx: CoreHttpContext): void {
     });
     if (!execution) return reply.code(410).send({ error: "thread_deleted" });
 
-    reply.hijack();
-    raw.on("error", () => {}); // 客户端断开后写 socket 不致命
-    raw.writeHead(200, {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-      "access-control-allow-origin": req.headers.origin ?? "*",
-    });
+    stream.open({ ...(req.headers.origin ? { origin: req.headers.origin } : {}) });
     try {
       for await (const event of execution.events) send(event);
     } catch (err) {
       send({ type: "error", message: err instanceof Error ? err.message : String(err) });
     } finally {
-      if (!raw.writableEnded && !raw.destroyed) raw.write("data: [DONE]\n\n");
-      try {
-        raw.end();
-      } catch {
-        /* ignore */
-      }
+      stream.end("data: [DONE]\n\n");
     }
   });
 

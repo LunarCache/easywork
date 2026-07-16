@@ -8,6 +8,7 @@ import {
 } from "@ew/shared";
 import { resolveLlamaBin, LLAMA_INSTALL } from "../../engine/resolve-llama.js";
 import type { CoreHttpContext } from "../context.js";
+import { createGuardedStream } from "../guarded-stream.js";
 
 export interface ModelRouteOptions {
   llamaBinPath?: string;
@@ -243,23 +244,14 @@ export function registerModelRoutes(ctx: CoreHttpContext, opts: ModelRouteOption
     }
     const hfToken = (req.body as { hfToken?: string }).hfToken;
 
-    const ac = new AbortController();
-    reply.raw.on("close", () => ac.abort());
-    reply.hijack();
-    const raw = reply.raw;
-    raw.on("error", () => {});
-    raw.writeHead(200, {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-      "access-control-allow-origin": req.headers.origin ?? "*",
-    });
+    const stream = createGuardedStream(reply);
+    stream.open({ ...(req.headers.origin ? { origin: req.headers.origin } : {}) });
     const send = (ev: DownloadEvent) => {
-      if (!raw.writableEnded && !raw.destroyed) raw.write(`data: ${JSON.stringify(ev)}\n\n`);
+      stream.write(`data: ${JSON.stringify(ev)}\n\n`);
     };
     try {
       for await (const ev of models.download(parsed.data, {
-        signal: ac.signal,
+        signal: stream.signal,
         ...(hfToken ? { hfToken } : {}),
       })) {
         send(ev);
@@ -267,12 +259,7 @@ export function registerModelRoutes(ctx: CoreHttpContext, opts: ModelRouteOption
     } catch (err) {
       send({ type: "error", message: err instanceof Error ? err.message : String(err) });
     } finally {
-      if (!raw.writableEnded && !raw.destroyed) raw.write("data: [DONE]\n\n");
-      try {
-        raw.end();
-      } catch {
-        /* ignore */
-      }
+      stream.end("data: [DONE]\n\n");
     }
   });
 }

@@ -28,11 +28,12 @@
 - **Core daemon 的三种进程形态**：显式 `easywork serve` 在前台运行；需要 daemon 且启用自动启动的 CLI 命令探测不到服务时，会 detached spawn 自身的 `serve` 并 `unref()`（`status` / `stop` 只检查现有服务，不自启）；Tauri 启动的是由桌面主进程持有、随应用退出回收的 child，不是 detached 自启进程。
 - **本地推理**：统一 `llama`（llama.app）的 **router 模式** —— 1 个 `llama serve --models-dir` 进程，按请求 `model`（即模型子目录名）路由、按需 auto-load、`--models-max` LRU 淘汰。嵌入模型走独立 `llama serve -m --embedding` 进程。DB 用内置 `node:sqlite`；唯一原生件是 **sqlite-vec** 可加载扩展（随包提供各平台预编译二进制，供记忆向量召回；缺失则降级纯词法）。
 
-七个高扇出生命周期以深模块集中，调用者只跨越各自的小接口：
+八个高扇出生命周期以深模块集中，调用者只跨越各自的小接口：
 
 | 深模块 | 所有权 | 外部 adapter / caller |
 |---|---|---|
 | Agent Turn（core） | Source Conversation claim、canonical trajectory、成功提交、artifacts、Learned Skill 遥测与 Skill Candidate 调度 | HTTP SSE / Channel reply adapters；SessionHost runtime |
+| Guarded Stream（core） | Fastify hijack / headers、断连取消、安全写入、幂等结束、心跳与 cleanup | Agent / 模型下载 / Inbox / OpenAI / Anthropic framing adapters |
 | Agent Turn（UI） | 发送、重试、停止、审批、AgentEvent 消费、usage、artifacts、错误与完成 | SDK transport；Chat / Workspace policy；React hook |
 | Workbench View Session（UI） | 工作台视图打开 / 激活 / 关闭回退、文件与 URL 导航 | filesystem / browser adapter；SideDock renderer |
 | Terminal Panel Session（UI） | Desktop PTY 恢复 / 创建 / 激活 / 关闭回退与前台任务确认 | PTY adapter；conversation-bottom TerminalPanel renderer |
@@ -40,7 +41,7 @@
 | Skill Candidate（core） | 审核资格、验证、来源、批准、遥测、pin / archive / snapshot / restore / rollback | SQLite/filesystem 与 reviewer internal adapters；routes/tools/coordinator callers |
 | Provider Model Configuration（core） | saved config normalization、连接预设持久化、route / upstream identity、能力继承、最终 runtime model、协议 compat | pi catalog adapter；ProviderManager / AgentProviderRuntime / HTTP projections |
 
-这些 seam 通过接口级行为测试验证；旧页面事件循环、SideDock 生命周期分支、route 级删除顺序和 partial candidate-store casts 已被替换，不再保留第二套语义实现。
+这些 seam 通过接口级行为测试验证；旧页面事件循环、SideDock 生命周期分支、route 级删除顺序、散落的 raw response 守卫和 partial candidate-store casts 已被替换，不再保留第二套语义实现。
 
 ## Monorepo 结构（npm workspaces + Turborepo）
 
@@ -101,7 +102,7 @@ Chat / Workspace 的思考档位仍是用户偏好：无保存值时，`reasonin
 | Agent 内核 | `@earendil-works/pi`（pi-coding-agent）`AgentSession` 无头托管；记忆 / 工具 / 权限经扩展 + customTools 接入 |
 | 本地推理 | llama.app 统一 `llama` 的 `llama serve` **router 模式**（`--models-dir` 单进程多模型路由 + 按需加载 + `--models-max` LRU）；嵌入独立 `llama serve -m --embedding` |
 | HF 模型源 | daemon 统一负责搜索、文件树与 GGUF/embedding 下载；默认 `huggingface.co`，通用设置可持久化切换 `hf-mirror.com`，同一动态端点覆盖全部 HF 请求 |
-| HTTP | Fastify 路由编排；SSE 通过 Node `reply.raw` 手写 |
+| HTTP | Fastify 路由编排；流式连接生命周期统一经 `GuardedStream`，协议 framing 留在各 adapter |
 | 契约 / 校验 | Zod 共享契约；HTTP handler 通过 `safeParse` 等手动校验请求 |
 | 本地 DB | `node:sqlite`（内置 DatabaseSync，零原生编译） |
 | 渠道密钥 | `ChannelSecretStore`：macOS Keychain / Linux Secret Service / Windows 当前用户 DPAPI；SQLite 仅存去密配置 |
