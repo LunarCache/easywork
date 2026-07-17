@@ -865,8 +865,10 @@ section .act:hover:not(:disabled) { box-shadow: var(--shadow-2); transform: tran
 .cv-tool > summary::-webkit-details-marker { display: none; }
 .cv-tline-ico { color: var(--tx-2); flex: none; }
 .cv-tool.error .cv-tline-ico { color: var(--red); }
+.cv-tool.awaiting-approval .cv-tline-ico { color: var(--accent); }
 .cv-tline-verb { font-weight: 600; color: var(--tx-1); flex: none; }
 .cv-tool.error .cv-tline-verb { color: var(--red); }
+.cv-tool.awaiting-approval .cv-tline-verb { color: var(--accent); }
 .cv-tname { font-family: var(--font-mono); font-size: 12px; color: var(--tx-0); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 运行折叠态命令预览：纯灰 mono 文本（无 pill），单行省略；展开后由正文 $ 行接管故隐藏 */
 .cv-tcmd { font-family: var(--font-mono); font-size: 12px; color: var(--tx-1); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

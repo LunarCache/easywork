@@ -8,13 +8,15 @@ export interface UiTool {
   result?: string;
   /** run_command 流式累积的 stdout/stderr（tool-progress）。 */
   output?: string;
-  status: "running" | "done" | "error";
+  /** pi 的 tool-start 先于权限 hook；pending/awaiting-approval 均不代表工具已执行。 */
+  status: "pending" | "awaiting-approval" | "running" | "done" | "error";
   sources?: { title: string; url: string }[];
   /** 工作区 fs_write/fs_edit 的 diff 载荷。 */
   diff?: { path: string; before: string | null; after: string; unified: string | null };
 }
 export interface PendingApproval {
   id: string;
+  toolCallId: string;
   toolName: string;
   args: unknown;
 }
@@ -232,6 +234,25 @@ function patchToolBlock(blocks: UiBlock[], id: string, patch: Partial<UiTool>): 
   );
 }
 
+function patchTool(m: UiMsg, id: string, patch: Partial<UiTool>): UiMsg {
+  return {
+    ...m,
+    tools: m.tools.map((tool) => (tool.id === id ? { ...tool, ...patch } : tool)),
+    blocks: patchToolBlock(m.blocks ?? [], id, patch),
+  };
+}
+
+/** 同步更新工具列表与时间线里的同一张工具卡。 */
+export function setToolStatus(m: UiMsg, id: string, status: UiTool["status"]): UiMsg {
+  return patchTool(m, id, { status });
+}
+
+/** 审批响应与 SSE 可能竞速；已结束的工具不得倒退回 running。 */
+export function markToolRunning(m: UiMsg, id: string): UiMsg {
+  const tool = m.tools.find((candidate) => candidate.id === id);
+  return tool?.status === "done" || tool?.status === "error" ? m : setToolStatus(m, id, "running");
+}
+
 export function applyAgentEvent(m: UiMsg, ev: AgentEvent): UiMsg {
   const blocks = m.blocks ?? [];
   switch (ev.type) {
@@ -265,34 +286,25 @@ export function applyAgentEvent(m: UiMsg, ev: AgentEvent): UiMsg {
         id: ev.call.id,
         name: ev.call.name,
         args: ev.call.arguments,
-        status: "running",
+        status: "pending",
       };
       const nb = closeReasoning(blocks, Date.now());
       return { ...m, tools: [...m.tools, tool], blocks: [...nb, { kind: "tool", tool }] };
     }
-    case "tool-progress":
-      return {
-        ...m,
-        tools: m.tools.map((t) =>
-          t.id === ev.callId ? { ...t, output: (t.output ?? "") + ev.chunk } : t,
-        ),
-        blocks: blocks.map((b) =>
-          b.kind === "tool" && b.tool.id === ev.callId
-            ? { kind: "tool", tool: { ...b.tool, output: (b.tool.output ?? "") + ev.chunk } }
-            : b,
-        ),
-      };
+    case "tool-progress": {
+      const tool = m.tools.find((candidate) => candidate.id === ev.callId);
+      return patchTool(m, ev.callId, {
+        output: (tool?.output ?? "") + ev.chunk,
+        status: "running",
+      });
+    }
     case "tool-end": {
       const patch: Partial<UiTool> = {
         result: String(ev.result.content),
         status: ev.result.isError ? "error" : "done",
         ...toolDisplayPatch((ev.result as { display?: unknown }).display),
       };
-      return {
-        ...m,
-        tools: m.tools.map((t) => (t.id === ev.call.id ? { ...t, ...patch } : t)),
-        blocks: patchToolBlock(blocks, ev.call.id, patch),
-      };
+      return patchTool(m, ev.call.id, patch);
     }
     case "artifacts":
       return { ...m, artifacts: ev.artifacts };

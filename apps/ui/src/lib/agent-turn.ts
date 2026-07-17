@@ -3,7 +3,9 @@ import type { EasyWorkClient } from "@ew/sdk";
 import {
   applyAgentEvent,
   isIncrementalAssistantEvent,
+  markToolRunning,
   messageText,
+  setToolStatus,
   type PendingApproval,
   type UiImage,
   type UiMsg,
@@ -26,7 +28,7 @@ export type AgentTurnRequest = Parameters<EasyWorkClient["runAgent"]>[0];
 
 export interface AgentTurnTransport {
   run(request: AgentTurnRequest, signal: AbortSignal): AsyncIterable<AgentEvent>;
-  approve(id: string, verdict: ApprovalVerdict): Promise<void>;
+  approve(id: string, verdict: ApprovalVerdict): Promise<boolean>;
 }
 
 export interface AgentTurnPolicy {
@@ -72,6 +74,8 @@ export class AgentTurnController {
   private policy: AgentTurnPolicy;
   private abortController: AbortController | null = null;
   private runVersion = 0;
+  private readonly approvalQueue: PendingApproval[] = [];
+  private approvalResponseId: string | null = null;
   private readonly listeners = new Set<Listener>();
 
   constructor(
@@ -98,6 +102,8 @@ export class AgentTurnController {
     this.abortController?.abort();
     this.abortController = null;
     this.runVersion += 1;
+    this.approvalQueue.length = 0;
+    this.approvalResponseId = null;
     this.setState({ messages, usage, busy: false, notice: null, approval: null });
   }
 
@@ -118,10 +124,12 @@ export class AgentTurnController {
     const runVersion = ++this.runVersion;
     const abortController = new AbortController();
     this.abortController = abortController;
+    this.approvalQueue.length = 0;
+    this.approvalResponseId = null;
     const messages = input.regenerate
       ? replaceLastAssistantTurn(this.state.messages, text)
       : appendUserTurn(this.state.messages, text, input.images);
-    this.setState({ messages, busy: true });
+    this.setState({ messages, busy: true, approval: null });
     let pendingUsage: Usage | null = null;
     let completed = false;
 
@@ -132,7 +140,20 @@ export class AgentTurnController {
         if (event.type === "usage") {
           pendingUsage = event.usage;
         } else if (event.type === "approval-request") {
-          this.setState({ approval: { id: event.id, toolName: event.toolName, args: event.args } });
+          const approval: PendingApproval = {
+            id: event.id,
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            args: event.args,
+          };
+          const activeApproval = this.state.approval;
+          if (activeApproval) this.approvalQueue.push(approval);
+          this.setState({
+            approval: activeApproval ?? approval,
+            messages: this.applyToAssistant((message) =>
+              setToolStatus(message, event.toolCallId, "awaiting-approval"),
+            ),
+          });
         } else if (event.type === "retry") {
           this.setState({ notice: `重试中 (${event.attempt}/${event.maxAttempts})…` });
         } else if (event.type === "compaction") {
@@ -157,7 +178,10 @@ export class AgentTurnController {
             })),
           });
         } else if (event.type === "tool-end") {
-          this.setState({ messages: this.applyToAssistant((message) => applyAgentEvent(message, event)) });
+          this.setState({
+            approval: this.removeApprovalForTool(event.call.id),
+            messages: this.applyToAssistant((message) => applyAgentEvent(message, event)),
+          });
           policy.onToolEnd?.(event);
         } else {
           this.setState({ messages: this.applyToAssistant((message) => applyAgentEvent(message, event)) });
@@ -202,6 +226,8 @@ export class AgentTurnController {
 
   stop(): void {
     this.abortController?.abort();
+    this.approvalQueue.length = 0;
+    this.approvalResponseId = null;
     this.setState({
       approval: null,
       messages: markLastAssistantCancelled(this.state.messages),
@@ -210,12 +236,26 @@ export class AgentTurnController {
 
   async respondApproval(verdict: ApprovalVerdict): Promise<void> {
     const approval = this.state.approval;
-    if (!approval) return;
-    this.setState({ approval: null });
+    if (!approval || this.approvalResponseId === approval.id) return;
+    this.approvalResponseId = approval.id;
     try {
-      await this.transport.approve(approval.id, verdict);
+      const accepted = await this.transport.approve(approval.id, verdict);
+      if (!accepted) return;
+      if (this.state.approval?.id !== approval.id) return;
+      this.setState({
+        approval: this.approvalQueue.shift() ?? null,
+        ...(verdict === "deny"
+          ? {}
+          : {
+              messages: this.applyToAssistant((message) =>
+                markToolRunning(message, approval.toolCallId),
+              ),
+            }),
+      });
     } catch {
-      // The stream may already have ended; approval responses are best effort.
+      // 保持审批可见，允许用户重试；工具仍处于等待态。
+    } finally {
+      if (this.approvalResponseId === approval.id) this.approvalResponseId = null;
     }
   }
 
@@ -223,11 +263,22 @@ export class AgentTurnController {
     this.abortController?.abort();
     this.abortController = null;
     this.runVersion += 1;
+    this.approvalQueue.length = 0;
+    this.approvalResponseId = null;
     this.listeners.clear();
   }
 
   private applyToAssistant(update: (message: UiMsg) => UiMsg): UiMsg[] {
     return updateLastAssistant(this.state.messages, update);
+  }
+
+  private removeApprovalForTool(toolCallId: string): PendingApproval | null {
+    for (let index = this.approvalQueue.length - 1; index >= 0; index -= 1) {
+      if (this.approvalQueue[index]?.toolCallId === toolCallId) this.approvalQueue.splice(index, 1);
+    }
+    return this.state.approval?.toolCallId === toolCallId
+      ? (this.approvalQueue.shift() ?? null)
+      : this.state.approval;
   }
 
   private setState(patch: Partial<AgentTurnState>): void {

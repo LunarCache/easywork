@@ -365,7 +365,9 @@ function groupExplore(blocks: UiBlock[]): RenderItem[] {
 
 /** 探索组（聚合的连续只读勘探）：扁平左竖线 + 过去式步骤，默认折叠、运行中展开。 */
 function ExploreGroup({ tools }: { tools: UiTool[] }) {
-  const running = tools.some((t) => t.status === "running");
+  const active = tools.some((t) =>
+    t.status === "pending" || t.status === "awaiting-approval" || t.status === "running"
+  );
   const err = tools.some((t) => t.status === "error");
   const files = tools.filter((t) => isReadTool(t.name)).length;
   const probes = tools.length - files;
@@ -374,11 +376,11 @@ function ExploreGroup({ tools }: { tools: UiTool[] }) {
     `${tools.length} 步`;
   return (
     <div className="cv-xwrap">
-      <details className={`cv-x${err ? " error" : ""}`} open={running}>
+      <details className={`cv-x${err ? " error" : ""}`} open={active}>
         <summary className="cv-xhead">
           <SearchIcon size={14} className="cv-xico" />
           <span className="cv-xverb">探索</span>
-          <span className="cv-xsum">· {running ? "勘探中…" : summary}</span>
+          <span className="cv-xsum">· {active ? "勘探中…" : summary}</span>
           <ChevronIcon size={12} className="cv-xchev" />
         </summary>
         <div className="cv-xbody">
@@ -448,16 +450,45 @@ function editStat(t: UiTool): { adds: number; dels: number } {
   return { adds: 0, dels: 0 };
 }
 
+type ToolPresentationKind = "run" | "edit" | "read";
+
+const TOOL_VERBS: Record<ToolPresentationKind, Record<UiTool["status"], string>> = {
+  run: {
+    pending: "准备执行",
+    "awaiting-approval": "等待审批",
+    running: "执行中",
+    done: "已执行",
+    error: "执行失败",
+  },
+  edit: {
+    pending: "准备编辑",
+    "awaiting-approval": "等待审批",
+    running: "编辑中",
+    done: "已编辑",
+    error: "编辑失败",
+  },
+  read: {
+    pending: "准备读取",
+    "awaiting-approval": "等待审批",
+    running: "读取中",
+    done: "已读取",
+    error: "读取失败",
+  },
+};
+
+const TOOL_ACTIVE_META: Record<Exclude<UiTool["status"], "done" | "error">, string> = {
+  pending: "准备中…",
+  "awaiting-approval": "等待审批",
+  running: "运行中…",
+};
+
 /** 行内工具调用（设计：单行 动词 + 载荷 + 统计/状态，点击展开详情）。 */
 export function ToolView({ t, onOpenUrl }: { t: UiTool; onOpenUrl?: (url: string) => void }) {
-  const statusChip = (label: string) =>
-    t.status === "error" ? (
-      <span className="cv-tchip err">失败</span>
-    ) : t.status === "done" ? (
-      <span className="cv-tchip">{label}</span>
-    ) : (
-      <span className="cv-tline-meta">运行中…</span>
-    );
+  const statusChip = (label: string) => {
+    if (t.status === "error") return <span className="cv-tchip err">失败</span>;
+    if (t.status === "done") return <span className="cv-tchip">{label}</span>;
+    return <span className="cv-tline-meta">{TOOL_ACTIVE_META[t.status]}</span>;
+  };
 
   if (t.name === "explore_web") {
     const q = toolQuery(t.args);
@@ -509,19 +540,8 @@ export function ToolView({ t, onOpenUrl }: { t: UiTool; onOpenUrl?: (url: string
   const read = /^(fs_)?(read|view|cat|open_file)$/i.test(t.name);
   const subject = toolSubject(t.args) || t.diff?.path || "";
   const Icon = run ? SquareTerminalIcon : edit ? EditIcon : read ? FileIcon : WrenchIcon;
-  const verb = run
-    ? t.status === "running"
-      ? "执行中"
-      : t.status === "error"
-        ? "执行失败"
-        : "已执行"
-    : edit
-      ? t.status === "running"
-        ? "编辑中"
-        : "已编辑"
-      : read
-        ? "已读取"
-        : t.name;
+  const kind: ToolPresentationKind | null = run ? "run" : edit ? "edit" : read ? "read" : null;
+  const verb = kind ? TOOL_VERBS[kind][t.status] : t.name;
   const filePath = t.diff?.path || subject;
   const fileName = filePath.split(/[/\\]/).pop() || filePath;
   const fileDir = filePath.slice(0, filePath.length - fileName.length);

@@ -23,6 +23,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("approval-request"),
     id: z.string(),
+    toolCallId: z.string(),
     toolName: z.string(),
     args: z.unknown(),
   }),

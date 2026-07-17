@@ -4,11 +4,12 @@ import { ApprovalRegistry, SseApprovalGate } from "../src/agent/approval-sse.js"
 describe("SseApprovalGate", () => {
   it("发出 approval-request 事件并在 /approve 解析后返回 verdict", async () => {
     const reg = new ApprovalRegistry();
-    const events: { type: string; id: string; toolName: string }[] = [];
+    const events: { type: string; id: string; toolCallId: string; toolName: string }[] = [];
     const gate = new SseApprovalGate({ registry: reg, emit: (e) => events.push(e as never) });
 
-    const p = gate.request({ toolName: "http_get", args: { url: "https://x" } });
+    const p = gate.request({ toolCallId: "call-1", toolName: "http_get", args: { url: "https://x" } });
     expect(events).toHaveLength(1);
+    expect(events[0]!.toolCallId).toBe("call-1");
     expect(events[0]!.toolName).toBe("http_get");
     const id = events[0]!.id;
 
@@ -22,7 +23,7 @@ describe("SseApprovalGate", () => {
     const reg = new ApprovalRegistry();
     const ac = new AbortController();
     const gate = new SseApprovalGate({ registry: reg, emit: () => {}, signal: ac.signal });
-    const p = gate.request({ toolName: "x", args: {} });
+    const p = gate.request({ toolCallId: "call-2", toolName: "x", args: {} });
     ac.abort();
     expect(await p).toBe("deny");
   });
@@ -30,7 +31,7 @@ describe("SseApprovalGate", () => {
   it("超时 → deny", async () => {
     const reg = new ApprovalRegistry();
     const gate = new SseApprovalGate({ registry: reg, emit: () => {}, timeoutMs: 10 });
-    const p = gate.request({ toolName: "x", args: {} });
+    const p = gate.request({ toolCallId: "call-3", toolName: "x", args: {} });
     expect(await p).toBe("deny");
   });
 });

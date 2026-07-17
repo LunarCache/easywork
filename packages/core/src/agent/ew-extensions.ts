@@ -318,7 +318,11 @@ export function permissionExtensionFactory(runtime: RunRuntime, cwd: string): Ex
       if (d === "block") return { block: true, reason: `当前「${runtime.mode}」模式禁止 ${event.toolName}` };
       if (runtime.alwaysApproved.has(event.toolName)) return {};
       if (!runtime.approval) return {}; // 无审批门（无 UI 连接）→ 放行，避免无人应答而卡死
-      const verdict = await runtime.approval.request({ toolName: event.toolName, args: event.input });
+      const verdict = await runtime.approval.request({
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        args: event.input,
+      });
       if (verdict === "deny") return { block: true, reason: "用户拒绝了该操作" };
       if (verdict === "approve-always") runtime.alwaysApproved.add(event.toolName);
       return {};

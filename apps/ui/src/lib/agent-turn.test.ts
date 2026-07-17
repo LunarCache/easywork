@@ -19,6 +19,19 @@ class InMemoryDaemonStream implements AgentTurnTransport {
 
   async approve(id: string, verdict: "approve" | "approve-always" | "deny") {
     this.approvals.push({ id, verdict });
+    return true;
+  }
+}
+
+class FailingApprovalDaemonStream extends InMemoryDaemonStream {
+  override async approve(): Promise<boolean> {
+    throw new Error("approval transport unavailable");
+  }
+}
+
+class RejectedApprovalDaemonStream extends InMemoryDaemonStream {
+  override async approve(): Promise<boolean> {
+    return false;
   }
 }
 
@@ -31,7 +44,9 @@ class BlockingDaemonStream implements AgentTurnTransport {
     throw new Error("aborted by caller");
   }
 
-  async approve() {}
+  async approve() {
+    return true;
+  }
 }
 
 class GatedDaemonStream implements AgentTurnTransport {
@@ -54,10 +69,203 @@ class GatedDaemonStream implements AgentTurnTransport {
     this.releaseRun();
   }
 
-  async approve() {}
+  async approve() {
+    return true;
+  }
+}
+
+class ApprovalDaemonStream implements AgentTurnTransport {
+  private releaseRun!: () => void;
+  private markWaiting!: () => void;
+  readonly waiting = new Promise<void>((resolve) => {
+    this.markWaiting = resolve;
+  });
+  private readonly released = new Promise<void>((resolve) => {
+    this.releaseRun = resolve;
+  });
+
+  async *run(): AsyncIterable<AgentEvent> {
+    yield { type: "tool-start", call: { id: "call-1", name: "bash", arguments: '{"command":"npm test"}' } };
+    yield {
+      type: "approval-request",
+      id: "approval-1",
+      toolCallId: "call-1",
+      toolName: "bash",
+      args: { command: "npm test" },
+    };
+    this.markWaiting();
+    await this.released;
+    yield { type: "tool-progress", callId: "call-1", stream: "stdout", chunk: "running\n" };
+    yield {
+      type: "tool-end",
+      call: { id: "call-1", name: "bash", arguments: "" },
+      result: { content: "ok", isError: false },
+    };
+    yield { type: "final", message: { role: "assistant", content: "done" } };
+  }
+
+  async approve(_id: string, verdict: "approve" | "approve-always" | "deny") {
+    if (verdict !== "deny") this.releaseRun();
+    return true;
+  }
 }
 
 describe("AgentTurnController", () => {
+  it("keeps the tool waiting when the daemon rejects an expired approval id", async () => {
+    const daemon = new RejectedApprovalDaemonStream([
+      { type: "tool-start", call: { id: "call-1", name: "bash", arguments: "{}" } },
+      {
+        type: "approval-request",
+        id: "approval-1",
+        toolCallId: "call-1",
+        toolName: "bash",
+        args: {},
+      },
+    ]);
+    const controller = new AgentTurnController(daemon, {
+      buildRequest: (history) => ({ model: "model-1", history }),
+    });
+
+    await controller.send({ text: "run", images: [] });
+    await controller.respondApproval("approve");
+
+    expect(controller.getState().approval?.id).toBe("approval-1");
+    expect(controller.getState().messages.at(-1)?.tools[0]?.status).toBe("awaiting-approval");
+  });
+
+  it("keeps the tool waiting when approval delivery fails", async () => {
+    const daemon = new FailingApprovalDaemonStream([
+      { type: "tool-start", call: { id: "call-1", name: "bash", arguments: "{}" } },
+      {
+        type: "approval-request",
+        id: "approval-1",
+        toolCallId: "call-1",
+        toolName: "bash",
+        args: {},
+      },
+    ]);
+    const controller = new AgentTurnController(daemon, {
+      buildRequest: (history) => ({ model: "model-1", history }),
+    });
+
+    await controller.send({ text: "run", images: [] });
+    await controller.respondApproval("approve");
+
+    expect(controller.getState().approval?.id).toBe("approval-1");
+    expect(controller.getState().messages.at(-1)?.tools[0]?.status).toBe("awaiting-approval");
+  });
+
+  it("queues parallel approval requests without losing their tool-call correlation", async () => {
+    const daemon = new InMemoryDaemonStream([
+      { type: "tool-start", call: { id: "call-1", name: "bash", arguments: "{}" } },
+      { type: "tool-start", call: { id: "call-2", name: "write", arguments: "{}" } },
+      {
+        type: "approval-request",
+        id: "approval-1",
+        toolCallId: "call-1",
+        toolName: "bash",
+        args: {},
+      },
+      {
+        type: "approval-request",
+        id: "approval-2",
+        toolCallId: "call-2",
+        toolName: "write",
+        args: {},
+      },
+    ]);
+    const controller = new AgentTurnController(daemon, {
+      buildRequest: (history) => ({ model: "model-1", history }),
+    });
+
+    await controller.send({ text: "run both", images: [] });
+
+    expect(controller.getState().approval?.id).toBe("approval-1");
+    expect(controller.getState().messages.at(-1)?.tools.map((tool) => tool.status)).toEqual([
+      "awaiting-approval",
+      "awaiting-approval",
+    ]);
+
+    await controller.respondApproval("approve");
+    expect(controller.getState().approval?.id).toBe("approval-2");
+    expect(controller.getState().messages.at(-1)?.tools.map((tool) => tool.status)).toEqual([
+      "running",
+      "awaiting-approval",
+    ]);
+
+    await controller.respondApproval("deny");
+    expect(controller.getState().approval).toBeNull();
+    expect(daemon.approvals).toEqual([
+      { id: "approval-1", verdict: "approve" },
+      { id: "approval-2", verdict: "deny" },
+    ]);
+  });
+
+  it("removes a queued approval when its tool ends before the prompt is shown", async () => {
+    const daemon = new InMemoryDaemonStream([
+      { type: "tool-start", call: { id: "call-1", name: "bash", arguments: "{}" } },
+      { type: "tool-start", call: { id: "call-2", name: "write", arguments: "{}" } },
+      {
+        type: "approval-request",
+        id: "approval-1",
+        toolCallId: "call-1",
+        toolName: "bash",
+        args: {},
+      },
+      {
+        type: "approval-request",
+        id: "approval-2",
+        toolCallId: "call-2",
+        toolName: "write",
+        args: {},
+      },
+      {
+        type: "tool-end",
+        call: { id: "call-2", name: "write", arguments: "" },
+        result: { content: "approval timed out", isError: true },
+      },
+    ]);
+    const controller = new AgentTurnController(daemon, {
+      buildRequest: (history) => ({ model: "model-1", history }),
+    });
+
+    await controller.send({ text: "run both", images: [] });
+    await controller.respondApproval("approve");
+
+    expect(controller.getState().approval).toBeNull();
+    expect(controller.getState().messages.at(-1)?.tools.map((tool) => tool.status)).toEqual([
+      "running",
+      "error",
+    ]);
+  });
+
+  it("keeps a tool out of the running state until its approval is granted", async () => {
+    const daemon = new ApprovalDaemonStream();
+    const controller = new AgentTurnController(daemon, {
+      buildRequest: (history) => ({ model: "model-1", history }),
+    });
+    const statuses: string[] = [];
+    controller.subscribe((state) => {
+      const status = state.messages.at(-1)?.tools[0]?.status;
+      if (status && statuses.at(-1) !== status) statuses.push(status);
+    });
+
+    const run = controller.send({ text: "run tests", images: [] });
+    await daemon.waiting;
+
+    expect(controller.getState().approval).toMatchObject({
+      id: "approval-1",
+      toolCallId: "call-1",
+    });
+    expect(controller.getState().messages.at(-1)?.tools[0]?.status).toBe("awaiting-approval");
+    expect(statuses).toEqual(["pending", "awaiting-approval"]);
+
+    await controller.respondApproval("approve");
+    await run;
+
+    expect(statuses).toEqual(["pending", "awaiting-approval", "running", "done"]);
+  });
+
   it("owns a complete streamed turn while the view supplies its run policy", async () => {
     const daemon = new InMemoryDaemonStream([
       { type: "retry", attempt: 1, maxAttempts: 3 },
@@ -66,7 +274,13 @@ describe("AgentTurnController", () => {
       { type: "text", text: "done" },
       { type: "usage", usage: { promptTokens: 8, completionTokens: 2, totalTokens: 10 } },
       { type: "artifacts", artifacts: [{ path: "report.html", kind: "created", size: 42 }] },
-      { type: "approval-request", id: "approval-1", toolName: "run_command", args: { command: "npm test" } },
+      {
+        type: "approval-request",
+        id: "approval-1",
+        toolCallId: "call-1",
+        toolName: "run_command",
+        args: { command: "npm test" },
+      },
       { type: "final", message: { role: "assistant", content: "done" } },
     ]);
     const completed: string[] = [];

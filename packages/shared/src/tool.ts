@@ -38,6 +38,8 @@ export type ApprovalVerdictResult = "approve" | "approve-always" | "deny";
 /** 审批门：危险工具执行前征询（UI 弹窗 / IM 确认 / 自动策略）。 */
 export interface ApprovalGate {
   request(req: {
+    /** 当前 pi 工具调用 id，用于把审批状态关联到正确的工具卡。 */
+    toolCallId: string;
     toolName: string;
     args: unknown;
     rationale?: string;

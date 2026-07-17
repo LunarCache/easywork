@@ -29,7 +29,7 @@ export class ApprovalRegistry {
 export interface SseApprovalOptions {
   registry: ApprovalRegistry;
   /** 向 SSE 流发出 approval-request 事件。 */
-  emit: (ev: { type: "approval-request"; id: string; toolName: string; args: unknown }) => void;
+  emit: (ev: { type: "approval-request"; id: string; toolCallId: string; toolName: string; args: unknown }) => void;
   signal?: AbortSignal;
   /** 超时（毫秒）未回应则按 deny。默认 120s。 */
   timeoutMs?: number;
@@ -42,7 +42,7 @@ export interface SseApprovalOptions {
 export class SseApprovalGate implements ApprovalGate {
   constructor(private readonly opts: SseApprovalOptions) {}
 
-  request(req: { toolName: string; args: unknown }): Promise<ApprovalVerdictResult> {
+  request(req: { toolCallId: string; toolName: string; args: unknown }): Promise<ApprovalVerdictResult> {
     const id = randomUUID();
     const timeoutMs = this.opts.timeoutMs ?? 120_000;
     return new Promise<ApprovalVerdictResult>((resolve) => {
@@ -62,7 +62,13 @@ export class SseApprovalGate implements ApprovalGate {
         if (this.opts.signal.aborted) return done("deny");
         this.opts.signal.addEventListener("abort", onAbort);
       }
-      this.opts.emit({ type: "approval-request", id, toolName: req.toolName, args: req.args });
+      this.opts.emit({
+        type: "approval-request",
+        id,
+        toolCallId: req.toolCallId,
+        toolName: req.toolName,
+        args: req.args,
+      });
     });
   }
 }

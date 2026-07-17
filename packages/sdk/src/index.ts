@@ -763,8 +763,9 @@ export class EasyWorkClient {
   }
 
   /** 回应工具审批请求（approval-request 事件携带 id）。 */
-  async approveTool(id: string, verdict: "approve" | "approve-always" | "deny"): Promise<void> {
-    await this.postJSON("/agent/approve", { id, verdict });
+  async approveTool(id: string, verdict: "approve" | "approve-always" | "deny"): Promise<boolean> {
+    const { ok } = await this.postJSON<{ ok: boolean }>("/agent/approve", { id, verdict });
+    return ok;
   }
 
   async listThreads(
