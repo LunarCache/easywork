@@ -19,17 +19,27 @@ use terminal::TerminalSessionManager;
 
 #[cfg(target_os = "macos")]
 const MACOS_TRAFFIC_LIGHT_INSET: f64 = 23.0;
+#[cfg(target_os = "macos")]
+const MACOS_TRAFFIC_LIGHT_LEFT: f64 = 14.0;
 
 #[cfg(target_os = "macos")]
 fn align_macos_traffic_lights(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
 
     // macOS 在 Tauri 完成窗口构建后会重新布局标准窗口按钮，因此配置里的
-    // trafficLightPosition 会被覆盖。主窗口获得焦点后重新设置标题栏容器高度，
-    // 保持横向位置不变，只把三个按钮向下移动到 Web 标题栏的中心线上。
+    // trafficLightPosition 会被覆盖。主窗口获得焦点后重新设置标题栏容器高度和
+    // 按钮横向位置，让三个按钮对齐 Web 标题栏并避开窗口左上圆角。
     unsafe {
         let ns_window: &NSWindow = &*window.ns_window()?.cast();
         let Some(close_button) = ns_window.standardWindowButton(NSWindowButton::CloseButton) else {
+            return Ok(());
+        };
+        let Some(minimize_button) =
+            ns_window.standardWindowButton(NSWindowButton::MiniaturizeButton)
+        else {
+            return Ok(());
+        };
+        let Some(zoom_button) = ns_window.standardWindowButton(NSWindowButton::ZoomButton) else {
             return Ok(());
         };
         let Some(titlebar_container) = close_button
@@ -45,6 +55,16 @@ fn align_macos_traffic_lights(window: &tauri::WebviewWindow) -> tauri::Result<()
         container_frame.size.height = close_frame.size.height + MACOS_TRAFFIC_LIGHT_INSET;
         container_frame.origin.y = window_frame.size.height - container_frame.size.height;
         titlebar_container.setFrame(container_frame);
+
+        let button_spacing = NSView::frame(&minimize_button).origin.x - close_frame.origin.x;
+        for (index, button) in [close_button, minimize_button, zoom_button]
+            .into_iter()
+            .enumerate()
+        {
+            let mut origin = NSView::frame(&button).origin;
+            origin.x = MACOS_TRAFFIC_LIGHT_LEFT + index as f64 * button_spacing;
+            button.setFrameOrigin(origin);
+        }
     }
 
     Ok(())
