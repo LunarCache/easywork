@@ -17,6 +17,39 @@ mod terminal;
 use browser_surface::BrowserSurfaceManager;
 use terminal::TerminalSessionManager;
 
+#[cfg(target_os = "macos")]
+const MACOS_TRAFFIC_LIGHT_INSET: f64 = 23.0;
+
+#[cfg(target_os = "macos")]
+fn align_macos_traffic_lights(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
+
+    // macOS 在 Tauri 完成窗口构建后会重新布局标准窗口按钮，因此配置里的
+    // trafficLightPosition 会被覆盖。主窗口获得焦点后重新设置标题栏容器高度，
+    // 保持横向位置不变，只把三个按钮向下移动到 Web 标题栏的中心线上。
+    unsafe {
+        let ns_window: &NSWindow = &*window.ns_window()?.cast();
+        let Some(close_button) = ns_window.standardWindowButton(NSWindowButton::CloseButton) else {
+            return Ok(());
+        };
+        let Some(titlebar_container) = close_button
+            .superview()
+            .and_then(|button_row| button_row.superview())
+        else {
+            return Ok(());
+        };
+
+        let close_frame = NSView::frame(&close_button);
+        let mut container_frame = NSView::frame(&titlebar_container);
+        let window_frame = ns_window.frame();
+        container_frame.size.height = close_frame.size.height + MACOS_TRAFFIC_LIGHT_INSET;
+        container_frame.origin.y = window_frame.size.height - container_frame.size.height;
+        titlebar_container.setFrame(container_frame);
+    }
+
+    Ok(())
+}
+
 #[derive(Clone, Serialize)]
 struct DaemonInfo {
     #[serde(rename = "baseUrl")]
@@ -146,16 +179,32 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("Tauri 初始化失败")
         .run(|app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                if let Some(window) = app_handle.get_window("main") {
-                    app_handle.state::<BrowserSurfaceManager>().close(&window);
+            match event {
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::Focused(true),
+                    ..
+                } if label == "main" => {
+                    #[cfg(target_os = "macos")]
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        if let Err(error) = align_macos_traffic_lights(&window) {
+                            eprintln!("无法对齐 macOS 窗口按钮: {error}");
+                        }
+                    }
                 }
-                app_handle.state::<TerminalSessionManager>().close_all();
-                // 退出时回收 daemon 子进程。
-                if let Some(mut child) = app_handle.state::<AppState>().child.lock().unwrap().take()
-                {
-                    let _ = child.kill();
+                tauri::RunEvent::ExitRequested { .. } => {
+                    if let Some(window) = app_handle.get_window("main") {
+                        app_handle.state::<BrowserSurfaceManager>().close(&window);
+                    }
+                    app_handle.state::<TerminalSessionManager>().close_all();
+                    // 退出时回收 daemon 子进程。
+                    if let Some(mut child) =
+                        app_handle.state::<AppState>().child.lock().unwrap().take()
+                    {
+                        let _ = child.kill();
+                    }
                 }
+                _ => {}
             }
         });
 }
